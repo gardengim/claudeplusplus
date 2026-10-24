@@ -188,6 +188,17 @@ Release binary: ~0.9 MB.
   skills, memory files, messages, with on-demand and reserved parts dimmed), tool-result and hook-output sizes, and
   your 5-hour and weekly limits with time to reset. When skills are a big share of every request it says so and
   points at `/profile sources`. On this machine skills were ~10k of 17k tokens.
+- **Instructions** (`/instructions`): the `CLAUDE.md` / `AGENTS.md` files Claude Code loads for this directory (yours in
+  `~/.claude`, then each folder up from here), as a checkbox tree with an estimated token size per file and section.
+  Space unticks a file or one markdown section (a heading and what is under it); the files are never edited. Rules
+  are saved in claude++'s config (`hidden`) and apply to tabs started afterwards: a hidden file goes into Claude Code's
+  `claudeMdExcludes`, and a file with only some sections hidden is excluded and a filtered copy is appended to the system
+  prompt (from `~/.cache/claude++/instructions/`; merged into the profile's own append prompt, since Claude Code takes
+  one). No model call. Checked against the real thing: hiding a 150 KB `~/AGENTS.md` took a fresh haiku session from
+  86.6k to 30.6k tokens of context; hiding one section removed exactly that section from the copy. A conversation that
+  has started keeps the prompt it began with (Claude Code pins it), so a started tab says so instead of pretending.
+  Sections are named by heading path, so a heading added later shows up ticked. The `lean` profile already skips
+  these files (9.9k vs 86k prompt tokens on this machine).
 - **Find** (`/find text`): jump to the newest entry containing the text (case-insensitive); `/find` again steps to
   older matches, `/find +` to newer, wrapping.
 - **Undo** (ctrl+z): in the message box; a burst of typing is one step, other edits one each; forgotten on send and

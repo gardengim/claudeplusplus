@@ -165,7 +165,7 @@ fn completion_ranks_prefix_first_and_dedupes_local_commands() {
     let (mut app, _d) = fake_app("comp");
     app.known_commands = vec![cmd("compact", "[focus]", "summarize"), cmd("model", "", "theirs"), cmd("context", "", "c")];
     typed(&mut app, "/c");
-    assert_eq!(names(&app), ["clear", "close", "config", "copy", "compact", "context"]);
+    assert_eq!(names(&app), ["clear", "close", "config", "copy", "compact", "context", "instructions"]);
     press(&mut app, KeyCode::Backspace);
     typed(&mut app, "m");
     // prefix matches ("mode", "model") before names that merely contain "m"; ours before theirs

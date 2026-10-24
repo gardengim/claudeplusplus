@@ -1,0 +1,431 @@
+//! Instruction files (`CLAUDE.md`, `AGENTS.md`, ...) that Claude Code loads for a directory, shown in a
+//! checkbox panel (`/instructions`). Unticking a file or one of its markdown sections keeps it out of the
+//! context of tabs started afterwards, without touching the file: the rule lives in claude++'s config
+//! (`hidden`: path → section ids, `*` for the whole file).
+//!
+//! How it is applied: a hidden file is added to Claude Code's `claudeMdExcludes` (`--settings`); a file
+//! with only some sections hidden is excluded too and a filtered copy is appended to the system prompt from
+//! the cache folder. Nothing is sent to a model. A section is a heading and everything under it, children
+//! included, and is named by its heading path, so a heading added later shows up ticked.
+
+use crate::panel::{View, row_with};
+use crate::theme;
+use ratatui::style::Style;
+use ratatui::text::{Line, Span};
+use serde_json::{Value, json};
+use std::collections::{BTreeMap, BTreeSet};
+use std::hash::{Hash, Hasher};
+use std::path::{Path, PathBuf};
+
+/// Rough characters per token for these files (markdown with code); measured against Claude Code's own
+/// count for a 150 KB file, it is closer to 3 than the usual 4.
+const BYTES_PER_TOKEN: usize = 3;
+/// Files Claude Code reads from the working directory and each ancestor.
+const NAMES: [&str; 5] = ["CLAUDE.md", "CLAUDE.local.md", "AGENTS.md", ".claude/CLAUDE.md", ".claude/AGENTS.md"];
+pub const WHOLE: &str = "*";
+const INTRO: &str = "(intro)";
+
+pub type Rules = BTreeMap<String, BTreeSet<String>>;
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Section {
+    /// Heading path, e.g. `Setup > Install`; repeats get ` #2`.
+    pub id: String,
+    pub title: String,
+    pub depth: usize,
+    /// Line range `[from, to)` including children.
+    pub from: usize,
+    pub to: usize,
+    pub bytes: usize,
+}
+
+pub fn sections(text: &str) -> Vec<Section> {
+    let lines: Vec<&str> = text.lines().collect();
+    let mut heads: Vec<(usize, usize, String)> = vec![]; // (line, level, title)
+    let mut fence: Option<&str> = None;
+    for (n, l) in lines.iter().enumerate() {
+        let t = l.trim_start();
+        let mark = if t.starts_with("```") { "```" } else if t.starts_with("~~~") { "~~~" } else { "" };
+        match (fence, mark) {
+            (None, m) if !m.is_empty() => fence = Some(m),
+            (Some(f), m) if f == m => fence = None,
+            (None, _) => {
+                let level = l.chars().take_while(|c| *c == '#').count();
+                if (1..=6).contains(&level) && l[level..].starts_with(' ') && !l[level..].trim().is_empty() {
+                    heads.push((n, level, l[level..].trim().trim_end_matches('#').trim().to_string()));
+                }
+            }
+            _ => {}
+        }
+    }
+    let size = |a: usize, b: usize| lines[a..b].iter().map(|l| l.len() + 1).sum::<usize>();
+    let mut out = vec![];
+    let first = heads.first().map_or(lines.len(), |h| h.0);
+    if lines[..first].iter().any(|l| !l.trim().is_empty()) {
+        out.push(Section { id: INTRO.into(), title: INTRO.into(), depth: 0, from: 0, to: first, bytes: size(0, first) });
+    }
+    let (mut path, mut seen): (Vec<(usize, String)>, BTreeMap<String, usize>) = (vec![], BTreeMap::new());
+    for (i, (line, level, title)) in heads.iter().enumerate() {
+        while path.last().is_some_and(|(l, _)| l >= level) {
+            path.pop();
+        }
+        let mut id = path.iter().map(|(_, t)| t.as_str()).chain([title.as_str()]).collect::<Vec<_>>().join(" > ");
+        let n = seen.entry(id.clone()).or_insert(0);
+        *n += 1;
+        if *n > 1 {
+            id = format!("{id} #{n}");
+        }
+        path.push((*level, title.clone()));
+        let to = heads[i + 1..].iter().find(|h| h.1 <= *level).map_or(lines.len(), |h| h.0);
+        out.push(Section { id, title: title.clone(), depth: path.len() - 1, from: *line, to, bytes: size(*line, to) });
+    }
+    out
+}
+
+fn hidden(secs: &[Section], set: &BTreeSet<String>, i: usize) -> bool {
+    if set.contains(WHOLE) || set.contains(&secs[i].id) {
+        return true;
+    }
+    secs[..i].iter().any(|p| p.to >= secs[i].to && p.from <= secs[i].from && p.depth < secs[i].depth && set.contains(&p.id))
+}
+
+/// `text` without the hidden sections.
+pub fn filtered(text: &str, secs: &[Section], set: &BTreeSet<String>) -> String {
+    if set.contains(WHOLE) {
+        return String::new();
+    }
+    let mut drop = vec![false; text.lines().count()];
+    for (i, s) in secs.iter().enumerate() {
+        if hidden(secs, set, i) {
+            drop[s.from..s.to].iter_mut().for_each(|d| *d = true);
+        }
+    }
+    text.lines().zip(drop).filter(|(_, d)| !d).map(|(l, _)| format!("{l}\n")).collect()
+}
+
+/// Instruction files that exist for `cwd`: the user's own, then each directory from `cwd` up.
+pub fn discover(cwd: &str) -> Vec<PathBuf> {
+    let mut out = vec![];
+    if let Some(h) = std::env::var_os("HOME") {
+        out.push(PathBuf::from(h).join(".claude/CLAUDE.md"));
+    }
+    for dir in Path::new(cwd).ancestors() {
+        out.extend(NAMES.iter().map(|n| dir.join(n)));
+    }
+    let mut seen = BTreeSet::new();
+    out.retain(|p| p.is_file() && seen.insert(p.clone()));
+    out
+}
+
+pub fn rules_path() -> Option<PathBuf> {
+    crate::config::path()
+}
+
+pub fn load_rules(file: &Path) -> Rules {
+    let Some(Value::Object(m)) = crate::config::get_value(file, "hidden") else { return Rules::new() };
+    m.into_iter()
+        .map(|(k, v)| (k, v.as_array().into_iter().flatten().filter_map(|x| x.as_str().map(String::from)).collect::<BTreeSet<_>>()))
+        .filter(|(_, v)| !v.is_empty())
+        .collect()
+}
+
+pub fn save_rules(file: &Path, rules: &Rules) {
+    let _ = crate::config::set_value(file, "hidden", json!(rules));
+}
+
+/// Adjust a launch's flags for the hidden rules in `rules`: exclude those files from Claude Code's own
+/// loading and append the filtered copies of the partly hidden ones (merged into any append prompt the
+/// profile already sets, since Claude Code takes one). Does nothing when nothing is hidden.
+pub fn apply(rules: &Rules, cache: &Path, args: &mut Vec<String>) {
+    let (mut excluded, mut copies) = (vec![], String::new());
+    for (path, set) in rules {
+        let Ok(text) = std::fs::read_to_string(path) else { continue };
+        let secs = sections(&text);
+        let keep = filtered(&text, &secs, set);
+        if keep == text {
+            continue;
+        }
+        excluded.push(path.clone());
+        if !keep.trim().is_empty() {
+            copies += &format!("# {path} (some sections hidden by claude++)\n\n{keep}\n");
+        }
+    }
+    if excluded.is_empty() {
+        return;
+    }
+    args.extend(["--settings".into(), json!({"claudeMdExcludes": excluded}).to_string()]);
+    if copies.is_empty() {
+        return;
+    }
+    let mut prior = String::new();
+    while let Some(i) = args.iter().position(|a| a == "--append-system-prompt-file" || a == "--append-system-prompt") {
+        let value = args.get(i + 1).cloned().unwrap_or_default();
+        let file = args[i] == "--append-system-prompt-file";
+        args.drain(i..(i + 2).min(args.len()));
+        prior += &if file { std::fs::read_to_string(&value).unwrap_or_default() } else { value };
+        prior += "\n\n";
+    }
+    let body = prior + &copies;
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    body.hash(&mut h);
+    let file = cache.join("instructions").join(format!("{:016x}.md", h.finish()));
+    if !file.exists() {
+        let _ = std::fs::create_dir_all(cache.join("instructions"));
+        if std::fs::write(&file, &body).is_err() {
+            return;
+        }
+    }
+    args.extend(["--append-system-prompt-file".into(), file.to_string_lossy().into_owned()]);
+}
+
+pub struct Source {
+    pub path: String,
+    pub text: String,
+    pub secs: Vec<Section>,
+}
+
+pub struct Ui {
+    pub sel: usize,
+    pub files: Vec<Source>,
+    pub rules: Rules,
+    pub open: BTreeSet<usize>,
+    /// Something changed since the panel opened.
+    pub dirty: bool,
+}
+
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum Row {
+    File(usize),
+    Sec(usize, usize),
+}
+
+impl Ui {
+    pub fn new(cwd: &str, rules: Rules) -> Ui {
+        let files = discover(cwd)
+            .into_iter()
+            .filter_map(|p| {
+                let text = std::fs::read_to_string(&p).ok()?;
+                Some(Source { path: p.to_string_lossy().into_owned(), secs: sections(&text), text })
+            })
+            .collect();
+        Ui { sel: 0, files, rules, open: BTreeSet::new(), dirty: false }
+    }
+
+    pub fn rows(&self) -> Vec<Row> {
+        let mut out = vec![];
+        for (f, src) in self.files.iter().enumerate() {
+            out.push(Row::File(f));
+            if self.open.contains(&f) {
+                out.extend((0..src.secs.len()).map(|s| Row::Sec(f, s)));
+            }
+        }
+        out
+    }
+
+    fn set(&self, f: usize) -> BTreeSet<String> {
+        self.rules.get(&self.files[f].path).cloned().unwrap_or_default()
+    }
+
+    /// Bytes still sent, and bytes hidden, for one file.
+    pub fn sizes(&self, f: usize) -> (usize, usize) {
+        let src = &self.files[f];
+        let keep = filtered(&src.text, &src.secs, &self.set(f)).len();
+        (keep, src.text.len() - keep)
+    }
+
+    /// 0 none shown, 1 some, 2 all.
+    fn state(&self, f: usize) -> u8 {
+        match self.sizes(f) {
+            (_, 0) => 2,
+            (0, _) => 0,
+            (k, _) if self.files[f].text.trim().is_empty() || k == 0 => 0,
+            _ => 1,
+        }
+    }
+
+    pub fn toggle(&mut self, row: Row) -> Result<(), &'static str> {
+        let (Row::File(f) | Row::Sec(f, _)) = row;
+        let mut cur = self.set(f);
+        match row {
+            Row::File(_) => {
+                if self.state(f) == 2 { cur = [WHOLE.to_string()].into() } else { cur.clear() }
+            }
+            Row::Sec(_, s) => {
+                let secs = &self.files[f].secs;
+                if hidden(secs, &cur, s) && !cur.contains(WHOLE) && !cur.contains(&secs[s].id) {
+                    return Err("hidden along with its parent section");
+                }
+                if cur.remove(WHOLE) {
+                    cur = secs.iter().map(|x| x.id.clone()).filter(|id| *id != secs[s].id).collect();
+                } else if !cur.remove(&secs[s].id) {
+                    cur.insert(secs[s].id.clone());
+                }
+            }
+        }
+        let path = self.files[f].path.clone();
+        if cur.is_empty() { self.rules.remove(&path) } else { self.rules.insert(path, cur) };
+        self.dirty = true;
+        Ok(())
+    }
+
+    pub fn total(&self) -> (usize, usize) {
+        (0..self.files.len()).map(|f| self.sizes(f)).fold((0, 0), |a, b| (a.0 + b.0, a.1 + b.1))
+    }
+}
+
+fn est(bytes: usize) -> String {
+    crate::usage::tokens((bytes / BYTES_PER_TOKEN) as u64)
+}
+
+fn short(path: &str) -> String {
+    match std::env::var("HOME") {
+        Ok(h) if path.starts_with(&h) => format!("~{}", &path[h.len()..]),
+        _ => path.to_string(),
+    }
+}
+
+pub fn view(ui: &Ui, width: usize) -> View {
+    let rows = ui.rows();
+    if rows.is_empty() {
+        return View::new("Instructions", vec![Line::styled("  no CLAUDE.md or AGENTS.md applies to this directory", theme::dim())], 0, theme::hints(&[("esc", "close")]));
+    }
+    let sel = ui.sel.min(rows.len() - 1);
+    let body = rows
+        .iter()
+        .enumerate()
+        .map(|(n, row)| {
+            let on = n == sel;
+            let (mark, label, size) = match *row {
+                Row::File(f) => {
+                    let (keep, gone) = ui.sizes(f);
+                    let m = match ui.state(f) { 2 => "[x]", 1 => "[-]", _ => "[ ]" };
+                    let open = if ui.open.contains(&f) { "▾" } else { "▸" };
+                    let tail = if gone > 0 { format!("{} of {}", est(keep), est(keep + gone)) } else { est(keep) };
+                    (m, format!("{open} {}  ({} sections)", short(&ui.files[f].path), ui.files[f].secs.len()), tail)
+                }
+                Row::Sec(f, s) => {
+                    let sec = &ui.files[f].secs[s];
+                    let off = hidden(&ui.files[f].secs, &ui.set(f), s);
+                    (if off { "[ ]" } else { "[x]" }, format!("{}{}", "  ".repeat(sec.depth + 1), sec.title), est(sec.bytes))
+                }
+            };
+            let off = mark == "[ ]";
+            let style = if on { theme::bold() } else if off { theme::dim() } else { Style::new() };
+            let pad = width.saturating_sub(12).saturating_sub(label.chars().count()).saturating_sub(size.chars().count()).max(1);
+            row_with(on, false, vec![Span::styled(format!("{mark} "), if off { theme::dim() } else { theme::ok() }), Span::styled(label.chars().take(width.saturating_sub(20)).collect::<String>(), style), Span::raw(" ".repeat(pad)), Span::styled(size, theme::dim())])
+        })
+        .collect();
+    let (keep, gone) = ui.total();
+    let mut tail = vec![Line::raw("")];
+    tail.push(Line::from(vec![
+        Span::styled(format!("≈{} tokens", est(keep)), theme::bold()),
+        Span::styled(format!(" at session start{}", if gone > 0 { format!(" · {} hidden", est(gone)) } else { String::new() }), theme::dim()),
+    ]));
+    if ui.dirty {
+        tail.push(Line::styled("applies to tabs started from now on", theme::dim()));
+    }
+    let side = match rows[sel] {
+        Row::Sec(f, s) => {
+            let sec = &ui.files[f].secs[s];
+            ui.files[f].text.lines().skip(sec.from).take(sec.to.saturating_sub(sec.from).min(12)).map(|l| Line::styled(l.chars().take(70).collect::<String>(), theme::dim())).collect()
+        }
+        Row::File(f) => vec![Line::styled(ui.files[f].path.clone(), theme::dim())],
+    };
+    View::new("Instructions", body, sel, theme::hints(&[("↑↓", "move"), ("space", "show/hide"), ("→←", "sections"), ("esc", "close")])).with_tail(tail).with_side(side).rows(0, 16)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const DOC: &str = "intro line\n# A\na text\n## A1\na1 text\n```\n# not a heading\n```\n## A2\na2 text\n# B\nb text\n# A\ndup\n";
+
+    #[test]
+    fn sections_nest_skip_fences_and_name_repeats() {
+        let s = sections(DOC);
+        let ids: Vec<_> = s.iter().map(|x| x.id.as_str()).collect();
+        assert_eq!(ids, ["(intro)", "A", "A > A1", "A > A2", "B", "A #2"]);
+        assert_eq!((s[1].from, s[1].to), (1, 10), "a parent holds its children");
+        assert_eq!(s[2].depth, 1);
+    }
+
+    #[test]
+    fn hiding_a_parent_hides_children_and_keeps_the_rest() {
+        let s = sections(DOC);
+        let set: BTreeSet<String> = ["A".to_string()].into();
+        let out = filtered(DOC, &s, &set);
+        assert!(out.contains("intro line") && out.contains("# B") && out.contains("dup"));
+        assert!(!out.contains("a text") && !out.contains("a2 text") && !out.contains("not a heading"));
+        let one: BTreeSet<String> = ["A > A1".to_string()].into();
+        let out = filtered(DOC, &s, &one);
+        assert!(out.contains("a text") && out.contains("a2 text") && !out.contains("a1 text"));
+        assert_eq!(filtered(DOC, &s, &[WHOLE.to_string()].into()), "");
+    }
+
+    #[test]
+    fn the_panel_draws_checkboxes_sizes_and_the_running_total() {
+        let d = temp("view");
+        std::fs::write(d.join("AGENTS.md"), DOC).unwrap();
+        let mut ui = Ui::new(d.to_str().unwrap(), Rules::new());
+        let f = ui.files.iter().position(|s| s.path.ends_with("AGENTS.md")).unwrap();
+        ui.open.insert(f);
+        ui.toggle(Row::Sec(f, 4)).unwrap();
+        let v = view(&ui, 80);
+        let text = |l: &Line| l.spans.iter().map(|s| s.content.as_ref()).collect::<String>();
+        let body: Vec<String> = v.body.iter().map(text).collect();
+        assert!(body[f].contains("[-]") && body[f + 1].contains("[x]   (intro)") && body.iter().any(|l| l.contains("[ ] ") && l.contains("B")), "{body:?}");
+        assert!(v.tail.iter().any(|l| text(l).contains("hidden")));
+    }
+
+    fn temp(name: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("claudeplusplus-instr-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    #[test]
+    fn toggles_are_checkbox_like_and_whole_file_expands_on_a_section_toggle() {
+        let d = temp("toggle");
+        std::fs::write(d.join("AGENTS.md"), DOC).unwrap();
+        let mut ui = Ui::new(d.to_str().unwrap(), Rules::new());
+        let f = ui.files.iter().position(|s| s.path.ends_with("AGENTS.md")).unwrap();
+        assert_eq!(ui.state(f), 2);
+        ui.toggle(Row::Sec(f, 4)).unwrap(); // hide B
+        assert_eq!(ui.state(f), 1);
+        assert!(ui.toggle(Row::Sec(f, 2)).is_ok());
+        ui.toggle(Row::File(f)).unwrap(); // partial → all shown
+        assert_eq!(ui.state(f), 2);
+        assert!(ui.rules.is_empty());
+        ui.toggle(Row::File(f)).unwrap(); // all → whole file hidden
+        assert_eq!(ui.state(f), 0);
+        ui.toggle(Row::Sec(f, 4)).unwrap(); // show B again: everything else stays hidden
+        let (keep, gone) = ui.sizes(f);
+        assert!(keep > 0 && gone > 0 && ui.state(f) == 1);
+        ui.toggle(Row::File(f)).unwrap(); // partial → all shown again
+        ui.toggle(Row::Sec(f, 1)).unwrap(); // hide A
+        assert_eq!(ui.toggle(Row::Sec(f, 2)), Err("hidden along with its parent section"));
+    }
+
+    #[test]
+    fn apply_excludes_and_appends_a_filtered_copy_merged_with_the_profile_prompt() {
+        let d = temp("apply");
+        let file = d.join("AGENTS.md");
+        std::fs::write(&file, DOC).unwrap();
+        let path = file.to_string_lossy().into_owned();
+        let mut args: Vec<String> = vec!["--append-system-prompt".into(), "from profile".into(), "--x".into()];
+        apply(&Rules::new(), &d, &mut args);
+        assert_eq!(args.len(), 3, "no rules, no change");
+        let rules: Rules = [(path.clone(), ["B".to_string()].into())].into();
+        apply(&rules, &d, &mut args);
+        let at = |f: &str| args.iter().position(|a| a == f).unwrap();
+        assert!(args[at("--settings") + 1].contains(&path));
+        assert!(!args.contains(&"--append-system-prompt".to_string()), "profile prompt folded into the file");
+        let body = std::fs::read_to_string(&args[at("--append-system-prompt-file") + 1]).unwrap();
+        assert!(body.contains("from profile") && body.contains("a text") && !body.contains("b text"));
+        // a whole-file rule only excludes
+        let mut args = vec![];
+        apply(&[(path, [WHOLE.to_string()].into())].into(), &d, &mut args);
+        assert_eq!(args.len(), 2);
+    }
+}

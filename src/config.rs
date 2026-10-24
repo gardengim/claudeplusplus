@@ -42,8 +42,22 @@ pub fn get_str(path: &Path, key: &str) -> Option<String> {
 }
 
 pub fn set_str(path: &Path, key: &str, value: &str) -> io::Result<()> {
+    set_value(path, key, Value::String(value.into()))
+}
+
+pub fn get_value(path: &Path, key: &str) -> Option<Value> {
+    load(path).remove(key)
+}
+
+/// Cache folder (`$XDG_CACHE_HOME/claude++`, else `~/.cache/claude++`).
+pub fn cache_dir() -> Option<PathBuf> {
+    let base = std::env::var_os("XDG_CACHE_HOME").map(PathBuf::from).or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache")))?;
+    Some(base.join(DIR))
+}
+
+pub fn set_value(path: &Path, key: &str, value: Value) -> io::Result<()> {
     let mut m = load(path);
-    m.insert(key.into(), Value::String(value.into()));
+    m.insert(key.into(), value);
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }

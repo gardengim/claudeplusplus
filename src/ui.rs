@@ -3,7 +3,7 @@
 //! the conversation grows.
 
 use crate::panel::{self, View};
-use crate::{App, settings, tabcfg, theme, usage};
+use crate::{App, instructions, settings, tabcfg, theme, usage};
 use crate::session::{Entry, Part, Pending, Session};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Position, Rect};
@@ -104,6 +104,9 @@ fn surface(app: &mut App, width: usize) -> Option<View> {
     if app.usage_open {
         let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0.0, |d| d.as_secs_f64());
         return Some(usage::view(&app.sessions[app.active].usage, width, now));
+    }
+    if let Some(ui) = &app.instr {
+        return Some(instructions::view(ui, width));
     }
     if let Some(ui) = &app.tabcfg {
         return Some(tabcfg::view(ui, &app.sessions[app.active], width));
