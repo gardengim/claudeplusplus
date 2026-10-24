@@ -183,6 +183,13 @@ Release binary: ~0.9 MB.
   `extends` loops are errors, not silently ignored. A new prompt only applies to a fresh conversation (Claude Code
   pins the prompt at the start); `/profile name --hard` re-renders it for the current one. Custom names are not
   in the `/config` cycle (it lists the built-ins); pick them with the commands above.
+- **Small things that add up**: each tab keeps its own half-typed message when you switch away; `/copy` (or ctrl+y)
+  copies the last answer and `/copy code` its last code block (OSC 52, plus `pbcopy` on macOS); alt+←/→ (or alt+b/f)
+  move by word, alt+backspace and ctrl+w delete a word, alt+d deletes the next word, ctrl+k deletes to the end; a
+  background tab that finishes a turn or asks for an answer rings the terminal bell or sends a desktop
+  notification (`/config` → Background tabs: off / bell / desktop, OSC 9 terminals). SIGTERM, SIGHUP and crashes
+  restore the terminal (mouse reporting, paste mode, keyboard mode) on the way out.
+- A full-profile tab whose claude process passes 400 MB gets a one-time note saying what `lean` would save.
 - Each tab has its own working directory (set when it opens a session from another directory); `@` files,
   the status line and `/resume` follow the tab in front.
 - Resume with history: `-c`, `-r <id>`. Earlier messages are shown again, with tool calls and results.
@@ -200,7 +207,7 @@ Release binary: ~0.9 MB.
 |---|---|---|
 | Lazy backend | `claude` starts on a tab's first message | idle claude++ = **3 MB** RSS vs interactive `claude` idle at its prompt = **176 MB** |
 | Warm on first keystroke | the backend starts when you begin typing (not at launch, not for `/commands`), so its ~0.6 s startup overlaps with composing the message; `initialize` makes no API call | memory stays 3 MB until you type; no startup wait after Enter (verified: no API activity before the first message) |
-| Idle suspension | background tabs idle > `--idle-suspend` (600 s) have their backend stopped; the next message respawns it with `--resume <id>` | frees ~220–330 MB per idle tab; context kept; **99% prompt-cache hit** on the first turn after resume |
+| Idle suspension | background tabs idle > `--idle-suspend` (120 s; a restart takes ~0.5 s) have their backend stopped; the next message respawns it with `--resume <id>` | frees ~220–330 MB per idle tab; context kept; **99% prompt-cache hit** on the first turn after resume |
 | Memory budget | `--mem-budget <MB>`: when all backends together exceed it (measured as macOS `footprint` incl. child processes), stop the least-recently-used tab that is safe to stop; never the focused, busy, prompting tab, or one that started background work (heuristic: `run_in_background`, Monitor, Cron/ScheduleWakeup) | e2e with 2 real tabs and a 200 MB budget: LRU tab stopped (`1z`), focused tab kept, one `claude` left; warns (max once a minute) if only protected tabs remain |
 | `--profile lean` | core tools + no MCP + `--setting-sources project,local` (skips user-level CLAUDE.md/AGENTS.md, skills, hooks) | prompt tokens/request in this repo: **85.8k → 8.9k**; cost of the bench turn $0.29 → $0.04 |
 | `--sources` / `--tools` / `--no-mcp` | the same levers, individually | e.g. `--sources project,local` alone: 65k → 7k with the 4-tool set |

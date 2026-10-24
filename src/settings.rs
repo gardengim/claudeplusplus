@@ -46,13 +46,19 @@ pub const ITEMS: &[Item] = &[
         key: "idle_suspend_s",
         label: "Stop idle tabs after",
         help: "A background tab idle this long has its claude process stopped to free memory. It resumes on your next message.",
-        choices: &[("0", "never"), ("300", "5 min"), ("600", "10 min"), ("1800", "30 min"), ("3600", "1 hour")],
+        choices: &[("0", "never"), ("120", "2 min"), ("300", "5 min"), ("600", "10 min"), ("1800", "30 min"), ("3600", "1 hour")],
     },
     Item {
         key: "mem_budget_mb",
         label: "Memory budget",
         help: "When all claude processes together use more than this, the least recently used idle tab is stopped.",
         choices: &[("0", "off"), ("500", "500 MB"), ("1000", "1 GB"), ("2000", "2 GB"), ("4000", "4 GB")],
+    },
+    Item {
+        key: "notify",
+        label: "Background tabs",
+        help: "How a tab you are not looking at gets your attention when it finishes a turn or needs an answer. bell: the terminal bell. desktop: a desktop notification (terminals that support OSC 9, such as iTerm2, Ghostty and WezTerm). off: tab marker only.",
+        choices: &[("off", "off"), ("bell", "bell"), ("desktop", "desktop")],
     },
     Item {
         key: "mouse",

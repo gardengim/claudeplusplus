@@ -23,9 +23,10 @@ use ratatui::crossterm::event::{
 };
 use ratatui::crossterm::{execute, terminal};
 use serde_json::json;
-use session::{Choice, Cmd, ModelInfo, Session};
+use session::{Choice, Cmd, Entry, ModelInfo, Session};
 use std::path::PathBuf;
 use std::io::{self, Write};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -38,6 +39,8 @@ pub enum AppEvent {
     Status(u64, u64, Option<Vec<String>>),
     /// `claude stop` finished: the message to show, and the session to open afterwards if it worked.
     Stopped(Result<String, String>, Option<(String, String, Option<String>)>),
+    /// SIGTERM or SIGHUP: leave through the normal path so the terminal is restored.
+    Quit,
 }
 
 /// `--profile lean` = this tool set, no MCP, and no user-level settings (user CLAUDE.md/AGENTS.md,
@@ -61,7 +64,7 @@ USAGE: claude++ [options] [-- <extra claude args>]
   --permission-mode <m> default | acceptEdits | plan | auto | ...
   -c, --continue        continue the latest conversation in this directory
   -r, --resume <id>     resume a session by id
-  --idle-suspend <s>    stop idle background tabs' claude after s seconds (0 = never, default 600)
+  --idle-suspend <s>    stop idle background tabs' claude after s seconds (0 = never, default 120)
   --mem-budget <MB>     when all claude processes together exceed this footprint, stop the least
                         recently used idle tab (0 = off, default). Busy/focused tabs are never stopped
   --cache-ttl <min>     prompt-cache lifetime used for the status-line countdown (default 60; use 5
@@ -83,11 +86,12 @@ COMMANDS  /session /new [profile] /profile [name] [--hard] /close /clear /resume
           anything else starting with / goes to Claude Code (e.g. /compact)
 @FILES    type @ to pick a file or folder; Claude Code reads what you mention (images included)
 PROFILES  your own: ~/.config/claude++/profiles/<name>.json (system prompt, tools, MCP, model, env...; see README)
+EDITING   alt+←/→ word · alt+backspace / ctrl+w delete word · ctrl+k to end · ctrl+y or /copy [code] copies the last answer
 IMAGES    ctrl+v, drag a file into the window or /img <path> to attach; pictures in the transcript are drawn
           inline in kitty/Ghostty (CLAUDEPP_IMAGES=on|off overrides detection)";
 
 /// Commands claude++ handles itself: (name, argument hint, description).
-const LOCAL_COMMANDS: [(&str, &str, &str); 15] = [
+const LOCAL_COMMANDS: [(&str, &str, &str); 16] = [
     ("new", "[profile]", "open a new tab"),
     ("profile", "[name] [--hard]", "show or change this tab's profile"),
     ("close", "", "close this tab"),
@@ -98,6 +102,7 @@ const LOCAL_COMMANDS: [(&str, &str, &str); 15] = [
     ("effort", "[level]", "pick or set the thinking effort"),
     ("mode", "<mode>", "set the permission mode"),
     ("img", "<path>", "attach an image to the next message"),
+    ("copy", "[code]", "copy the last answer, or its last code block, to the clipboard"),
     ("config", "", "claude++'s own config"),
     ("session", "", "this tab's permission mode and tool rules"),
     ("statusline", "[claude|builtin]", "choose which status line to show"),
@@ -140,6 +145,11 @@ pub struct App {
     pub explorer: Option<explorer::Explorer>,
     /// Config "sessions = panel": ← opens a docked list first, a second ← the full screen.
     pub dock_mode: bool,
+    /// off | bell | desktop: how a background tab gets your attention.
+    notify: String,
+    /// What `notify` emitted, kept for tests.
+    #[cfg(test)]
+    sent_notices: Vec<String>,
     /// Real terminal attached: only then are mouse-mode escapes written.
     tty: bool,
     mouse: bool,
@@ -204,6 +214,41 @@ struct Opts {
 
 fn profile_args(p: &str) -> Result<Vec<String>, String> {
     profile::spec(p).map(|s| s.args)
+}
+
+/// A full-profile tab above this is worth suggesting the lean profile for.
+const HEAVY_TAB_KB: u64 = 400 * 1024;
+
+static ENHANCED: AtomicBool = AtomicBool::new(false);
+
+/// Put the terminal back the way we found it: mouse reporting off, paste and key modes reset, images
+/// deleted, raw mode and the alternate screen left. Safe to call twice (the panic hook and normal exit).
+fn restore_terminal() {
+    let mut out = io::stdout();
+    let _ = write!(out, "\x1b[?1000l\x1b[?1006l");
+    if ENHANCED.swap(false, Ordering::Relaxed) {
+        let _ = execute!(out, PopKeyboardEnhancementFlags);
+    }
+    let _ = execute!(out, DisableBracketedPaste);
+    image::clear_all();
+    ratatui::restore();
+}
+
+/// The body of the last ``` fenced block in `text`.
+fn last_code_block(text: &str) -> Option<String> {
+    let mut blocks = vec![];
+    let mut cur: Option<Vec<&str>> = None;
+    for line in text.lines() {
+        if line.trim_start().starts_with("```") {
+            match cur.take() {
+                Some(b) => blocks.push(b.join("\n")),
+                None => cur = Some(vec![]),
+            }
+        } else if let Some(b) = cur.as_mut() {
+            b.push(line);
+        }
+    }
+    blocks.pop()
 }
 
 fn parse_args() -> Result<Opts, String> {
@@ -285,7 +330,7 @@ fn run(opts: Opts) -> io::Result<()> {
     let config_path = config::path();
     let saved = |key: &str| config_path.as_deref().and_then(|p| config::get_str(p, key));
     let saved_num = |key: &str| saved(key).and_then(|v| v.parse::<u64>().ok());
-    let idle = opts.idle.or(saved_num("idle_suspend_s")).unwrap_or(600);
+    let idle = opts.idle.or(saved_num("idle_suspend_s")).unwrap_or(120);
     let mut app = App::new(opts.launch, cwd, tx.clone(), Duration::from_secs(idle));
     app.config_path = config_path.clone();
     app.mem_budget_kb = opts.mem_budget_mb.or(saved_num("mem_budget_mb")).unwrap_or(0) * 1024;
@@ -296,6 +341,9 @@ fn run(opts: Opts) -> io::Result<()> {
     app.cache_ttl = Duration::from_secs(opts.cache_ttl_min.or(saved_num("cache_ttl_min")).unwrap_or(60) * 60);
     image::set_mode(&saved("images").unwrap_or_default());
     app.dock_mode = saved("side_panel").as_deref() == Some("on");
+    if let Some(n) = saved("notify").filter(|n| ["off", "bell", "desktop"].contains(&n.as_str())) {
+        app.notify = n;
+    }
     let mode = statusline::Mode::parse(&opts.statusline).or_else(|| saved("statusline").as_deref().and_then(statusline::Mode::parse));
     app.startup_note = app.apply_statusline_mode(mode.unwrap_or(statusline::Mode::Builtin));
     app.known_commands = load_commands();
@@ -311,6 +359,14 @@ fn run(opts: Opts) -> io::Result<()> {
         app.sessions[0].continue_last(&cwd);
     }
 
+    if let Ok(mut signals) = signal_hook::iterator::Signals::new([signal_hook::consts::SIGTERM, signal_hook::consts::SIGHUP]) {
+        let tx = tx.clone();
+        thread::spawn(move || {
+            for _ in signals.forever() {
+                let _ = tx.send(AppEvent::Quit);
+            }
+        });
+    }
     let mut term = ratatui::init();
     app.tty = true;
     app.mouse = saved("mouse").as_deref() != Some("off");
@@ -323,7 +379,14 @@ fn run(opts: Opts) -> io::Result<()> {
     if enhanced {
         // Lets Shift+Enter be told apart from Enter.
         let _ = execute!(out, PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES));
+        ENHANCED.store(true, Ordering::Relaxed);
     }
+    // A crash must not leave the terminal reporting the mouse or swallowing paste: undo everything first.
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        restore_terminal();
+        previous(info);
+    }));
     thread::spawn(move || {
         while let Ok(e) = event::read() {
             if tx.send(AppEvent::Term(e)).is_err() {
@@ -350,13 +413,7 @@ fn run(opts: Opts) -> io::Result<()> {
         Ok(())
     })();
 
-    if enhanced {
-        let _ = execute!(io::stdout(), PopKeyboardEnhancementFlags);
-    }
-    let _ = execute!(io::stdout(), DisableBracketedPaste);
-    app.set_mouse(false);
-    image::clear_all();
-    ratatui::restore();
+    restore_terminal();
     // EOF every backend first so they shut down in parallel, then wait for each.
     app.sessions.iter_mut().filter_map(|s| s.backend.as_mut()).for_each(Backend::close);
     drop(app);
@@ -388,6 +445,9 @@ impl App {
             budget_warned: None,
             explorer: None,
             dock_mode: false,
+            notify: "bell".into(),
+            #[cfg(test)]
+            sent_notices: vec![],
             tty: false,
             mouse: true,
             dock: None,
@@ -480,8 +540,32 @@ impl App {
         let mut s = Session::new(self.next_id, title);
         s.profile = self.default_profile.clone();
         s.cache_ttl = self.cache_ttl;
+        self.save_draft();
         self.sessions.push(s);
         self.active = self.sessions.len() - 1;
+        self.load_draft();
+    }
+
+    /// The message box belongs to the tab in front: leaving a tab keeps what was typed in it.
+    fn save_draft(&mut self) {
+        if let Some(s) = self.sessions.get_mut(self.active) {
+            s.draft = (std::mem::take(&mut self.input), self.cursor);
+        }
+    }
+
+    fn load_draft(&mut self) {
+        let s = &mut self.sessions[self.active];
+        (self.input, self.cursor) = std::mem::take(&mut s.draft);
+        self.cursor = self.cursor.min(self.input.chars().count());
+    }
+
+    fn goto(&mut self, i: usize) {
+        if i != self.active {
+            self.save_draft();
+            self.active = i;
+            self.load_draft();
+            self.files_at = None; // the `@` index belongs to the tab's directory
+        }
     }
 
     fn close_tab(&mut self) {
@@ -491,17 +575,19 @@ impl App {
             self.new_tab(); // keep `active` valid until the loop exits
         }
         self.active = self.active.min(self.sessions.len() - 1);
+        self.load_draft(); // the closed tab's own draft goes with it
     }
 
     fn switch(&mut self, delta: isize) {
         let n = self.sessions.len() as isize;
-        self.active = ((self.active as isize + delta).rem_euclid(n)) as usize;
-        self.files_at = None; // the `@` index belongs to the tab's directory
+        self.goto(((self.active as isize + delta).rem_euclid(n)) as usize);
     }
 
     fn on_event(&mut self, ev: AppEvent) {
         match ev {
             AppEvent::Backend(sid, pid, msg) => {
+                let at = self.sessions.iter().position(|s| s.id == sid);
+                let before = at.map(|i| (self.sessions[i].busy, self.sessions[i].pending.len()));
                 if let Some(s) = self.sessions.iter_mut().find(|s| s.id == sid) {
                     s.on_backend(pid, msg);
                     if std::mem::take(&mut s.cmds_new) && s.commands.len() != self.known_commands.len() {
@@ -513,6 +599,16 @@ impl App {
                         if let Some(p) = cache_path("models.json") {
                             write_models(&p, &self.known_models);
                         }
+                    }
+                }
+                // A tab you are not looking at finished a turn or wants an answer.
+                if let (Some(i), Some((was_busy, was_pending))) = (at.filter(|i| *i != self.active), before) {
+                    let s = &self.sessions[i];
+                    let name = if s.title.is_empty() { format!("tab {}", i + 1) } else { s.title.clone() };
+                    if s.pending.len() > was_pending {
+                        self.notify(&format!("{name} needs you"));
+                    } else if was_busy && !s.busy {
+                        self.notify(&format!("{name} finished"));
                     }
                 }
             }
@@ -560,6 +656,7 @@ impl App {
                     _ => {}
                 }
             }
+            AppEvent::Quit => self.quit = true,
             AppEvent::Term(_) => {}
         }
     }
@@ -646,7 +743,8 @@ impl App {
                 s.note(format!("prompt cache expired after {}m idle: your next message re-caches ~{k}k tokens (a fresh /new tab would not)", ttl.as_secs() / 60));
             }
         }
-        if self.last_sample.elapsed() < Duration::from_secs(5) {
+        // Sampling spawns `ps` and `footprint`: every 5 s only while a memory budget needs it.
+        if self.last_sample.elapsed() < Duration::from_secs(if self.mem_budget_kb > 0 { 5 } else { 15 }) {
             return;
         }
         self.last_sample = Instant::now();
@@ -666,6 +764,13 @@ impl App {
         let me = std::process::id();
         let own = footprint_kb(&[me]);
         self.ui_mem_kb = own.first().or(rss_kb(&[me]).first()).map_or(0, |r| r.1);
+        // A full-profile tab carries MCP servers and hooks: say once what `lean` would save.
+        for s in &mut self.sessions {
+            if s.profile == "full" && s.mem_kb > HEAVY_TAB_KB && !std::mem::replace(&mut s.lean_hinted, true) {
+                let mb = s.mem_kb / 1024;
+                s.note(format!("this tab's claude process uses {mb} MB; `/profile lean` runs a single process of about 220 MB (core tools only, no MCP servers or user hooks). `/new lean` opens one."));
+            }
+        }
         self.enforce_budget();
     }
 
@@ -781,6 +886,39 @@ impl App {
         let at = self.byte_at(self.cursor);
         self.input.insert_str(at, t);
         self.cursor += t.chars().count();
+    }
+
+    /// Start of the word before the cursor (whitespace, newlines included, separates words).
+    fn word_left(&self) -> usize {
+        let chars: Vec<char> = self.input.chars().collect();
+        let mut i = self.cursor.min(chars.len());
+        while i > 0 && chars[i - 1].is_whitespace() {
+            i -= 1;
+        }
+        while i > 0 && !chars[i - 1].is_whitespace() {
+            i -= 1;
+        }
+        i
+    }
+
+    /// End of the word after the cursor.
+    fn word_right(&self) -> usize {
+        let chars: Vec<char> = self.input.chars().collect();
+        let mut i = self.cursor;
+        while i < chars.len() && chars[i].is_whitespace() {
+            i += 1;
+        }
+        while i < chars.len() && !chars[i].is_whitespace() {
+            i += 1;
+        }
+        i
+    }
+
+    /// Remove the characters between two positions; the cursor ends at the lower one.
+    fn delete_range(&mut self, from: usize, to: usize) {
+        let (a, b) = (self.byte_at(from.min(to)), self.byte_at(from.max(to)));
+        self.input.replace_range(a..b, "");
+        self.cursor = from.min(to);
     }
 
     fn byte_at(&self, char_idx: usize) -> usize {
@@ -902,6 +1040,61 @@ impl App {
 
     /// Wheel scrolling needs the terminal to report clicks and wheel (modes 1000/1006, not motion); the cost
     /// is that selecting text takes Shift (Option in some terminals) while it is on.
+    /// Tell the user something happened in a tab they are not looking at: a bell, or a desktop notification
+    /// (OSC 9: iTerm2, Ghostty, WezTerm...), as configured.
+    fn notify(&mut self, what: &str) {
+        let seq = match self.notify.as_str() {
+            "bell" => "\x07".to_string(),
+            "desktop" => format!("\x1b]9;claude++: {}\x07", what.replace(['\x07', '\x1b'], "")),
+            _ => return,
+        };
+        #[cfg(test)]
+        self.sent_notices.push(seq.clone());
+        if self.tty {
+            let _ = write!(io::stdout(), "{seq}");
+            let _ = io::stdout().flush();
+        }
+    }
+
+    /// `/copy` and ctrl+y: the last answer, or with `code` the last fenced code block in it.
+    fn copy_last(&mut self, what: &str) {
+        let last = self.sessions[self.active].items.iter().rev().find_map(|i| match &i.entry {
+            Entry::Assistant { text, .. } if !text.trim().is_empty() => Some(text.clone()),
+            _ => None,
+        });
+        let Some(text) = last else { return self.flash("nothing to copy yet") };
+        let (text, label) = match what {
+            "" => (text, "answer"),
+            "code" => match last_code_block(&text) {
+                Some(code) => (code, "code block"),
+                None => return self.flash("the last answer has no code block"),
+            },
+            _ => return self.flash("usage: /copy [code]"),
+        };
+        let n = text.chars().count();
+        self.copy_text(&text);
+        self.flash(format!("copied the last {label} ({n} chars)"));
+    }
+
+    /// Clipboard via the OSC 52 escape (works over ssh in terminals that allow it) and, where it exists,
+    /// `pbcopy`.
+    fn copy_text(&mut self, text: &str) {
+        #[cfg(test)]
+        self.sent_notices.push(format!("copy:{text}"));
+        if self.tty {
+            let _ = write!(io::stdout(), "\x1b]52;c;{}\x07", image::base64(text.as_bytes()));
+            let _ = io::stdout().flush();
+        }
+        if cfg!(target_os = "macos") && self.tty
+            && let Ok(mut c) = std::process::Command::new("pbcopy").stdin(std::process::Stdio::piped()).spawn()
+        {
+            if let Some(mut i) = c.stdin.take() {
+                let _ = i.write_all(text.as_bytes());
+            }
+            thread::spawn(move || drop(c.wait()));
+        }
+    }
+
     fn set_mouse(&mut self, on: bool) {
         self.mouse = on;
         if self.tty {
@@ -985,7 +1178,7 @@ impl App {
     /// still blank, else a new one.
     fn open_session(&mut self, id: String, title: String, cwd: Option<String>) {
         if let Some(i) = self.sessions.iter().position(|s| s.session_id.as_deref() == Some(id.as_str())) {
-            self.active = i;
+            self.goto(i);
             return;
         }
         self.open_in_tab(id, title, cwd);
@@ -1103,7 +1296,7 @@ impl App {
             KeyCode::Char(c @ '1'..='9') if alt => {
                 let i = c as usize - '1' as usize;
                 if i < self.sessions.len() {
-                    self.active = i;
+                    self.goto(i);
                 }
             }
             KeyCode::Char('o') if ctrl => {
@@ -1112,6 +1305,7 @@ impl App {
                     s.items.iter_mut().for_each(|i| i.cache = None);
                 }
             }
+            KeyCode::Char('y') if ctrl => self.copy_last(""),
             KeyCode::Char('j') if ctrl => self.insert("\n"),
             KeyCode::Enter if alt || k.modifiers.contains(KeyModifiers::SHIFT) => self.insert("\n"),
             KeyCode::Enter => self.submit(),
@@ -1122,19 +1316,12 @@ impl App {
             KeyCode::Char('a') if ctrl => self.cursor = 0,
             KeyCode::Char('e') if ctrl => self.cursor = self.input.chars().count(),
             KeyCode::Char('u') if ctrl => self.set_input(String::new()),
-            KeyCode::Char('w') if ctrl => {
-                let chars: Vec<char> = self.input.chars().collect();
-                let mut i = self.cursor;
-                while i > 0 && chars[i - 1] == ' ' {
-                    i -= 1;
-                }
-                while i > 0 && chars[i - 1] != ' ' {
-                    i -= 1;
-                }
-                let (a, b) = (self.byte_at(i), self.byte_at(self.cursor));
-                self.input.replace_range(a..b, "");
-                self.cursor = i;
-            }
+            KeyCode::Char('w') if ctrl => self.delete_range(self.word_left(), self.cursor),
+            KeyCode::Backspace if alt => self.delete_range(self.word_left(), self.cursor),
+            KeyCode::Char('d') if alt => self.delete_range(self.cursor, self.word_right()),
+            KeyCode::Char('b') if alt => self.cursor = self.word_left(),
+            KeyCode::Char('f') if alt => self.cursor = self.word_right(),
+            KeyCode::Char('k') if ctrl => self.delete_range(self.cursor, self.input.chars().count()),
             KeyCode::Char(c) if !ctrl => {
                 self.insert(c.encode_utf8(&mut [0; 4]));
                 self.warm();
@@ -1159,6 +1346,8 @@ impl App {
                 let at = self.byte_at(self.cursor);
                 self.input.remove(at);
             }
+            KeyCode::Left if alt || ctrl => self.cursor = self.word_left(),
+            KeyCode::Right if alt || ctrl => self.cursor = self.word_right(),
             // As in Claude Code: ← with nothing to the left of the cursor goes to the session list.
             KeyCode::Left if self.cursor == 0 && !ctrl && !alt => {
                 if self.dock_mode { self.show_dock(true) } else { self.open_explorer() }
@@ -1337,6 +1526,7 @@ impl App {
             "cache_ttl_min" => (self.cache_ttl.as_secs() / 60).to_string(),
             "idle_suspend_s" => self.idle_suspend.as_secs().to_string(),
             "mem_budget_mb" => (self.mem_budget_kb / 1024).to_string(),
+            "notify" => self.notify.clone(),
             "mouse" => if self.mouse { "on" } else { "off" }.to_string(),
             "side_panel" => if self.dock_mode { "on" } else { "off" }.to_string(),
             _ => String::new(),
@@ -1368,6 +1558,7 @@ impl App {
             "idle_suspend_s" => self.idle_suspend = Duration::from_secs(num),
             "mem_budget_mb" => self.mem_budget_kb = num * 1024,
             "mouse" => self.set_mouse(value != "off"),
+            "notify" => self.notify = value.into(),
             "side_panel" => {
                 self.dock_mode = value == "on";
                 if !self.dock_mode {
@@ -1563,6 +1754,7 @@ impl App {
             "/session" => self.tabcfg = Some(tabcfg::Ui::default()),
             "/close" => self.close_tab(),
             "/clear" => self.s().clear(),
+            "/copy" => self.copy_last(arg.as_str()),
             "/img" if arg.is_empty() => self.flash("usage: /img <path to png/jpeg/gif/webp>"),
             "/img" => self.attach(arg.trim_matches(|c| c == '\'' || c == '"')),
             "/model" | "/effort" if arg.is_empty() => self.open_model_picker(),
@@ -1948,7 +2140,7 @@ mod tests {
         let (mut app, _d) = fake_app("comp");
         app.known_commands = vec![cmd("compact", "[focus]", "summarize"), cmd("model", "", "theirs"), cmd("context", "", "c")];
         typed(&mut app, "/c");
-        assert_eq!(names(&app), ["clear", "close", "config", "compact", "context"]);
+        assert_eq!(names(&app), ["clear", "close", "config", "copy", "compact", "context"]);
         press(&mut app, KeyCode::Backspace);
         typed(&mut app, "m");
         // prefix matches ("mode", "model") before names that merely contain "m"; ours before theirs
@@ -2777,9 +2969,9 @@ mod tests {
         assert_eq!(app.cache_ttl, Duration::from_secs(300));
         assert!(app.sessions.iter().all(|s| s.cache_ttl == Duration::from_secs(300)));
         press(&mut app, KeyCode::Down);
-        press(&mut app, KeyCode::Right); // never (the fake app's value) -> 5 min
-        assert_eq!(app.idle_suspend, Duration::from_secs(300));
-        assert_eq!(config::get_str(&cfg, "idle_suspend_s").as_deref(), Some("300"));
+        press(&mut app, KeyCode::Right); // never (the fake app's value) -> 2 min
+        assert_eq!(app.idle_suspend, Duration::from_secs(120));
+        assert_eq!(config::get_str(&cfg, "idle_suspend_s").as_deref(), Some("120"));
         press(&mut app, KeyCode::Down);
         press(&mut app, KeyCode::Right); // off -> 500 MB
         assert_eq!(app.mem_budget_kb, 500 * 1024);
@@ -2946,6 +3138,96 @@ mod tests {
         assert!(app.sessions[0].rules.is_empty());
         press(&mut app, KeyCode::Esc);
         assert!(app.tabcfg.is_none());
+    }
+
+    #[test]
+    fn a_background_tab_that_finishes_or_asks_rings_once_and_the_front_tab_does_not() {
+        let (mut app, _d) = fake_app("notify");
+        app.new_tab();
+        for i in 0..2 {
+            let (launch, tx) = (app.launch_for(i), app.tx.clone());
+            app.sessions[i].warm(&launch, &tx);
+        }
+        let (front, back) = (app.sessions[1].id, app.sessions[0].id);
+        let (front_pid, back_pid) = (app.sessions[1].backend.as_ref().unwrap().pid, app.sessions[0].backend.as_ref().unwrap().pid);
+        let line = |s: &str| Msg::Line(serde_json::from_str(s).unwrap());
+        app.sessions[0].busy = true;
+        app.sessions[1].busy = true;
+        let done = r#"{"type":"result","subtype":"success","is_error":false,"result":"ok","total_cost_usd":0.1,"usage":{"input_tokens":1,"output_tokens":1}}"#;
+        app.on_event(AppEvent::Backend(front, front_pid, line(done)));
+        assert!(app.sent_notices.is_empty(), "the tab you are looking at stays quiet");
+        app.on_event(AppEvent::Backend(back, back_pid, line(done)));
+        assert_eq!(app.sent_notices, ["\x07"], "a background tab finishing rings the bell");
+        app.apply_setting("notify", "desktop");
+        let ask = r#"{"type":"control_request","request_id":"p","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"ls"},"permission_suggestions":[]}}"#;
+        app.on_event(AppEvent::Backend(back, back_pid, line(ask)));
+        assert!(app.sent_notices[1].starts_with("\x1b]9;claude++: ") && app.sent_notices[1].contains("needs you"), "{:?}", app.sent_notices);
+        app.apply_setting("notify", "off");
+        app.sessions[0].busy = true;
+        app.on_event(AppEvent::Backend(back, back_pid, line(done)));
+        assert_eq!(app.sent_notices.len(), 2, "off is silent");
+    }
+
+    #[test]
+    fn copy_takes_the_last_answer_or_its_last_code_block() {
+        let (mut app, _d) = fake_app("copy");
+        run_cmd(&mut app, "/copy");
+        assert!(app.sent_notices.is_empty(), "nothing yet, nothing copied");
+        let reply = "First:\n```sh\nls\n```\nThen:\n```rust\nfn main() {}\nprintln!();\n```\ndone";
+        app.s().push(Entry::Assistant { text: reply.into(), msg_id: "m".into(), streaming: false });
+        run_cmd(&mut app, "/copy");
+        run_cmd(&mut app, "/copy code");
+        assert_eq!(app.sent_notices, [format!("copy:{reply}"), "copy:fn main() {}\nprintln!();".to_string()]);
+        run_cmd(&mut app, "/copy nope");
+        assert_eq!(app.sent_notices.len(), 2);
+        assert_eq!(last_code_block("no fences"), None);
+    }
+
+    #[test]
+    fn word_movement_and_deletion_work_on_words_and_whole_lines() {
+        let (mut app, _d) = fake_app("words");
+        typed(&mut app, "one two  three");
+        let key = |app: &mut App, c, m| app.on_key(KeyEvent::new(c, m));
+        key(&mut app, KeyCode::Left, KeyModifiers::ALT);
+        assert_eq!(app.cursor, 9, "to the start of `three`");
+        key(&mut app, KeyCode::Char('b'), KeyModifiers::ALT);
+        assert_eq!(app.cursor, 4);
+        key(&mut app, KeyCode::Right, KeyModifiers::ALT);
+        assert_eq!(app.cursor, 7, "to the end of `two`");
+        key(&mut app, KeyCode::Char('f'), KeyModifiers::ALT);
+        assert_eq!(app.cursor, 14);
+        key(&mut app, KeyCode::Backspace, KeyModifiers::ALT);
+        assert_eq!((app.input.as_str(), app.cursor), ("one two  ", 9));
+        key(&mut app, KeyCode::Char('w'), KeyModifiers::CONTROL);
+        assert_eq!(app.input, "one ");
+        app.set_input("one two".into());
+        app.cursor = 4;
+        key(&mut app, KeyCode::Char('d'), KeyModifiers::ALT);
+        assert_eq!(app.input, "one ");
+        app.set_input("keep this, drop that".into());
+        app.cursor = 10;
+        key(&mut app, KeyCode::Char('k'), KeyModifiers::CONTROL);
+        assert_eq!(app.input, "keep this,");
+        app.cursor = 0;
+        key(&mut app, KeyCode::Left, KeyModifiers::ALT);
+        assert!(app.explorer.is_none(), "alt+← at the start is not the session-list key");
+    }
+
+    #[test]
+    fn each_tab_keeps_its_own_draft() {
+        let (mut app, _d) = fake_app("drafts");
+        typed(&mut app, "first draft");
+        app.new_tab();
+        assert!(app.input.is_empty(), "a new tab starts with an empty box");
+        typed(&mut app, "second");
+        app.switch(-1);
+        assert_eq!((app.input.as_str(), app.cursor), ("first draft", 11));
+        app.switch(1);
+        assert_eq!(app.input, "second");
+        app.close_tab();
+        assert_eq!(app.input, "first draft", "closing a tab brings back the neighbour's draft");
+        app.switch(1);
+        assert_eq!(app.input, "first draft");
     }
 
     #[test]

@@ -109,6 +109,9 @@ pub struct Session {
     pub cwd: Option<String>,
     /// Resume as a copy: the first spawn adds `--fork-session`.
     pub fork: bool,
+    pub lean_hinted: bool,
+    /// The message box while another tab is in front: (text, cursor).
+    pub draft: (String, usize),
     /// This tab's own tool rules, (rule, allow?), sent as `permissions` and re-sent when the process restarts.
     pub rules: Vec<(String, bool)>,
     /// Tool names the session reported.
@@ -223,6 +226,8 @@ impl Session {
             backend: None,
             cwd: None,
             fork: false,
+            lean_hinted: false,
+            draft: Default::default(),
             rules: vec![],
             tools: vec![],
             view_h: 20,
