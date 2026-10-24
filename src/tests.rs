@@ -169,7 +169,7 @@ fn completion_ranks_prefix_first_and_dedupes_local_commands() {
     press(&mut app, KeyCode::Backspace);
     typed(&mut app, "m");
     // prefix matches ("mode", "model") before names that merely contain "m"; ours before theirs
-    assert_eq!(names(&app), ["mode", "model", "img", "resume", "compact"]);
+    assert_eq!(names(&app), ["mode", "model", "img", "permissions", "resume", "compact"]);
     let model = app.completions().into_iter().find(|c| c.name == "model").unwrap();
     assert_eq!(model.desc, "pick a model and effort, or switch directly", "ours wins over Claude Code's same-named command");
     assert!(names(&app).iter().filter(|n| *n == "model").count() == 1);
@@ -1511,4 +1511,39 @@ fn redraw_cost_stays_flat_on_a_long_transcript() {
     let streaming = t.elapsed() / n;
     eprintln!("3000 entries: first draw {first:?}, steady redraw {steady:?}, streaming redraw {streaming:?}");
     assert!(steady < Duration::from_millis(50) && streaming < Duration::from_millis(50));
+}
+
+#[test]
+fn permissions_panel_adds_and_deletes_in_the_chosen_file_and_confirms_a_delete() {
+    let (mut app, d) = fake_app("perms");
+    let proj = d.join("proj");
+    std::fs::create_dir_all(&proj).unwrap();
+    app.cwd = proj.to_string_lossy().into();
+    let local = proj.join(".claude/settings.local.json");
+    permissions::add(&local, permissions::Behavior::Ask, "Bash(rm:*)").unwrap();
+    run_cmd(&mut app, "/permissions");
+    assert!(app.perms.is_some());
+    typed(&mut app, "abc");
+    assert!(app.input.is_empty(), "keys belong to the panel");
+
+    press(&mut app, KeyCode::Right); // Ask tab
+    assert_eq!(app.perms.as_ref().unwrap().tab, permissions::Behavior::Ask);
+    press(&mut app, KeyCode::Down);
+    assert_eq!(app.perms.as_ref().unwrap().at().map(|r| r.text.as_str()), Some("Bash(rm:*)"));
+    press(&mut app, KeyCode::Char('d'));
+    assert!(std::fs::read_to_string(&local).unwrap().contains("Bash(rm:*)"), "one press only asks");
+    press(&mut app, KeyCode::Char('d'));
+    assert!(!std::fs::read_to_string(&local).unwrap().contains("Bash(rm:*)"), "the second press deletes");
+
+    press(&mut app, KeyCode::Left); // Allow tab
+    press(&mut app, KeyCode::Up);
+    press(&mut app, KeyCode::Up);
+    press(&mut app, KeyCode::Enter);
+    typed(&mut app, "Read(./x)");
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Enter); // first location: local
+    assert!(std::fs::read_to_string(&local).unwrap().contains("\"Read(./x)\""));
+    assert_eq!(app.perms.as_ref().unwrap().at().map(|r| r.text.as_str()), Some("Read(./x)"), "the cursor lands on the new rule");
+    press(&mut app, KeyCode::Esc);
+    assert!(app.perms.is_none());
 }

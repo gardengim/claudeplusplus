@@ -188,6 +188,14 @@ Release binary: ~0.9 MB.
   skills, memory files, messages, with on-demand and reserved parts dimmed), tool-result and hook-output sizes, and
   your 5-hour and weekly limits with time to reset. When skills are a big share of every request it says so and
   points at `/profile sources`. On this machine skills were ~10k of 17k tokens.
+- **Permissions** (`/permissions`): the saved `allow` / `ask` / `deny` rules from your user, project and local
+  settings files, one tab per behavior with the file each rule comes from (and "overridden by deny" where a stronger
+  behavior holds the same rule; deny beats ask beats allow). `+ add a new rule…` asks for the rule, then which file;
+  `d` twice deletes a rule from its file; this tab's own `/session` rules are listed read-only. Only the list being
+  changed is edited (other keys keep their order and values; a file that is not valid JSON is refused, never
+  overwritten; a symlinked settings file is edited in place), and running sessions pick the change up by themselves:
+  Claude Code watches its settings files (checked: a rule written while a session was open showed up in
+  `get_settings` within 2 s). Not covered: the Workspace (additional directories) tab and managed policy rules.
 - **Instructions** (`/instructions`): the `CLAUDE.md` / `AGENTS.md` files Claude Code loads for this directory (yours in
   `~/.claude`, then each folder up from here), as a checkbox tree with an estimated token size per file and section.
   Space unticks a file or one markdown section (a heading and what is under it); the files are never edited. Rules

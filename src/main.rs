@@ -4,6 +4,7 @@ mod explorer;
 mod jobs;
 mod profile;
 mod instructions;
+mod permissions;
 mod tabcfg;
 mod usage;
 mod files;
@@ -93,7 +94,7 @@ IMAGES    ctrl+v, drag a file into the window or /img <path> to attach; pictures
           inline in kitty/Ghostty (CLAUDEPP_IMAGES=on|off overrides detection)";
 
 /// Commands claude++ handles itself: (name, argument hint, description).
-const LOCAL_COMMANDS: [(&str, &str, &str); 19] = [
+const LOCAL_COMMANDS: [(&str, &str, &str); 20] = [
     ("new", "[profile]", "open a new tab"),
     ("profile", "[name] [--hard]", "show or change this tab's profile"),
     ("close", "", "close this tab"),
@@ -109,6 +110,7 @@ const LOCAL_COMMANDS: [(&str, &str, &str); 19] = [
     ("config", "", "claude++'s own config"),
     ("session", "", "this tab's permission mode and tool rules"),
     ("usage", "", "where this tab's context goes, and your plan limits"),
+    ("permissions", "", "saved allow/ask/deny rules from your settings files: add and delete"),
     ("instructions", "", "tick CLAUDE.md / AGENTS.md files and sections in or out of new sessions"),
     ("statusline", "[claude|builtin]", "choose which status line to show"),
     ("help", "", "keys and commands"),
@@ -179,6 +181,7 @@ pub struct App {
     pub settings: Option<settings::Ui>,
     pub tabcfg: Option<tabcfg::Ui>,
     pub instr: Option<instructions::Ui>,
+    pub perms: Option<permissions::Ui>,
     pub usage_open: bool,
     /// File index for `@`, rebuilt when the popup opens and the list is older than 30 s.
     files: Vec<String>,
@@ -486,6 +489,7 @@ impl App {
             settings: None,
             tabcfg: None,
             instr: None,
+            perms: None,
             usage_open: false,
             files: vec![],
             files_at: None,
@@ -526,7 +530,7 @@ impl App {
     pub fn placeholder(&self) -> &'static str {
         if !self.sessions[self.active].pending.is_empty() {
             "answer in the panel above…"
-        } else if self.explorer.is_some() || self.model_picker.is_some() || self.settings.is_some() || self.tabcfg.is_some() || self.instr.is_some() || self.usage_open {
+        } else if self.explorer.is_some() || self.model_picker.is_some() || self.settings.is_some() || self.tabcfg.is_some() || self.instr.is_some() || self.perms.is_some() || self.usage_open {
             "use the panel above…"
         } else {
             "message Claude…  (/help)"
@@ -846,7 +850,7 @@ impl App {
     }
 
     fn on_paste(&mut self, p: String) {
-        if self.explorer.is_some() || self.model_picker.is_some() || self.settings.is_some() || self.tabcfg.is_some() || self.instr.is_some() || self.usage_open {
+        if self.explorer.is_some() || self.model_picker.is_some() || self.settings.is_some() || self.tabcfg.is_some() || self.instr.is_some() || self.perms.is_some() || self.usage_open {
             return;
         }
         // A question takes pasted text as its typed answer; a permission prompt takes nothing (a pasted "y"
@@ -978,7 +982,7 @@ impl App {
     }
 
     fn on_key(&mut self, k: KeyEvent) {
-        let box_is_free = self.explorer.is_none() && self.model_picker.is_none() && self.settings.is_none() && self.tabcfg.is_none() && self.instr.is_none() && !self.usage_open && self.sessions[self.active].pending.is_empty();
+        let box_is_free = self.explorer.is_none() && self.model_picker.is_none() && self.settings.is_none() && self.tabcfg.is_none() && self.instr.is_none() && self.perms.is_none() && !self.usage_open && self.sessions[self.active].pending.is_empty();
         if box_is_free && k.code == KeyCode::Char('z') && k.modifiers.contains(KeyModifiers::CONTROL) {
             return match self.undo.pop() {
                 Some((text, cursor)) => (self.input, self.cursor) = (text, cursor),
@@ -1033,7 +1037,7 @@ impl App {
 
     /// Keep the `@` popup's rows in step with the word under the cursor.
     fn refresh_files(&mut self) {
-        let tok = if self.explorer.is_some() || self.model_picker.is_some() || self.settings.is_some() || self.tabcfg.is_some() || self.instr.is_some() || self.usage_open { None } else { self.at_token() };
+        let tok = if self.explorer.is_some() || self.model_picker.is_some() || self.settings.is_some() || self.tabcfg.is_some() || self.instr.is_some() || self.perms.is_some() || self.usage_open { None } else { self.at_token() };
         let Some((_, q)) = tok else {
             self.file_rows.clear();
             self.file_key = None;
@@ -1301,7 +1305,7 @@ impl App {
         if self.model_picker.is_some() {
             return self.picker_key(k);
         }
-        if self.dock_focus && self.dock.is_some() && self.settings.is_none() && self.tabcfg.is_none() && self.instr.is_none() && !self.usage_open && self.sessions[self.active].pending.is_empty() {
+        if self.dock_focus && self.dock.is_some() && self.settings.is_none() && self.tabcfg.is_none() && self.instr.is_none() && self.perms.is_none() && !self.usage_open && self.sessions[self.active].pending.is_empty() {
             use KeyCode::*;
             if matches!(k.code, Up | Down | PageUp | PageDown | Home | End | Enter | Right | Esc | Left) && !ctrl && !alt {
                 return self.dock_key(k);
@@ -1316,6 +1320,9 @@ impl App {
         }
         if self.instr.is_some() {
             return self.instr_key(k);
+        }
+        if self.perms.is_some() {
+            return self.perms_key(k);
         }
         if self.usage_open {
             match k.code {
@@ -1545,6 +1552,86 @@ impl App {
         s.warm(&launch, &tx);
         s.control("get_context_usage", json!({}));
         s.control("get_usage", json!({}));
+    }
+
+    fn perms_key(&mut self, k: KeyEvent) {
+        use permissions::Stage;
+        let Some(mut ui) = self.perms.take() else { return };
+        let ctrl_c = k.code == KeyCode::Char('c') && k.modifiers.contains(KeyModifiers::CONTROL);
+        ui.note = None;
+        match ui.stage.clone() {
+            Stage::Typing(mut text) => {
+                match k.code {
+                    KeyCode::Esc => ui.stage = Stage::List,
+                    KeyCode::Enter if !text.trim().is_empty() => ui.stage = Stage::Where(text.trim().to_string(), 0),
+                    KeyCode::Backspace => {
+                        text.pop();
+                        ui.stage = Stage::Typing(text);
+                    }
+                    KeyCode::Char(c) if !k.modifiers.contains(KeyModifiers::CONTROL) => {
+                        text.push(c);
+                        ui.stage = Stage::Typing(text);
+                    }
+                    _ => {}
+                }
+                if ctrl_c {
+                    ui.stage = Stage::List;
+                }
+            }
+            Stage::Where(rule, w) => match k.code {
+                KeyCode::Esc => ui.stage = Stage::Typing(rule),
+                KeyCode::Up => ui.stage = Stage::Where(rule, (w + 2) % 3),
+                KeyCode::Down | KeyCode::Tab => ui.stage = Stage::Where(rule, (w + 1) % 3),
+                KeyCode::Enter => {
+                    let scope = permissions::Scope::ALL[w];
+                    let res = permissions::Scope::file(scope, self.cwd()).ok_or("no settings location".to_string()).and_then(|f| permissions::add(&f, ui.tab, &rule));
+                    match res {
+                        Ok(true) => ui.stage = Stage::List,
+                        Ok(false) => {
+                            ui.note = Some(format!("{rule} is already in {} settings", scope.name()));
+                            ui.stage = Stage::List;
+                        }
+                        Err(e) => ui.note = Some(e),
+                    }
+                    ui.reload(&self.sessions[self.active]);
+                    ui.sel = ui.shown().iter().position(|r| r.text == rule).map_or(0, |i| i + 1);
+                }
+                _ => {}
+            },
+            stage => match k.code {
+                KeyCode::Esc | KeyCode::Char('q') => return,
+                _ if ctrl_c => return,
+                KeyCode::Left | KeyCode::BackTab => ui.switch(-1),
+                KeyCode::Right | KeyCode::Tab => ui.switch(1),
+                KeyCode::Up => {
+                    ui.sel = (ui.sel + ui.shown().len()) % (ui.shown().len() + 1);
+                    ui.stage = Stage::List;
+                }
+                KeyCode::Down => {
+                    ui.sel = (ui.sel + 1) % (ui.shown().len() + 1);
+                    ui.stage = Stage::List;
+                }
+                KeyCode::Enter if ui.sel == 0 => ui.stage = Stage::Typing(String::new()),
+                KeyCode::Char('d') | KeyCode::Delete | KeyCode::Backspace if ui.sel > 0 => {
+                    if let Some(r) = ui.at().cloned() {
+                        match r.source {
+                            permissions::Source::Tab => ui.note = Some("this tab's own rule: change it in /session".into()),
+                            permissions::Source::File(scope) if matches!(stage, Stage::Confirm(n) if n + 1 == ui.sel) => {
+                                let res = scope.file(self.cwd()).ok_or("no settings location".to_string()).and_then(|f| permissions::remove(&f, r.behavior, &r.text));
+                                if let Err(e) = res {
+                                    ui.note = Some(e);
+                                }
+                                ui.stage = Stage::List;
+                                ui.reload(&self.sessions[self.active]);
+                            }
+                            permissions::Source::File(_) => ui.stage = Stage::Confirm(ui.sel - 1),
+                        }
+                    }
+                }
+                _ => {}
+            },
+        }
+        self.perms = Some(ui);
     }
 
     fn instr_key(&mut self, k: KeyEvent) {
@@ -1897,6 +1984,7 @@ impl App {
             },
             "/config" => self.settings = Some(settings::Ui::default()),
             "/session" => self.tabcfg = Some(tabcfg::Ui::default()),
+            "/permissions" => self.perms = Some(permissions::Ui::new(self.cwd(), &self.sessions[self.active])),
             "/instructions" => self.instr = Some(instructions::Ui::new(self.cwd(), instructions::rules_path().map(|f| instructions::load_rules(&f)).unwrap_or_default())),
             "/usage" => self.open_usage(),
             "/close" => self.close_tab_asking(),
