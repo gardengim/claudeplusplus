@@ -3,7 +3,7 @@
 //! the conversation grows.
 
 use crate::panel::{self, View};
-use crate::{App, settings, tabcfg, theme};
+use crate::{App, settings, tabcfg, theme, usage};
 use crate::session::{Entry, Part, Pending, Session};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Position, Rect};
@@ -100,6 +100,10 @@ fn surface(app: &mut App, width: usize) -> Option<View> {
     }
     if app.model_picker.is_some() {
         return Some(model_view(app));
+    }
+    if app.usage_open {
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0.0, |d| d.as_secs_f64());
+        return Some(usage::view(&app.sessions[app.active].usage, width, now));
     }
     if let Some(ui) = &app.tabcfg {
         return Some(tabcfg::view(ui, &app.sessions[app.active], width));
@@ -207,6 +211,11 @@ fn transcript(f: &mut Frame, s: &mut Session, area: Rect, expanded: bool, cwd: &
         s.scroll += total - s.last_total;
     }
     (s.last_total, s.view_h) = (total, h);
+    // `/find` asked for an entry: put its first line at the top of the view.
+    if let Some(i) = s.reveal.take() {
+        let above: usize = s.items[..i.min(s.items.len())].iter().map(|it| it.cache.as_ref().map_or(0, |c| c.1.len())).sum();
+        s.scroll = total.saturating_sub(h + above.saturating_sub(1));
+    }
     s.scroll = s.scroll.min(total.saturating_sub(h));
     let start = total.saturating_sub(h + s.scroll);
     let mut lines = Vec::with_capacity(h);

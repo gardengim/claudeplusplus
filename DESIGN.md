@@ -58,6 +58,7 @@ does this is `src/panel.rs` and nothing else draws a panel. A surface only build
 | permission, `AskUserQuestion` | `prompt.rs` | yellow | the panel's |
 | model / effort / fast mode | `ui::model_view` | cyan | the panel's |
 | config (`/config`) | `settings.rs` | cyan | the panel's |
+| usage | `usage.rs` | the panel's; plan bars turn yellow at 70%, red at 90% | the panel's |
 | session config | `tabcfg.rs` | the panel's; green `allow`, red `deny` | the panel's |
 | session list | `explorer.rs` | the one full-screen surface: no frame, title on the first row, hints on the last (`panel::render_full`); preview beside the list. Always available; → or Esc leaves | its own screen |
 | session dock | `explorer.rs` (`dock_lines`) | cyan border when focused, dim otherwise; yellow `!` = needs you | a 30-column strip, not a panel: opt-in, ← / ctrl+r |

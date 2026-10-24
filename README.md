@@ -183,6 +183,17 @@ Release binary: ~0.9 MB.
   `extends` loops are errors, not silently ignored. A new prompt only applies to a fresh conversation (Claude Code
   pins the prompt at the start); `/profile name --hard` re-renders it for the current one. Custom names are not
   in the `/config` cycle (it lists the built-ins); pick them with the commands above.
+- **Usage** (`/usage`): where this tab's context goes and how much of your plan is used, straight from Claude Code
+  (`get_context_usage` and `get_usage`, so no model call): per-category tokens biggest first (system prompt, tools,
+  skills, memory files, messages, with on-demand and reserved parts dimmed), tool-result and hook-output sizes, and
+  your 5-hour and weekly limits with time to reset. When skills are a big share of every request it says so and
+  points at `/profile sources`. On this machine skills were ~10k of 17k tokens.
+- **Find** (`/find text`): jump to the newest entry containing the text (case-insensitive); `/find` again steps to
+  older matches, `/find +` to newer, wrapping.
+- **Undo** (ctrl+z): in the message box; a burst of typing is one step, other edits one each; forgotten on send and
+  per tab. Closing a tab that is mid-turn asks for a second press.
+- **Per-project profile**: `<project>/.claude++/config.json` with `{"profile": "lean"}` (any built-in or custom
+  profile) sets the profile for tabs started there and for sessions opened from that project; `--profile` wins.
 - **Small things that add up**: each tab keeps its own half-typed message when you switch away; `/copy` (or ctrl+y)
   copies the last answer and `/copy code` its last code block (OSC 52, plus `pbcopy` on macOS); alt+←/→ (or alt+b/f)
   move by word, alt+backspace and ctrl+w delete a word, alt+d deletes the next word, ctrl+k deletes to the end; a

@@ -109,6 +109,12 @@ pub struct Session {
     pub cwd: Option<String>,
     /// Resume as a copy: the first spawn adds `--fork-session`.
     pub fork: bool,
+    /// `/find`: the item last jumped to, and the item the next frame should bring into view.
+    pub found: Option<usize>,
+    pub find_query: String,
+    pub reveal: Option<usize>,
+    /// Last `/usage` data: the context breakdown and plan limits Claude Code reported.
+    pub usage: crate::usage::Usage,
     pub lean_hinted: bool,
     /// The message box while another tab is in front: (text, cursor).
     pub draft: (String, usize),
@@ -218,6 +224,19 @@ pub struct Session {
     pub mem_kb: u64,
 }
 
+impl Entry {
+    /// The words of this entry, for search.
+    fn text(&self) -> String {
+        match self {
+            Entry::User(t) | Entry::Note(t) | Entry::Error(t) => t.clone(),
+            Entry::Rich(parts) => parts.iter().filter_map(|p| if let Part::Text(t) = p { Some(t.as_str()) } else { None }).collect::<Vec<_>>().join(" "),
+            Entry::Assistant { text, .. } => text.clone(),
+            Entry::Tool { name, input, result, .. } => format!("{name} {input} {}", result.as_ref().map_or("", |r| r.0.as_str())),
+            Entry::Image(_) => String::new(),
+        }
+    }
+}
+
 impl Session {
     pub fn new(id: u64, title: String) -> Self {
         Session {
@@ -226,6 +245,10 @@ impl Session {
             backend: None,
             cwd: None,
             fork: false,
+            found: None,
+            find_query: String::new(),
+            reveal: None,
+            usage: Default::default(),
             lean_hinted: false,
             draft: Default::default(),
             rules: vec![],
@@ -536,6 +559,27 @@ impl Session {
         let pick = |allow: bool| self.rules.iter().filter(|r| r.1 == allow).map(|r| r.0.clone()).collect::<Vec<_>>();
         let permissions = json!({"allow": pick(true), "deny": pick(false)});
         self.control("apply_flag_settings", json!({"settings": {"permissions": permissions}}));
+    }
+
+    /// `/find`: jump to the newest entry containing `query` (case-insensitive) and remember the query.
+    pub fn find(&mut self, query: &str) -> Option<(usize, usize)> {
+        self.find_query = query.to_lowercase();
+        self.found = None;
+        self.find_step(true)
+    }
+
+    /// Step to the next older (or newer) match of the remembered query, wrapping. Returns (match number counted
+    /// from the newest, total), or `None` when nothing matches.
+    pub fn find_step(&mut self, older: bool) -> Option<(usize, usize)> {
+        let hits: Vec<usize> = (0..self.items.len()).filter(|&i| self.items[i].entry.text().to_lowercase().contains(&self.find_query)).collect();
+        let n = hits.len();
+        let pos = match self.found.and_then(|f| hits.iter().position(|&h| h == f)) {
+            Some(p) if older => (p + n - 1) % n,
+            Some(p) => (p + 1) % n,
+            None => n.checked_sub(1)?,
+        };
+        (self.found, self.reveal) = (Some(hits[pos]), Some(hits[pos]));
+        Some((n - pos, n))
     }
 
     pub fn choose_effort(&mut self, level: &str) {
@@ -1030,6 +1074,13 @@ impl Session {
                 // Older Claude Code versions lack some of the requests we probe with; that is not news.
                 if r["subtype"] == "error" && !err.starts_with("Unsupported control request") {
                     self.note(format!("backend refused a request: {err}"));
+                }
+                if let Some(c) = crate::usage::parse_context(&r["response"]) {
+                    self.usage.ctx = Some(c);
+                    self.usage.asked = true;
+                }
+                if r["response"]["rate_limits"].is_object() {
+                    self.usage.plan = crate::usage::parse_plan(&r["response"]);
                 }
                 if let Some(e) = r["response"]["applied"]["effort"].as_str() {
                     self.status_dirty |= !self.busy && self.effort != e;
