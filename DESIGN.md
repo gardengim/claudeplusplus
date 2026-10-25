@@ -101,3 +101,9 @@ Adding a surface means writing a function that returns a `View`. Adding a config
 - Config options are choice lists only; free-form values (a number, a path) will need a text-entry row.
 - The transcript's tool/diff rendering predates the theme and is only partly cleaned up.
 - No mouse. Intentional (it would break text selection), but it is a choice.
+
+## Session lists (full screen and side panel)
+
+Rows are grouped under headings; Tab cycles *by state* (◆ needs you, ◐ working, ✗ failed, ✓ done, · stopped, ○ earlier), *recent* and *by folder*. An open tab reports its own state (needs you = a prompt is waiting, working = mid-turn, done = idle). In the side panel the cursor follows you: moving onto an open conversation switches to its tab, moving onto a stored one previews it in the main area, and Enter opens it in a new tab (or switches to it) and hands the keyboard back to the input.
+
+The permission mode is always in the status line (◇ manual, ⏵⏵ accept edits, ◈ plan, ✦ auto), with ⇧⇥ to cycle it.

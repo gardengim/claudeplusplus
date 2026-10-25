@@ -171,6 +171,8 @@ pub struct App {
     mouse: bool,
     pub dock: Option<explorer::Explorer>,
     pub dock_focus: bool,
+    /// The main area shows the side panel's highlighted stored conversation instead of the tab.
+    pub dock_peek: bool,
     dock_at: Instant,
     /// Slash commands Claude Code offers, remembered across runs so completion works before any
     /// backend is running.
@@ -484,6 +486,7 @@ impl App {
             mouse: true,
             dock: None,
             dock_focus: false,
+            dock_peek: false,
             dock_at: Instant::now(),
             known_commands: vec![],
             sel: 0,
@@ -792,7 +795,7 @@ impl App {
         self.pump_statusline();
         self.opt_poll();
         if self.dock_at.elapsed() > Duration::from_secs(5) && self.dock.is_some() {
-            let (here, open) = (self.cwd().to_string(), self.sessions.iter().filter_map(|s| s.session_id.clone()).collect());
+            let (here, open) = (self.cwd().to_string(), self.open_states());
             if let Some(d) = self.dock.as_mut() {
                 d.refresh(&here, open);
             }
@@ -1193,9 +1196,30 @@ impl App {
         profile_args(p).is_err()
     }
 
+    /// Every open tab that has a stored conversation, with what it is doing now.
+    pub fn open_states(&self) -> Vec<(String, jobs::State)> {
+        self.sessions
+            .iter()
+            .filter_map(|s| {
+                let st = if !s.pending.is_empty() { jobs::State::Blocked } else if s.busy { jobs::State::Working } else { jobs::State::Done };
+                s.session_id.clone().map(|id| (id, st))
+            })
+            .collect()
+    }
+
+    /// The side panel follows the cursor: an open conversation is switched to at once; a stored one is
+    /// previewed in the main area (`dock_peek`) until Enter opens it in a new tab.
+    fn dock_follow(&mut self) {
+        let Some((id, tab)) = self.dock.as_ref().and_then(|d| d.selected()) else { return };
+        self.dock_peek = !tab;
+        if let Some(i) = self.sessions.iter().position(|s| s.session_id.as_deref() == Some(id.as_str())) {
+            self.goto(i);
+        }
+    }
+
     fn show_dock(&mut self, focus: bool) {
         if self.dock.is_none() {
-            let open = self.sessions.iter().filter_map(|s| s.session_id.clone()).collect();
+            let open = self.open_states();
             self.dock = Some(explorer::Explorer::new(self.cwd(), open));
             self.dock_at = Instant::now();
         }
@@ -1217,10 +1241,16 @@ impl App {
         match k.code {
             KeyCode::Left => self.open_explorer(),
             KeyCode::Right => (self.dock, self.dock_focus) = (None, false),
-            KeyCode::Esc => self.dock_focus = false,
+            KeyCode::Esc => (self.dock_focus, self.dock_peek) = (false, false),
             _ => {
                 if let Some(o) = self.dock.as_mut().map(|d| d.key(k)) {
-                    self.explorer_outcome(o); // the dock keeps the keyboard; typing hands it back
+                    let opened = matches!(o, explorer::Outcome::Open(..));
+                    self.explorer_outcome(o);
+                    if opened {
+                        (self.dock_focus, self.dock_peek) = (false, false); // typing now goes to that conversation
+                    } else {
+                        self.dock_follow();
+                    }
                 }
             }
         }
@@ -1255,7 +1285,7 @@ impl App {
     }
 
     fn open_explorer(&mut self) {
-        let open = self.sessions.iter().filter_map(|s| s.session_id.clone()).collect();
+        let open = self.open_states();
         self.explorer = Some(explorer::Explorer::new(self.cwd(), open));
     }
 
@@ -1322,10 +1352,10 @@ impl App {
         }
         if self.dock_focus && self.dock.is_some() && self.settings.is_none() && self.tabcfg.is_none() && self.instr.is_none() && self.perms.is_none() && self.opt.is_none() && !self.usage_open && self.sessions[self.active].pending.is_empty() {
             use KeyCode::*;
-            if matches!(k.code, Up | Down | PageUp | PageDown | Home | End | Enter | Right | Esc | Left) && !ctrl && !alt {
+            if matches!(k.code, Up | Down | PageUp | PageDown | Home | End | Enter | Right | Esc | Left | Tab) && !ctrl && !alt {
                 return self.dock_key(k);
             }
-            self.dock_focus = false; // any other key is for the input box
+            (self.dock_focus, self.dock_peek) = (false, false); // any other key is for the input box
         }
         if self.settings.is_some() {
             return self.settings_key(k);

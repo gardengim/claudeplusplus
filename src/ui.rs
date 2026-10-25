@@ -22,7 +22,9 @@ const DOCK_W: u16 = 30;
 
 pub fn draw(f: &mut Frame, app: &mut App) {
     // The full-screen session list replaces everything: no tabs, input or frame.
+    let open = app.open_states();
     if let Some(ex) = app.explorer.as_mut() {
+        ex.set_open(open);
         let area = f.area();
         let v = ex.view(area.width as usize);
         panel::render_full(f, area, v);
@@ -33,7 +35,9 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     if area.width >= DOCK_MIN_SCREEN && app.dock.is_some() {
         let [dock, rest] = Layout::horizontal([Constraint::Length(DOCK_W), Constraint::Min(1)]).areas(area);
         let focused = app.dock_focus;
+        let open = app.open_states();
         if let Some(d) = app.dock.as_mut() {
+            d.set_open(open);
             let lines = d.dock_lines(DOCK_W as usize - 1, dock.height as usize, focused);
             f.render_widget(Paragraph::new(lines).block(Block::new().borders(Borders::RIGHT).border_style(if focused { theme::accent() } else { theme::dim() })), dock);
         }
@@ -71,7 +75,14 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     f.render_widget(Paragraph::new(tab_line(app)), tabs);
     let expanded = app.expanded;
     let cwd = app.cwd.clone();
-    transcript(f, &mut app.sessions[app.active], body, expanded, &cwd);
+    let peek = if app.dock_peek && app.dock_focus { app.dock.as_mut().map(|d| d.peek_lines(body.width as usize)) } else { None };
+    match peek {
+        Some(lines) => {
+            let skip = lines.len().saturating_sub(body.height as usize);
+            f.render_widget(Paragraph::new(lines).scroll((skip as u16, 0)), body);
+        }
+        None => transcript(f, &mut app.sessions[app.active], body, expanded, &cwd),
+    }
     if let Some(view) = view.filter(|_| panel_h > 0) {
         panel::render(f, panel_area, view);
     }
@@ -439,16 +450,18 @@ fn status_line(app: &App, f_height: u16) -> Line<'static> {
         spans.push(Span::styled(format!("{frame} {what} {}s · ⎋ stop  ", el.as_secs()), theme::bold()));
     }
     let mode_style = theme::mode(&s.mode);
+    // The permission mode is always shown, in words: it decides whether Claude asks before acting.
     let mode = match s.mode.as_str() {
-        "" | "default" => None,
-        "acceptEdits" => Some("⏵⏵ edits"),
-        "plan" => Some("◈ plan"),
-        "bypassPermissions" => Some("! bypass"),
-        m => Some(m),
+        "" | "default" => "◇ manual",
+        "acceptEdits" => "⏵⏵ accept edits",
+        "plan" => "◈ plan",
+        "auto" => "✦ auto",
+        "bypassPermissions" => "! bypass",
+        "dontAsk" => "✗ don't ask",
+        m => m,
     };
-    if let Some(m) = mode {
-        spans.push(Span::styled(format!("{m}  "), mode_style));
-    }
+    spans.push(Span::styled(mode.to_string(), mode_style.add_modifier(Modifier::BOLD)));
+    spans.push(Span::styled(" ⇧⇥  ", theme::dim()));
     let mut parts: Vec<(String, Style)> = vec![];
     if !s.model.is_empty() && !ext {
         let base = if s.effort.is_empty() { s.model.clone() } else { format!("{} {}", s.model, s.effort) };

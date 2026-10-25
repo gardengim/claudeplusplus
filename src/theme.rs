@@ -60,6 +60,7 @@ pub fn mode(mode: &str) -> Style {
     match mode {
         "acceptEdits" => Style::new().fg(Color::Magenta),
         "plan" => accent(),
+        "auto" => ok(),
         "bypassPermissions" => danger(),
         _ => dim(),
     }
