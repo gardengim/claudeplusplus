@@ -1210,7 +1210,10 @@ impl App {
     /// The side panel follows the cursor: an open conversation is switched to at once; a stored one is
     /// previewed in the main area (`dock_peek`) until Enter opens it in a new tab.
     fn dock_follow(&mut self) {
-        let Some((id, tab)) = self.dock.as_ref().and_then(|d| d.selected()) else { return };
+        let Some((id, tab)) = self.dock.as_ref().and_then(|d| d.selected()) else {
+            self.dock_peek = false; // on a heading: nothing to follow
+            return;
+        };
         self.dock_peek = !tab;
         if let Some(i) = self.sessions.iter().position(|s| s.session_id.as_deref() == Some(id.as_str())) {
             self.goto(i);

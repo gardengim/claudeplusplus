@@ -21,9 +21,10 @@ const PREVIEW_LINES_PER_TURN: usize = 6;
 static GROUP: AtomicU8 = AtomicU8::new(0);
 const GROUPS: [&str; 3] = ["by state", "recent", "by folder"];
 
-/// A line of the list: a group heading, or the `k`th matching session.
+/// A line of the list: a group heading (its name, text and colour), or a session (index into `rows`).
+/// Both can hold the cursor; Enter on a heading folds or unfolds its group.
 enum Entry {
-    Head(String, Style),
+    Head(String, String, Style),
     Row(usize),
 }
 
@@ -67,6 +68,8 @@ pub struct Explorer {
     preview: Option<(String, Vec<(bool, String)>)>,
     /// A longer look at the highlighted conversation, for the main area while the side panel follows you.
     peek: Option<(String, Vec<(bool, String)>)>,
+    /// Headings folded away (names), while this list is open.
+    folded: Vec<String>,
     /// A destructive chord pressed once: (session id, which); the same chord again confirms.
     armed: Option<(String, char)>,
 }
@@ -106,8 +109,9 @@ impl Explorer {
     }
 
     fn from(here: &str, items: Vec<Summary>, jobs: Vec<Job>, open: Vec<(String, State)>) -> Self {
-        let mut e = Explorer { rows: merge(here, items, jobs), open: vec![], query: String::new(), sel: 0, preview: None, peek: None, armed: None };
+        let mut e = Explorer { rows: merge(here, items, jobs), open: vec![], query: String::new(), sel: 0, preview: None, peek: None, folded: vec![], armed: None };
         e.set_open(open);
+        e.sel = e.first_row();
         e
     }
 
@@ -156,28 +160,63 @@ impl Explorer {
         }
     }
 
-    /// The matching rows as display lines, with a heading before each group.
-    fn layout(&self, m: &[usize]) -> Vec<Entry> {
+    /// The list as display lines: a heading before each group, and no rows under a folded one.
+    fn entries(&self) -> Vec<Entry> {
+        let m = self.matches();
+        let folded = &self.folded;
         let mut out = Vec::new();
         let mut last = String::new();
+        let mut hide = false;
         for (k, &i) in m.iter().enumerate() {
             let (_, name, style) = self.heading(&self.rows[i]);
             if !name.is_empty() && name != last {
                 let n = m[k..].iter().take_while(|&&j| self.heading(&self.rows[j]).1 == name).count();
-                out.push(Entry::Head(format!("{name} {n}"), style));
+                hide = folded.contains(&name);
+                out.push(Entry::Head(name.clone(), format!("{} {name} {n}", if hide { theme::CLOSED } else { theme::OPEN }), style));
                 last = name;
             }
-            out.push(Entry::Row(k));
+            if !hide {
+                out.push(Entry::Row(i));
+            }
         }
         out
     }
 
+    /// The session under the cursor (`None` on a heading or an empty list).
+    fn cur(&self) -> Option<usize> {
+        match self.entries().get(self.sel) {
+            Some(Entry::Row(i)) => Some(*i),
+            _ => None,
+        }
+    }
+
+    /// Put the cursor back on session `id` after the list was reordered or reread.
+    fn seek(&mut self, id: Option<String>) {
+        let e = self.entries();
+        self.sel = id.and_then(|id| e.iter().position(|x| matches!(x, Entry::Row(i) if self.rows[*i].id == id))).unwrap_or(self.sel.min(e.len().saturating_sub(1)));
+    }
+
+    /// The first session, skipping headings (after typing in the filter).
+    fn first_row(&self) -> usize {
+        self.entries().iter().position(|x| matches!(x, Entry::Row(_))).unwrap_or(0)
+    }
+
+    /// Enter on a heading: fold or unfold the group.
+    fn toggle_fold(&mut self) {
+        let e = self.entries();
+        if let Some(Entry::Head(name, ..)) = e.get(self.sel) {
+            match self.folded.iter().position(|x| x == name) {
+                Some(p) => drop(self.folded.remove(p)),
+                None => self.folded.push(name.clone()),
+            }
+        }
+    }
+
     /// Tab: by state, recent, by folder. The cursor stays on the same session.
     fn cycle_group(&mut self) {
-        let keep = self.matches().get(self.sel).map(|&i| self.rows[i].id.clone());
+        let keep = self.cur().map(|i| self.rows[i].id.clone());
         GROUP.store((GROUP.load(Ordering::Relaxed) + 1) % 3, Ordering::Relaxed);
-        let m = self.matches();
-        self.sel = keep.and_then(|id| m.iter().position(|&i| self.rows[i].id == id)).unwrap_or(0);
+        self.seek(keep);
     }
 
     /// Update which sessions are open in tabs, and what state each tab is in.
@@ -195,7 +234,7 @@ impl Explorer {
 
     /// The highlighted session and whether it is open in a tab.
     pub fn selected(&self) -> Option<(String, bool)> {
-        self.matches().get(self.sel).map(|&i| (self.rows[i].id.clone(), self.rows[i].tab))
+        self.cur().map(|i| (self.rows[i].id.clone(), self.rows[i].tab))
     }
 
     /// The end of the highlighted (closed) conversation, to show in the main area.
@@ -218,18 +257,16 @@ impl Explorer {
 
     /// Re-read the sources, keeping the cursor on the same session.
     pub fn refresh(&mut self, here: &str, open: Vec<(String, State)>) {
-        let keep = self.matches().get(self.sel).map(|&i| self.rows[i].id.clone());
+        let keep = self.cur().map(|i| self.rows[i].id.clone());
         self.rows = merge(here, history::recent(here, MAX_SESSIONS), jobs::load());
         self.set_open(open);
-        if let Some(p) = keep.and_then(|id| self.matches().iter().position(|&i| self.rows[i].id == id)) {
-            self.sel = p;
-        }
+        self.seek(keep);
     }
 
     /// The docked column: one compact line per session under group headings, only what fits around the cursor.
     pub fn dock_lines(&mut self, width: usize, height: usize, focused: bool) -> Vec<Line<'static>> {
-        let m = self.matches();
-        self.sel = self.sel.min(m.len().saturating_sub(1));
+        let entries = self.entries();
+        self.sel = self.sel.min(entries.len().saturating_sub(1));
         let mut out = vec![Line::from(vec![Span::styled(" Sessions", theme::dim()), Span::styled(format!(" · {}", GROUPS[GROUP.load(Ordering::Relaxed) as usize]), theme::dim())])];
         let keys = if focused {
             vec![theme::hints(&[("↑↓", "move"), ("⏎", "open"), ("tab", "group")]), theme::hints(&[("←", "wide"), ("→", "hide"), ("esc", "back")])]
@@ -239,19 +276,19 @@ impl Explorer {
         let room = height.saturating_sub(1 + keys.len());
         let mut lines: Vec<Line<'static>> = Vec::new();
         let mut at = 0;
-        for e in self.layout(&m) {
+        for (pos, e) in entries.into_iter().enumerate() {
+            let on = pos == self.sel && focused;
+            if pos == self.sel {
+                at = lines.len();
+            }
             match e {
-                Entry::Head(t, style) => lines.push(Line::styled(format!(" {t}"), style)),
-                Entry::Row(k) => {
-                    if k == self.sel {
-                        at = lines.len();
-                    }
-                    let r = &self.rows[m[k]];
+                Entry::Head(_, t, style) => lines.push(if on { panel::row(true, vec![Span::raw(t)]) } else { Line::styled(format!(" {t}"), style) }),
+                Entry::Row(i) => {
+                    let r = &self.rows[i];
                     let glyph = r.state.map_or(" ", State::glyph);
                     let title = if !r.title.is_empty() { &*r.title } else if !r.detail.is_empty() { &*r.detail } else { "(empty)" };
                     let text: String = title.chars().take(width.saturating_sub(6)).collect();
                     let dot = if r.tab { theme::CURRENT } else { " " };
-                    let on = k == self.sel && focused;
                     let spans = if on { vec![Span::raw(format!("{glyph}{dot}{text}"))] } else { vec![Span::styled(glyph, Self::state_cell(r).style), Span::raw(format!("{dot}{text}"))] };
                     lines.push(panel::row(on, spans));
                 }
@@ -266,7 +303,7 @@ impl Explorer {
 
     pub fn key(&mut self, k: KeyEvent) -> Outcome {
         let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
-        let last = self.matches().len().saturating_sub(1);
+        let last = self.entries().len().saturating_sub(1);
         let armed = self.armed.take();
         if ctrl && matches!(k.code, KeyCode::Char('f' | 't' | 'x')) {
             return self.act(k.code, armed);
@@ -276,7 +313,9 @@ impl Explorer {
             KeyCode::Char('c' | 'r' | 'd') if ctrl => return Outcome::Close,
             KeyCode::Right if self.query.is_empty() => return Outcome::Close,
             KeyCode::Enter => {
-                if let Some(&i) = self.matches().get(self.sel) {
+                if self.cur().is_none() {
+                    self.toggle_fold();
+                } else if let Some(i) = self.cur() {
                     let r = &self.rows[i];
                     if r.state.is_some_and(State::live) && !r.tab {
                         let id = r.short.as_deref().unwrap_or(&r.id);
@@ -294,15 +333,15 @@ impl Explorer {
             KeyCode::End => self.sel = last,
             KeyCode::Char('u') if ctrl => {
                 self.query.clear();
-                self.sel = 0;
+                self.sel = self.first_row();
             }
             KeyCode::Backspace => {
                 self.query.pop();
-                self.sel = 0;
+                self.sel = self.first_row();
             }
             KeyCode::Char(c) if !ctrl => {
                 self.query.push(c);
-                self.sel = 0;
+                self.sel = self.first_row();
             }
             _ => {}
         }
@@ -311,7 +350,7 @@ impl Explorer {
 
     /// ctrl+f fork, ctrl+t take over, ctrl+x stop. Stopping needs the same chord twice.
     fn act(&mut self, code: KeyCode, armed: Option<(String, char)>) -> Outcome {
-        let Some(r) = self.matches().get(self.sel).map(|&i| &self.rows[i]) else { return Outcome::Stay };
+        let Some(r) = self.cur().map(|i| &self.rows[i]) else { return Outcome::Stay };
         let KeyCode::Char(c) = code else { return Outcome::Stay };
         let target = || (r.id.clone(), r.title.to_string(), Some(r.cwd.to_string()).filter(|d| !d.is_empty()));
         if c == 'f' {
@@ -343,38 +382,38 @@ impl Explorer {
     /// preview of the end of the highlighted one. `width` is the terminal width, to wrap the preview.
     pub fn view(&mut self, width: usize) -> View {
         let m = self.matches();
-        self.sel = self.sel.min(m.len().saturating_sub(1));
+        let entries = self.entries();
+        self.sel = self.sel.min(entries.len().saturating_sub(1));
         let head = vec![Line::from(vec![Span::styled("filter ", theme::dim()), Span::raw(self.query.clone()), Span::styled(" ", theme::selected())])];
         let mut focus = 0;
         let body: Vec<Line> = if m.is_empty() {
             let msg = if self.rows.is_empty() { "no sessions here yet" } else { "nothing matches" };
             vec![Line::styled(msg, theme::dim())]
         } else {
-            self.layout(&m)
+            let sel = self.sel;
+            focus = sel;
+            entries
                 .into_iter()
                 .enumerate()
                 .map(|(at, e)| match e {
-                    Entry::Head(t, style) => Line::styled(t, style),
-                    Entry::Row(k) => {
-                        if k == self.sel {
-                            focus = at;
-                        }
-                        let r = &self.rows[m[k]];
+                    Entry::Head(_, t, style) => panel::row_with(at == sel, false, vec![Span::styled(t, if at == sel { theme::bold() } else { style })]),
+                    Entry::Row(i) => {
+                        let r = &self.rows[i];
                         let dot = if r.tab { theme::CURRENT } else { " " };
                         let title = if !r.title.is_empty() { &*r.title } else if !r.detail.is_empty() { &*r.detail } else { "(empty)" };
                         let mut spans = vec![Span::raw(format!("{dot} ")), Self::state_cell(r), Span::raw(format!("{:>4}  {title}", history::ago(r.modified)))];
                         if let Some(dir) = std::path::Path::new(&*r.cwd).file_name() {
                             spans.push(Span::styled(format!("  {}", dir.to_string_lossy()), theme::dim()));
                         }
-                        panel::row(k == self.sel, spans)
+                        panel::row(at == sel, spans)
                     }
                 })
                 .collect()
         };
-        let footer = theme::hints(&[("↑↓", "move"), ("enter", "open"), ("type", "to filter"), ("tab", GROUPS[GROUP.load(Ordering::Relaxed) as usize]), ("ctrl+f", "fork"), ("ctrl+t", "take over"), ("esc/→", "close")]);
+        let footer = theme::hints(&[("↑↓", "move"), ("enter", "open/fold"), ("type", "to filter"), ("tab", GROUPS[GROUP.load(Ordering::Relaxed) as usize]), ("ctrl+f", "fork"), ("ctrl+t", "take over"), ("esc/→", "close")]);
         let title = format!("Sessions {}/{}", m.len(), self.rows.len());
         let mut v = View::new(title, body, focus, footer).with_head(head).rows(10, usize::MAX);
-        if let Some(&i) = m.get(self.sel) {
+        if let Some(i) = self.cur() {
             let r = &self.rows[i];
             let (id, modified, size, state, detail) = (r.id.clone(), r.modified, r.size, r.state, r.detail.to_string());
             let side_w = (width.saturating_sub(4) * 42 / 100).saturating_sub(4);
@@ -452,7 +491,7 @@ mod tests {
         for c in "log".chars() {
             e.key(key(KeyCode::Char(c)));
         }
-        assert_eq!(e.sel, 0, "typing resets the selection");
+        assert_eq!(e.selected().map(|x| x.0), Some("aaa111".into()), "typing puts the cursor on the first match");
         e.key(key(KeyCode::Down));
         e.key(key(KeyCode::Down)); // clamped to the last match
         assert!(matches!(e.key(key(KeyCode::Enter)), Outcome::Open(id, ..) if id == "ccc333"));
@@ -465,11 +504,18 @@ mod tests {
     fn groups_open_tabs_by_their_state_and_forgets_it_when_the_tab_closes() {
         let mut e = explorer();
         e.set_open(vec![("aaa111".into(), State::Blocked), ("bbb222".into(), State::Working)]);
-        let m = e.matches();
-        let heads: Vec<String> = e.layout(&m).into_iter().filter_map(|x| if let Entry::Head(t, _) = x { Some(t) } else { None }).collect();
-        assert_eq!(heads, vec!["◆ needs you 1", "◐ working 1", "○ earlier 1"]);
-        assert_eq!(e.selected(), Some(("aaa111".into(), true)), "the one that needs you is first");
+        let heads: Vec<String> = e.entries().into_iter().filter_map(|x| if let Entry::Head(_, t, _) = x { Some(t) } else { None }).collect();
+        assert_eq!(heads, vec!["▾ ◆ needs you 1", "▾ ◐ working 1", "▾ ○ earlier 1"]);
+        e.sel = 1;
+        assert_eq!(e.selected(), Some(("aaa111".into(), true)), "the one that needs you is first (row 0 is its heading)");
+        e.sel = 0;
+        assert_eq!(e.selected(), None, "a heading is not a session");
+        assert!(matches!(e.key(key(KeyCode::Enter)), Outcome::Stay));
+        assert_eq!(e.entries().len(), 5, "the folded group keeps its heading, loses its row");
+        e.key(key(KeyCode::Enter));
+        assert_eq!(e.entries().len(), 6, "Enter again unfolds it");
         e.set_open(vec![]);
+        e.sel = 1;
         assert_eq!(e.selected().map(|x| x.1), Some(false));
         assert!(e.rows.iter().all(|r| r.state.is_none() && !r.tab));
     }
@@ -502,9 +548,8 @@ mod tests {
         e.query.clear();
         // a live session cannot be resumed headless: explain instead of opening
         assert!(matches!(e.key(key(KeyCode::Enter)), Outcome::Refused(m) if m.contains("ctrl+t takes it over")));
-        e.key(key(KeyCode::Down));
-        e.key(key(KeyCode::Down));
-        assert!(matches!(e.key(key(KeyCode::Enter)), Outcome::Open(id, ..) if id == "aaa111" || id == "bbb222"));
+        e.sel = e.entries().iter().position(|x| matches!(x, Entry::Row(i) if e.rows[*i].id == "aaa111")).unwrap();
+        assert!(matches!(e.key(key(KeyCode::Enter)), Outcome::Open(id, ..) if id == "aaa111"));
     }
 
     #[test]
@@ -513,7 +558,9 @@ mod tests {
         let mut e = Explorer::from("/p", vec![sum("aaa111", "idle one", "p")], vec![job("zzz999", State::Blocked, "/o", "deploy", "q")], vec![]);
         assert!(matches!(e.key(ctrl('t')), Outcome::Refused(m) if m.contains("again to confirm")));
         e.key(key(KeyCode::Down));
+        e.key(key(KeyCode::Down)); // past the next heading
         assert!(matches!(e.key(ctrl('t')), Outcome::Refused(m) if m.contains("only a session running")), "an idle one cannot be stopped");
+        e.key(key(KeyCode::Up));
         e.key(key(KeyCode::Up));
         e.key(ctrl('x'));
         assert!(matches!(e.key(ctrl('t')), Outcome::Refused(_)), "a different chord re-arms instead of confirming");
