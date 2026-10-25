@@ -609,13 +609,13 @@ mod tests {
         press(&mut ui, &qs, KeyCode::Char('1'));
         assert!(text(&ui.question_view(&qs, 60)).iter().any(|l| l.contains("☑ 1. Lint")));
         let footer: String = ui.question_view(&qs, 60).footer.spans.iter().map(|s| s.content.as_ref()).collect();
-        assert!(footer.contains("space toggle") && footer.contains("←→ question") && footer.contains("esc decline"), "{footer}");
+        assert!(footer.contains("␣ toggle") && footer.contains("←→ question") && footer.contains("⎋ decline"), "{footer}");
         // typing shows the text with the cursor, and the hints change
         typed(&mut ui, &qs, "hey");
         let v = ui.question_view(&qs, 60);
         assert!(text(&v).iter().any(|l| l.contains("✎ 4. Other: hey")));
         let footer: String = v.footer.spans.iter().map(|s| s.content.as_ref()).collect();
-        assert!(footer.contains("esc stop typing"), "{footer}");
+        assert!(footer.contains("⎋ stop typing"), "{footer}");
     }
 
     #[test]

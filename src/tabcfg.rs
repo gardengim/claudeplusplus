@@ -62,9 +62,7 @@ pub fn view(ui: &Ui, s: &Session, width: usize) -> View {
         .map(|(n, row)| {
             let on = n == sel;
             let name = |t: &str| Span::styled(format!("{t:<label_w$}"), if on { theme::bold() } else { Style::new() });
-            let chip = |label: &str, active: bool, hue: Style| {
-                Span::styled(format!(" {label} "), if active && on { theme::selected() } else if active { hue } else { theme::dim() })
-            };
+            let chip = |label: &str, active: bool, hue: Style| theme::chip(label, active, active && on, hue);
             match row {
                 Row::Mode => {
                     let mut v = vec![name("Permission mode")];
@@ -73,7 +71,7 @@ pub fn view(ui: &Ui, s: &Session, width: usize) -> View {
                 }
                 Row::Tool(t, _) => {
                     let state = s.rule(t);
-                    row_with(on, false, vec![name(t), chip("default", state.is_none(), theme::bold()), chip("allow", state == Some(true), theme::ok()), chip("deny", state == Some(false), theme::danger())])
+                    row_with(on, false, vec![name(t), chip("default", state.is_none(), theme::bold()), chip("allow ✓", state == Some(true), theme::ok()), chip("deny ✗", state == Some(false), theme::danger())])
                 }
                 Row::Add => match (&ui.adding, on) {
                     (Some(text), true) => row_with(on, false, vec![Span::styled("rule ", theme::dim()), Span::raw(text.clone()), Span::styled(" ", theme::selected())]),

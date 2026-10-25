@@ -142,8 +142,7 @@ fn model_view(app: &App) -> View {
     if let Some(m) = models.get(p.sel).filter(|m| !m.efforts.is_empty()) {
         let mut spans = vec![Span::raw("effort  ")];
         for (i, e) in m.efforts.iter().enumerate() {
-            let label = format!(" {e}{} ", if *e == s.effort { theme::CURRENT } else { "" });
-            spans.push(if i == p.effort { Span::styled(label, theme::selected()) } else { Span::styled(label, theme::dim()) });
+            spans.push(theme::chip(e, *e == s.effort, i == p.effort, theme::bold()));
         }
         tail.push(Line::from(spans));
     }
@@ -152,10 +151,9 @@ fn model_view(app: &App) -> View {
     if models.get(p.sel).is_some_and(|m| m.fast) {
         let mut spans = vec![Span::raw("fast ↯  ")];
         for (on, label) in [(false, "off"), (true, "on")] {
-            let text = format!(" {label}{} ", if cur_fast == on { theme::CURRENT } else { "" });
-            spans.push(if p.fast == on { Span::styled(text, theme::selected()) } else { Span::styled(text, theme::dim()) });
+            spans.push(theme::chip(label, cur_fast == on, p.fast == on, theme::bold()));
         }
-        spans.push(Span::styled("  space toggles · faster output, higher price per token", theme::dim()));
+        spans.push(Span::styled("  faster output, higher price per token", theme::dim()));
         tail.push(Line::from(spans));
     } else {
         tail.push(Line::styled("fast ↯  not available on this model (Opus only)", theme::dim()));
@@ -189,11 +187,11 @@ fn tab_line(app: &App) -> Line<'static> {
     let mut spans = Vec::new();
     for (i, s) in app.sessions.iter().enumerate() {
         let mark = if !s.pending.is_empty() {
-            "!"
+            crate::jobs::State::Blocked.glyph()
         } else if s.busy {
-            "*"
+            crate::jobs::State::Working.glyph()
         } else if s.backend.is_none() && s.session_id.is_some() {
-            "z"
+            "○"
         } else {
             " "
         };
@@ -321,7 +319,10 @@ fn tool_lines(
     };
     let pad = if nested { "    " } else { "" };
     let summary = tool_summary(name, input, cwd);
-    let head = format!("{pad}{}{name}({summary})", if nested { "↳ " } else { "● " });
+    let head = match tool_icon(name) {
+        Some(icon) => format!("{pad}{}{icon} {summary}", if nested { "↳ " } else { "" }),
+        None => format!("{pad}{}{name}({summary})", if nested { "↳ " } else { "● " }),
+    };
     let head: String = truncate(&head, width);
     out.push(Line::from(Span::styled(head, role.add_modifier(Modifier::BOLD))));
     if nested {
@@ -369,6 +370,22 @@ fn tool_lines(
     }
 }
 
+/// One glyph per kind of tool, so a run of tool calls reads by shape. Unknown (MCP...) tools keep their name.
+fn tool_icon(name: &str) -> Option<&'static str> {
+    Some(match name {
+        "Bash" => "$",
+        "Read" => "≡",
+        "Edit" | "NotebookEdit" => "±",
+        "Write" => "+",
+        "Glob" | "Grep" => "⌕",
+        "WebFetch" | "WebSearch" => "◎",
+        "Task" | "Agent" => "◈",
+        "Skill" => "✦",
+        "AskUserQuestion" => "?",
+        _ => return None,
+    })
+}
+
 pub fn tool_summary(name: &str, input: &Value, cwd: &str) -> String {
     let s = |k: &str| input[k].as_str().unwrap_or_default().to_string();
     let path = |k: &str| {
@@ -410,11 +427,18 @@ fn status_line(app: &App, f_height: u16) -> Line<'static> {
         let el = s.busy_since.elapsed();
         let frame = SPINNER[(el.as_millis() / 100) as usize % SPINNER.len()];
         let what = if s.activity.is_empty() { "working" } else { &s.activity };
-        spans.push(Span::styled(format!("{frame} {what} {}s · esc to interrupt  ", el.as_secs()), theme::bold()));
+        spans.push(Span::styled(format!("{frame} {what} {}s · ⎋ stop  ", el.as_secs()), theme::bold()));
     }
     let mode_style = theme::mode(&s.mode);
-    if !s.mode.is_empty() {
-        spans.push(Span::styled(format!("{} (shift+tab)  ", s.mode), mode_style));
+    let mode = match s.mode.as_str() {
+        "" | "default" => None,
+        "acceptEdits" => Some("⏵⏵ edits"),
+        "plan" => Some("◈ plan"),
+        "bypassPermissions" => Some("! bypass"),
+        m => Some(m),
+    };
+    if let Some(m) = mode {
+        spans.push(Span::styled(format!("{m}  "), mode_style));
     }
     let mut parts = vec![];
     if !s.model.is_empty() && !ext {
@@ -428,7 +452,7 @@ fn status_line(app: &App, f_height: u16) -> Line<'static> {
         parts.push(format!("hit {:.0}%", 100.0 * s.cache_read as f64 / s.prompt_total as f64));
     }
     if let Some(left) = s.cache_left(app.cache_ttl) {
-        parts.push(if left.is_zero() { "cache cold".into() } else { format!("cache {}m", left.as_secs().div_ceil(60)) });
+        parts.push(if left.is_zero() { "◷ cold".into() } else { format!("◷ {}m", left.as_secs().div_ceil(60)) });
     }
     if !s.profile.is_empty() && s.profile != "full" {
         parts.insert(0, s.profile.clone());
@@ -581,6 +605,6 @@ mod tests {
         let mut out = Vec::new();
         tool_lines(&mut out, "Edit", &input, &Some(("ok".into(), false)), false, 80, false, "/p");
         let text: Vec<String> = out.iter().map(|l| l.to_string()).collect();
-        assert_eq!(text, vec!["● Edit(a.rs)", "    - x", "    + y", "    + z"]);
+        assert_eq!(text, vec!["± a.rs", "    - x", "    + y", "    + z"]);
     }
 }

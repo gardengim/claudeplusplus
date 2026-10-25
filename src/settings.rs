@@ -110,10 +110,10 @@ pub fn view(ui: Ui, width: usize, current: impl Fn(&str) -> String) -> View {
             let known = item.choices.iter().any(|c| c.0 == value);
             for (v, label) in item.choices {
                 let active = *v == value;
-                spans.push(Span::styled(format!(" {label} "), if active && on { theme::selected() } else if active { theme::bold() } else { theme::dim() }));
+                spans.push(theme::chip(label, active, active && on, theme::bold()));
             }
             if !known {
-                spans.push(Span::styled(format!(" {value} "), if on { theme::selected() } else { theme::bold() })); // e.g. set by a flag
+                spans.push(theme::chip(&value, true, on, theme::bold())); // e.g. set by a flag
             }
             row_with(on, false, spans)
         })
@@ -159,7 +159,7 @@ mod tests {
         assert_eq!(lean.style, theme::selected(), "the active choice of the cursor row is highlighted");
         let full = v.body[1].spans.iter().find(|s| s.content.contains("full")).unwrap();
         assert_eq!(full.style, theme::dim());
-        assert!(text(&v.body[0]).contains(" x "), "a value outside the choices is still shown");
+        assert!(text(&v.body[0]).contains("x"), "a value outside the choices is still shown");
         assert!(text(&v.tail[1]).contains("full: stock Claude Code"));
         // the panel keeps one height whichever row is highlighted, at any width
         for w in [60, 100, 160] {

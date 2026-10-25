@@ -192,7 +192,7 @@ mod tests {
         let bottom = rows.iter().rposition(|r| r.starts_with('└')).expect("bottom border");
         assert_eq!(bottom, 11, "anchored to the bottom edge");
         assert!(rows.iter().any(|r| r.starts_with("┌ Things ")), "{rows:?}");
-        assert_eq!(rows[bottom - 1], format!("│ esc close{}│", " ".repeat(40 - 2 - 10)), "footer is the last row inside the frame");
+        assert_eq!(rows[bottom - 1], format!("│ ⎋ close{}│", " ".repeat(40 - 2 - 8)), "footer is the last row inside the frame");
     }
 
     #[test]
@@ -229,7 +229,7 @@ mod tests {
         t.draw(|f| render_full(f, f.area(), v)).unwrap();
         let b = t.backend().buffer().clone();
         let row = |y: u16| (0..120).map(|x| b[(x, y)].symbol().to_string()).collect::<String>();
-        assert!(row(0).starts_with(" Everything") && row(9).contains("esc close"));
+        assert!(row(0).starts_with(" Everything") && row(9).contains("⎋ close"));
         assert!((0..10).all(|y| !row(y).contains('┌') && !row(y).contains('│') || row(y).contains("DETAIL") || row(y).starts_with("│") == false));
         assert!(row(1).contains("row 0") && (0..10).any(|y| row(y).contains("DETAIL")), "body and the wide detail pane use the screen");
     }

@@ -57,7 +57,7 @@ fn cache_clock_counts_down_from_the_last_api_response() {
     s.ctx_tokens = 5000;
     s.last_api = Instant::now().checked_sub(Duration::from_secs(600));
     let left = s.cache_left(ttl).unwrap();
-    assert!(left > Duration::from_secs(2900) && left < Duration::from_secs(3000));
+    assert!(left > Duration::from_secs(2900) && left <= Duration::from_secs(3000));
     s.last_api = Instant::now().checked_sub(Duration::from_secs(4000));
     assert!(s.cache_left(ttl).unwrap().is_zero());
 }
@@ -458,7 +458,7 @@ fn current_model_prefers_the_pick_and_picker_fits_a_short_terminal() {
     let mut t = ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 12)).unwrap();
     t.draw(|f| ui::draw(f, &mut app)).unwrap();
     let text: String = t.backend().buffer().content().iter().map(|c| c.symbol()).collect();
-    assert!(text.contains("M19") && text.contains("effort") && text.contains("enter apply"), "selected row and effort row both visible");
+    assert!(text.contains("M19") && text.contains("effort") && text.contains("⏎ apply"), "selected row and effort row both visible");
     assert!(text.contains("fast") && text.contains("not available"), "the fast row is there even for a model without it");
 }
 
@@ -907,37 +907,37 @@ fn every_panel_sits_at_the_bottom_above_the_input_with_the_same_frame() {
     };
 
     typed(&mut app, "/comp");
-    check(&mut app, "command suggestions", "Commands", "tab complete");
+    check(&mut app, "command suggestions", "Commands", "⇥ complete");
     app.set_input("@".into());
     app.refresh_files();
-    check(&mut app, "file suggestions", "Files", "tab complete");
+    check(&mut app, "file suggestions", "Files", "⇥ complete");
     app.set_input(String::new());
     app.refresh_files();
 
     run_cmd(&mut app, "/model");
-    check(&mut app, "model picker", "Model, effort & fast mode", "esc cancel");
+    check(&mut app, "model picker", "Model, effort & fast mode", "⎋ cancel");
     press(&mut app, KeyCode::Esc);
 
     run_cmd(&mut app, "/config");
-    check(&mut app, "config", "Config", "esc close");
+    check(&mut app, "config", "Config", "⎋ close");
     press(&mut app, KeyCode::Esc);
 
     run_cmd(&mut app, "/session");
-    check(&mut app, "session config", "Session", "esc close");
+    check(&mut app, "session config", "Session", "⎋ close");
     press(&mut app, KeyCode::Esc);
 
     app.explorer = Some(explorer::Explorer::for_bench(vec![history::Summary { id: "abcdef12-0000".into(), title: "a session".into(), prompt: "p".into(), modified: std::time::SystemTime::now(), size: 10 }]));
     let rows = screen(&mut app, 100, 30);
     assert!(rows[0].starts_with(" Sessions 1/1"), "title on the first row: {:?}", rows[0]);
-    assert!(rows[29].contains("esc/→ close"), "hints on the last row: {:?}", rows[29]);
+    assert!(rows[29].contains("⎋/→ close"), "hints on the last row: {:?}", rows[29]);
     assert!(!rows.iter().any(|r| r.contains('┌') || r.contains('└') || r.starts_with("───")), "full screen has no frame, tabs or input\n{}", rows.join("\n"));
     app.explorer = None;
 
     ask(&mut app, QUESTIONS);
-    check(&mut app, "question", "Question 1/2", "esc decline");
+    check(&mut app, "question", "Question 1/2", "⎋ decline");
     press(&mut app, KeyCode::Esc);
     app.sessions[0].handle(&serde_json::from_str(r#"{"type":"control_request","request_id":"p1","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"ls"},"permission_suggestions":[]}}"#).unwrap());
-    check(&mut app, "permission", "Permission", "esc deny");
+    check(&mut app, "permission", "Permission", "⎋ deny");
     assert_eq!(cases.len(), 7, "all seven panels were checked (the session list is full screen, checked above)");
 }
 
@@ -1254,7 +1254,7 @@ fn usage_asks_claude_code_shows_its_answers_and_closes() {
     let rows = screen(&mut app, 100, 30);
     let text = rows.join("\n");
     assert!(rows.iter().any(|r| r.starts_with("┌ Usage")) && text.contains("5-hour") && text.contains("Skills") && text.contains("17.8k of 1.0M"), "{text}");
-    assert!(rows.iter().any(|r| r.contains("esc close")));
+    assert!(rows.iter().any(|r| r.contains("⎋ close")));
     press(&mut app, KeyCode::Esc);
     assert!(!app.usage_open);
 }

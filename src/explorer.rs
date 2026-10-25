@@ -128,14 +128,7 @@ impl Explorer {
         let first = if m.len() <= room { 0 } else { self.sel.saturating_sub(room / 2).min(m.len() - room) };
         for (k, &i) in m.iter().enumerate().skip(first).take(room) {
             let r = &self.rows[i];
-            let glyph = match r.state {
-                Some(State::Blocked) => "!",
-                Some(State::Working) => "~",
-                Some(State::Failed) => "x",
-                Some(State::Done) => "✓",
-                Some(State::Stopped) => "·",
-                None => " ",
-            };
+            let glyph = r.state.map_or(" ", State::glyph);
             let title = if !r.title.is_empty() { &*r.title } else if !r.detail.is_empty() { &*r.detail } else { "(empty)" };
             let text: String = title.chars().take(width.saturating_sub(6)).collect();
             let dot = if self.open.contains(&r.id) { theme::CURRENT } else { " " };
@@ -213,14 +206,13 @@ impl Explorer {
     }
 
     fn state_cell(r: &Row) -> Span<'static> {
-        let (text, style) = match r.state {
-            Some(State::Blocked) => ("needs you", theme::attention()),
-            Some(State::Working) => ("working", theme::accent()),
-            Some(State::Failed) => ("failed", theme::danger()),
-            Some(s) => (s.label(), theme::dim()),
-            None => ("", theme::dim()),
+        let style = match r.state {
+            Some(State::Blocked) => theme::attention(),
+            Some(State::Working) => theme::accent(),
+            Some(State::Failed) => theme::danger(),
+            _ => theme::dim(),
         };
-        Span::styled(format!("{text:<9} "), style)
+        Span::styled(format!("{} ", r.state.map_or(" ", State::glyph)), style)
     }
 
     /// The panel for this explorer: a pinned filter box, the matching sessions, and (on wide screens) a

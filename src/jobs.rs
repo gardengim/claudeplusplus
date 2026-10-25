@@ -36,6 +36,16 @@ impl State {
             State::Stopped => "stopped",
         }
     }
+    /// One glyph per state, the same in the session list, the dock and the tab bar.
+    pub fn glyph(self) -> &'static str {
+        match self {
+            State::Blocked => "◆",
+            State::Working => "◐",
+            State::Failed => "✗",
+            State::Done => "✓",
+            State::Stopped => "·",
+        }
+    }
     /// Another process owns the conversation, so a headless `--resume` of it is refused.
     pub fn live(self) -> bool {
         matches!(self, State::Blocked | State::Working)

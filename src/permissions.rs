@@ -31,6 +31,9 @@ impl Behavior {
     fn label(self) -> &'static str {
         match self { Behavior::Allow => "Allow", Behavior::Ask => "Ask", Behavior::Deny => "Deny" }
     }
+    fn glyph(self) -> &'static str {
+        match self { Behavior::Allow => theme::ALLOW, Behavior::Ask => theme::ASK, Behavior::Deny => theme::DENY }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -44,6 +47,9 @@ impl Scope {
     pub const ALL: [Scope; 3] = [Scope::Local, Scope::Project, Scope::User];
     pub fn name(self) -> &'static str {
         match self { Scope::User => "user", Scope::Project => "project", Scope::Local => "local" }
+    }
+    fn glyph(self) -> &'static str {
+        match self { Scope::User => "⌂", Scope::Project => "▤", Scope::Local => "◇" }
     }
     fn blurb(self) -> &'static str {
         match self {
@@ -210,7 +216,7 @@ pub fn view(ui: &Ui, width: usize) -> View {
             .iter()
             .flat_map(|b| {
                 let n = ui.rules.iter().filter(|r| r.behavior == *b).count();
-                [Span::styled(format!(" {} {n} ", b.label()), if *b == ui.tab { theme::selected() } else { theme::dim() }), Span::raw(" ")]
+                [Span::styled(format!(" {} {} {n} ", b.glyph(), b.label()), if *b == ui.tab { theme::selected() } else { theme::dim() }), Span::raw(" ")]
             })
             .collect::<Vec<_>>(),
     )];
@@ -224,14 +230,14 @@ pub fn view(ui: &Ui, width: usize) -> View {
     for (i, r) in shown.iter().enumerate() {
         let on = sel == i + 1;
         let over = ui.overridden_by(r);
-        let src = match r.source { Source::File(s) => s.name(), Source::Tab => "this tab" };
+        let src = match r.source { Source::File(s) => format!("{} {}", s.glyph(), s.name()), Source::Tab => "◦ this tab".to_string() };
         let confirm = matches!(ui.stage, Stage::Confirm(n) if n == i);
         let mut v = vec![Span::styled(r.text.clone(), if over.is_some() { theme::dim() } else if on { theme::bold() } else { Style::new() }), Span::raw("  "), Span::styled(src, theme::dim())];
         if let Some(b) = over {
             v.push(Span::styled(format!("  overridden by {}", b.key()), theme::dim()));
         }
         if confirm {
-            v.push(Span::styled("  press d again to delete", theme::danger()));
+            v.push(Span::styled("  d again to delete", theme::danger()));
         }
         body.push(row_with(on, false, v));
     }
@@ -240,7 +246,7 @@ pub fn view(ui: &Ui, width: usize) -> View {
         Stage::Where(rule, w) => {
             tail.push(Line::from(vec![Span::styled("save ", theme::dim()), Span::styled(rule.clone(), theme::bold()), Span::styled(format!(" as {} in:", ui.tab.key()), theme::dim())]));
             for (i, s) in Scope::ALL.iter().enumerate() {
-                tail.push(row_with(i == *w, false, vec![Span::styled(format!("{:<8}", s.name()), if i == *w { theme::bold() } else { Style::new() }), Span::styled(s.blurb(), theme::dim())]));
+                tail.push(row_with(i == *w, false, vec![Span::styled(format!("{} {:<8}", s.glyph(), s.name()), if i == *w { theme::bold() } else { Style::new() }), Span::styled(s.blurb(), theme::dim())]));
             }
             String::new()
         }

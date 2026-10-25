@@ -57,6 +57,47 @@ pub fn mode(mode: &str) -> Style {
 pub const CURRENT: &str = "●";
 /// Marker in front of the row the cursor is on in choice lists.
 pub const CURSOR: &str = "❯";
+/// Checkbox states, the same in every list: shown, hidden, some of the children, shortened.
+pub const ON: &str = "☑";
+pub const OFF: &str = "☐";
+pub const PART: &str = "▣";
+pub const BRIEF: &str = "◑";
+/// Rule verdicts. Single-width glyphs only: no emoji, so columns never shift.
+pub const ALLOW: &str = "✓";
+pub const ASK: &str = "?";
+pub const DENY: &str = "✗";
+/// Tree rows, closed and open.
+pub const CLOSED: &str = "▸";
+pub const OPEN: &str = "▾";
+
+/// One choice in a row of choices: a dot marks the value in effect (in `hue`), the others recede, and the
+/// choice the cursor is on is reversed.
+pub fn chip(label: &str, current: bool, cursor: bool, hue: Style) -> Span<'static> {
+    let style = if cursor { selected() } else if current { hue } else { dim() };
+    Span::styled(format!(" {}{label} ", if current { CURRENT } else { " " }), style)
+}
+
+/// A key as drawn in a hint: words become the symbols Mac keyboards print, so a footer scans by shape.
+fn key_glyph(key: &str) -> String {
+    key.split('+')
+        .map(|k| {
+            k.split('/')
+                .map(|w| match w {
+                    "esc" => "⎋",
+                    "enter" => "⏎",
+                    "space" => "␣",
+                    "tab" => "⇥",
+                    "ctrl" => "⌃",
+                    "alt" => "⌥",
+                    "shift" => "⇧",
+                    w => w,
+                })
+                .collect::<Vec<_>>()
+                .join("/")
+        })
+        .collect::<Vec<_>>()
+        .join("")
+}
 
 /// A bordered box. `blocking` boxes are the agent asking you something (yellow); the rest are things you
 /// opened yourself (cyan). The colour tells you who is waiting on whom.
@@ -71,7 +112,7 @@ pub fn hints(items: &[(&str, &str)]) -> Line<'static> {
         if i > 0 {
             spans.push(Span::styled(" · ", dim()));
         }
-        spans.push(Span::styled(key.to_string(), bold()));
+        spans.push(Span::styled(key_glyph(key), bold()));
         spans.push(Span::styled(format!(" {action}"), dim()));
     }
     Line::from(spans)
@@ -111,13 +152,21 @@ mod tests {
     use super::*;
 
     #[test]
+    fn every_glyph_is_one_column_wide() {
+        use unicode_width::UnicodeWidthStr;
+        for g in [ON, OFF, PART, BRIEF, ALLOW, ASK, DENY, CLOSED, OPEN, CURRENT, CURSOR, "⌂", "▤", "◇", "◦", "◐", "◆", "⎋", "⏎", "␣", "⇥", "⌃", "⌥", "⇧", "⏵", "◷", "≡", "±", "⌕", "◎", "◈", "✦"] {
+            assert_eq!(g.width(), 1, "{g} would shift columns");
+        }
+    }
+
+    #[test]
     fn narrow_footers_keep_the_first_and_last_hint() {
         let full = hints(&[("↑↓", "move"), ("enter", "choose"), ("1-9", "pick"), ("esc", "decline")]);
         let text = |l: &Line| l.spans.iter().map(|s| s.content.as_ref()).collect::<String>();
-        assert_eq!(text(&fit_hints(full.clone(), 80)), " ↑↓ move · enter choose · 1-9 pick · esc decline");
-        assert_eq!(text(&fit_hints(full.clone(), 38)), " ↑↓ move · enter choose · esc decline");
-        assert_eq!(text(&fit_hints(full.clone(), 20)), " ↑↓ move · esc decline");
-        assert_eq!(text(&fit_hints(full, 5)), " ↑↓ move · esc decline", "never fewer than two; the renderer clips the rest");
+        assert_eq!(text(&fit_hints(full.clone(), 80)), " ↑↓ move · ⏎ choose · 1-9 pick · ⎋ decline");
+        assert_eq!(text(&fit_hints(full.clone(), 38)), " ↑↓ move · ⏎ choose · ⎋ decline");
+        assert_eq!(text(&fit_hints(full.clone(), 20)), " ↑↓ move · ⎋ decline");
+        assert_eq!(text(&fit_hints(full, 5)), " ↑↓ move · ⎋ decline", "never fewer than two; the renderer clips the rest");
     }
 
     /// The consistency rule, enforced: surfaces name roles ("selected", "dim", "attention"), never colours.
@@ -148,7 +197,7 @@ mod tests {
     fn hints_have_one_shape() {
         let l = hints(&[("↑↓", "move"), ("enter", "choose"), ("esc", "back")]);
         let text: String = l.spans.iter().map(|s| s.content.as_ref()).collect();
-        assert_eq!(text, " ↑↓ move · enter choose · esc back");
+        assert_eq!(text, " ↑↓ move · ⏎ choose · ⎋ back");
         assert!(l.spans[1].style.add_modifier.contains(Modifier::BOLD), "keys are bold");
         assert_eq!(l.spans[2].style.fg, Some(Color::DarkGray), "actions recede");
     }

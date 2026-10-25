@@ -358,22 +358,22 @@ pub fn view(ui: &Ui, width: usize) -> View {
             let (mark, label, size) = match *row {
                 Row::File(f) => {
                     let (keep, gone) = ui.sizes(f);
-                    let m = match ui.state(f) { 2 => "[x]", 1 => "[-]", _ => "[ ]" };
-                    let open = if ui.open.contains(&f) { "▾" } else { "▸" };
+                    let m = match ui.state(f) { 2 => theme::ON, 1 => theme::PART, _ => theme::OFF };
+                    let open = if ui.open.contains(&f) { theme::OPEN } else { theme::CLOSED };
                     let tail = if gone > 0 { format!("{} of {}", est(keep), est(keep + gone)) } else { est(keep) };
-                    (m, format!("{open} {}  ({} sections)", short(&ui.files[f].path), ui.files[f].secs.len()), tail)
+                    (m, format!("{open} {} · {}", short(&ui.files[f].path), ui.files[f].secs.len()), tail)
                 }
                 Row::Sec(f, s) => {
                     let sec = &ui.files[f].secs[s];
                     let off = hidden(&ui.files[f].secs, &ui.set(f), s);
                     let short = !off && brief(&ui.files[f].secs, &ui.set(f), s);
-                    (if off { "[ ]" } else if short { "[~]" } else { "[x]" }, format!("{}{}", "  ".repeat(sec.depth + 1), sec.title), est(sec.bytes))
+                    (if off { theme::OFF } else if short { theme::BRIEF } else { theme::ON }, format!("{}{}", "  ".repeat(sec.depth + 1), sec.title), est(sec.bytes))
                 }
             };
-            let off = mark == "[ ]";
+            let off = mark == theme::OFF;
             let style = if on { theme::bold() } else if off { theme::dim() } else { Style::new() };
             let pad = width.saturating_sub(12).saturating_sub(label.chars().count()).saturating_sub(size.chars().count()).max(1);
-            row_with(on, false, vec![Span::styled(format!("{mark} "), if off { theme::dim() } else { theme::ok() }), Span::styled(label.chars().take(width.saturating_sub(20)).collect::<String>(), style), Span::raw(" ".repeat(pad)), Span::styled(size, theme::dim())])
+            row_with(on, false, vec![Span::styled(format!("{mark} "), if off { theme::dim() } else if mark == theme::ON { theme::ok() } else { theme::accent() }), Span::styled(label.chars().take(width.saturating_sub(20)).collect::<String>(), style), Span::raw(" ".repeat(pad)), Span::styled(size, theme::dim())])
         })
         .collect();
     let (keep, gone) = ui.total();
@@ -392,7 +392,7 @@ pub fn view(ui: &Ui, width: usize) -> View {
         }
         Row::File(f) => vec![Line::styled(ui.files[f].path.clone(), theme::dim())],
     };
-    View::new("Instructions", body, sel, theme::hints(&[("↑↓", "move"), ("space", "show/hide"), ("b", "brief"), ("→←", "sections"), ("esc", "close")])).with_tail(tail).with_side(side).rows(0, 16)
+    View::new("Instructions", body, sel, theme::hints(&[("↑↓", "move"), ("space", "show/hide"), ("b", "brief"), ("→←", "fold"), ("esc", "close")])).with_tail(tail).with_side(side).rows(0, 16)
 }
 
 #[cfg(test)]
@@ -434,7 +434,7 @@ mod tests {
         let v = view(&ui, 80);
         let text = |l: &Line| l.spans.iter().map(|s| s.content.as_ref()).collect::<String>();
         let body: Vec<String> = v.body.iter().map(text).collect();
-        assert!(body[f].contains("[-]") && body[f + 1].contains("[x]   (intro)") && body.iter().any(|l| l.contains("[ ] ") && l.contains("B")), "{body:?}");
+        assert!(body[f].contains("▣") && body[f + 1].contains("☑   (intro)") && body.iter().any(|l| l.contains("☐ ") && l.contains("B")), "{body:?}");
         assert!(v.tail.iter().any(|l| text(l).contains("hidden")));
     }
 

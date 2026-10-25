@@ -42,7 +42,13 @@ Key hints are always one line in one shape, built by `theme::hints`: **`key` act
 | `dim` | Descriptions, hints, separators, work still in progress. |
 | `selected` | The row under the cursor (reverse video). |
 | `code` | Code, commands, file contents. |
-| `❯` cursor · `●` current value · `☐ ☑` checkbox · `✓ ✗` done/missing | Same marks in every list. |
+| `❯` cursor · `●` value in effect · `☑ ☐ ▣ ◑` shown / hidden / some / shortened | Same marks in every list; choices are `●value  value`, not words in brackets. |
+| `✓ ? ✗` allow / ask / deny · `⌂ ▤ ◇` user / project / local file | Rules and where they live. |
+| `◆ ◐ ✓ ✗ ·` needs you / working / done / failed / stopped | One state glyph in the tab bar, dock and session list (`jobs::State::glyph`). |
+| `$ ≡ ± + ⌕ ◎ ◈` | Bash, read, edit, write, search, web, agent: a tool call is its glyph plus what it touched. Unknown tools keep `Name(...)`. |
+| `⏎ ⎋ ␣ ⇥ ⌃ ⌥ ⇧` | Keys in hint footers (`theme::hints` converts the words). |
+
+Glyphs are single-column and non-emoji (`theme::tests::every_glyph_is_one_column_wide`), so columns never shift. A glyph carries state; a word appears only where the glyph alone would be ambiguous.
 
 The colour of a frame tells you who is waiting on whom: yellow, the agent waits on you; cyan, you opened it.
 

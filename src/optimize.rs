@@ -407,7 +407,7 @@ pub fn view(ui: &Ui, width: usize) -> View {
     let head = vec![Line::from(
         Level::ALL
             .iter()
-            .flat_map(|l| [Span::styled(format!(" {} ", l.name()), if *l == ui.level { theme::selected() } else { theme::dim() }), Span::raw(" ")])
+            .flat_map(|l| [theme::chip(l.name(), *l == ui.level, *l == ui.level, theme::bold()), Span::raw(" ")])
             .collect::<Vec<_>>(),
     )];
     if ui.loading {
@@ -429,7 +429,7 @@ pub fn view(ui: &Ui, width: usize) -> View {
         let label: String = it.label.chars().take(width.saturating_sub(24)).collect();
         let pad = width.saturating_sub(12).saturating_sub(label.chars().count()).saturating_sub(size.chars().count()).max(1);
         let style = if n == sel { theme::bold() } else if it.on { ratatui::style::Style::new() } else { theme::dim() };
-        body.push(row_with(n == sel, false, vec![Span::styled(if it.on { "[x] " } else { "[ ] " }, if it.on { theme::ok() } else { theme::dim() }), Span::styled(label, style), Span::raw(" ".repeat(pad)), Span::styled(size, theme::dim())]));
+        body.push(row_with(n == sel, false, vec![Span::styled(if it.on { "☑ " } else { "☐ " }, if it.on { theme::ok() } else { theme::dim() }), Span::styled(label, style), Span::raw(" ".repeat(pad)), Span::styled(size, theme::dim())]));
     }
     let ev = ui.ev.clone().unwrap_or_default();
     let mut tail = vec![Line::raw("")];
