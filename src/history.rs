@@ -3,7 +3,8 @@
 //! to Claude Code, so parsing is lenient: anything not recognised is skipped.
 
 use serde_json::Value;
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
+use std::sync::Mutex;
 use std::io::{BufRead, BufReader, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
@@ -19,6 +20,8 @@ pub struct Summary {
     pub prompt: String,
     pub modified: SystemTime,
     pub size: u64,
+    /// The directory the conversation ran in (empty if the transcript does not say).
+    pub cwd: String,
 }
 
 fn projects_dir() -> Option<PathBuf> {
@@ -62,12 +65,22 @@ pub fn transcripts(cwd: &str, n: usize) -> Vec<PathBuf> {
 
 /// Most recent sessions for a working directory, newest first.
 pub fn recent(cwd: &str, n: usize) -> Vec<Summary> {
-    projects_dir().map(|d| recent_in(&d.join(encode_cwd(cwd)), n)).unwrap_or_default()
+    projects_dir().map(|d| recent_in(&[d.join(encode_cwd(cwd))], n)).unwrap_or_default()
 }
 
-fn recent_in(dir: &Path, n: usize) -> Vec<Summary> {
-    let Ok(rd) = std::fs::read_dir(dir) else { return vec![] };
-    let mut files: Vec<(PathBuf, SystemTime)> = rd
+/// Most recent sessions of every project, newest first: a conversation you closed in another folder
+/// is still one you want back.
+pub fn recent_all(n: usize) -> Vec<Summary> {
+    let Some(root) = projects_dir() else { return vec![] };
+    let dirs: Vec<PathBuf> = std::fs::read_dir(root).into_iter().flatten().flatten().map(|d| d.path()).filter(|p| p.is_dir()).collect();
+    recent_in(&dirs, n)
+}
+
+fn recent_in(dirs: &[PathBuf], n: usize) -> Vec<Summary> {
+    let mut files: Vec<(PathBuf, SystemTime)> = dirs
+        .iter()
+        .filter_map(|d| std::fs::read_dir(d).ok())
+        .flatten()
         .flatten()
         .filter(|e| e.path().extension().is_some_and(|x| x == "jsonl"))
         .filter_map(|e| Some((e.path(), e.metadata().ok()?.modified().ok()?)))
@@ -77,16 +90,31 @@ fn recent_in(dir: &Path, n: usize) -> Vec<Summary> {
     files
         .into_iter()
         .map(|(p, modified)| {
-            let (title, prompt) = titles(&p);
-            Summary {
-                id: p.file_stem().unwrap_or_default().to_string_lossy().into_owned(),
-                title,
-                prompt,
-                modified,
-                size: std::fs::metadata(&p).map_or(0, |m| m.len()),
-            }
+            let size = std::fs::metadata(&p).map_or(0, |m| m.len());
+            let (title, prompt, cwd) = cached_titles(&p, modified, size);
+            Summary { id: p.file_stem().unwrap_or_default().to_string_lossy().into_owned(), title, prompt, modified, size, cwd }
         })
         .collect()
+}
+
+type Titles = (String, String, String);
+type Cached = (SystemTime, u64, Titles);
+
+/// Listing re-reads often (the side panel refreshes); a transcript is only re-read when it changed.
+fn cached_titles(path: &Path, modified: SystemTime, size: u64) -> Titles {
+    static CACHE: Mutex<Option<HashMap<PathBuf, Cached>>> = Mutex::new(None);
+    if let Ok(c) = CACHE.lock()
+        && let Some((m, sz, t)) = c.as_ref().and_then(|c| c.get(path))
+        && *m == modified
+        && *sz == size
+    {
+        return t.clone();
+    }
+    let t = titles(path);
+    if let Ok(mut c) = CACHE.lock() {
+        c.get_or_insert_with(HashMap::new).insert(path.to_path_buf(), (modified, size, t.clone()));
+    }
+    t
 }
 
 /// How much of a transcript's end is scanned for titles and previews, to keep listing cheap.
@@ -96,23 +124,23 @@ fn squash(t: &str, n: usize) -> String {
     t.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(n).collect()
 }
 
-/// (display title, first prompt). Titles are appended as the session goes, so the tail is scanned too.
-fn titles(path: &Path) -> (String, String) {
-    let (custom, ai, prompt) = names(path);
+/// (display title, first prompt, directory). Titles are appended as the session goes, so the tail is scanned too.
+fn titles(path: &Path) -> Titles {
+    let (custom, ai, prompt, cwd) = names(path);
     let title = [custom, ai].into_iter().find(|t| !t.trim().is_empty()).map_or_else(|| squash(&prompt, 60), |t| squash(&t, 60));
-    (title, prompt)
+    (title, prompt, cwd)
 }
 
 /// The name a session shows elsewhere: the `/rename` or `--name` title, else the generated one.
 pub fn session_name(path: &Path) -> Option<String> {
-    let (custom, ai, _) = names(path);
+    let (custom, ai, ..) = names(path);
     [custom, ai].into_iter().find(|t| !t.trim().is_empty())
 }
 
-/// (custom title, generated title, first prompt), each empty if absent.
-fn names(path: &Path) -> (String, String, String) {
+/// (custom title, generated title, first prompt, directory), each empty if absent.
+fn names(path: &Path) -> (String, String, String, String) {
     let Ok(mut f) = std::fs::File::open(path) else { return Default::default() };
-    let (mut custom, mut ai, mut prompt) = (String::new(), String::new(), String::new());
+    let (mut custom, mut ai, mut prompt, mut cwd) = (String::new(), String::new(), String::new(), String::new());
     let mut title_line = |line: &str| {
         let (key, out) = if line.contains("\"type\":\"custom-title\"") {
             ("customTitle", &mut custom)
@@ -137,17 +165,20 @@ fn names(path: &Path) -> (String, String, String) {
         }
     }
     if let Ok(f) = std::fs::File::open(path) {
-        prompt = BufReader::new(f)
-            .lines()
-            .take(300)
-            .map_while(Result::ok)
-            .filter(|l| l.contains("\"type\":\"user\""))
-            .filter_map(|l| serde_json::from_str::<Value>(&l).ok())
-            .find_map(|v| user_text(&v))
-            .map(|t| squash(&t, 200))
-            .unwrap_or_default();
+        let users = BufReader::new(f).lines().take(300).map_while(Result::ok).filter(|l| l.contains("\"type\":\"user\"")).filter_map(|l| serde_json::from_str::<Value>(&l).ok());
+        for v in users {
+            if cwd.is_empty() {
+                cwd = v["cwd"].as_str().unwrap_or_default().to_string();
+            }
+            if prompt.is_empty() {
+                prompt = user_text(&v).map(|t| squash(&t, 200)).unwrap_or_default();
+            }
+            if !cwd.is_empty() && !prompt.is_empty() {
+                break;
+            }
+        }
     }
-    (custom, ai, prompt)
+    (custom, ai, prompt, cwd)
 }
 
 /// The last few exchanges of a transcript as (is_user, text), read from its tail only.
@@ -285,7 +316,7 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(30));
         std::fs::write(dir.join("bbb.jsonl"), line("newer prompt")).unwrap();
         std::fs::write(dir.join("notes.txt"), "x").unwrap();
-        let r = recent_in(&dir, 5);
+        let r = recent_in(std::slice::from_ref(&dir), 5);
         assert_eq!(r.iter().map(|s| (s.id.as_str(), s.title.as_str())).collect::<Vec<_>>(), vec![("bbb", "newer prompt"), ("aaa", "older prompt")]);
     }
 
@@ -293,7 +324,7 @@ mod tests {
     fn titles_prefer_rename_then_generated_then_first_prompt() {
         let dir = std::env::temp_dir().join(format!("claudeplusplus-titles-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        let user = "{\"type\":\"user\",\"message\":{\"content\":\"first prompt here\"}}\n";
+        let user = "{\"type\":\"user\",\"cwd\":\"/work/app\",\"message\":{\"content\":\"first prompt here\"}}\n";
         let ai = "{\"type\":\"ai-title\",\"aiTitle\":\"Generated\"}\n";
         let custom = "{\"type\":\"custom-title\",\"customTitle\":\"Renamed\"}\n";
         let t = |name: &str, body: String| {
@@ -301,7 +332,7 @@ mod tests {
             std::fs::write(&p, body).unwrap();
             titles(&p)
         };
-        assert_eq!(t("a", user.into()), ("first prompt here".into(), "first prompt here".into()));
+        assert_eq!(t("a", user.into()), ("first prompt here".into(), "first prompt here".into(), "/work/app".into()));
         assert_eq!(t("b", format!("{user}{ai}")).0, "Generated");
         assert_eq!(t("c", format!("{user}{ai}{custom}")).0, "Renamed");
         // A title appended after a long body is found through the tail scan.

@@ -86,7 +86,7 @@ pub struct Explorer {
 fn merge(here: &str, items: Vec<Summary>, jobs: Vec<Job>) -> Vec<Row> {
     let mut rows: Vec<Row> = items
         .into_iter()
-        .map(|s| Row { id: s.id, short: None, title: s.title.into(), detail: s.prompt.into(), cwd: "".into(), state: None, base: None, tab: false, modified: s.modified, size: s.size })
+        .map(|s| Row { id: s.id, short: None, title: s.title.into(), detail: s.prompt.into(), cwd: if s.cwd == here { "".into() } else { s.cwd.into() }, state: None, base: None, tab: false, modified: s.modified, size: s.size })
         .collect();
     for j in jobs {
         let cwd: Box<str> = if &*j.cwd == here { "".into() } else { j.cwd };
@@ -109,7 +109,7 @@ fn merge(here: &str, items: Vec<Summary>, jobs: Vec<Job>) -> Vec<Row> {
 
 impl Explorer {
     pub fn new(cwd: &str, open: Vec<(String, State)>) -> Self {
-        Self::from(cwd, history::recent(cwd, MAX_SESSIONS), jobs::load(), open)
+        Self::from(cwd, history::recent_all(MAX_SESSIONS), jobs::load(), open)
     }
 
     #[cfg(test)]
@@ -276,7 +276,7 @@ impl Explorer {
     /// Re-read the sources, keeping the cursor on the same session.
     pub fn refresh(&mut self, here: &str, open: Vec<(String, State)>) {
         let keep = self.cur().map(|i| self.rows[i].id.clone());
-        self.rows = merge(here, history::recent(here, MAX_SESSIONS), jobs::load());
+        self.rows = merge(here, history::recent_all(MAX_SESSIONS), jobs::load());
         self.set_open(open);
         self.seek(keep);
     }
@@ -474,7 +474,7 @@ mod tests {
     use std::time::Duration;
 
     fn sum(id: &str, title: &str, prompt: &str) -> Summary {
-        Summary { id: id.into(), title: title.into(), prompt: prompt.into(), modified: SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000), size: 2048 }
+        Summary { id: id.into(), title: title.into(), prompt: prompt.into(), modified: SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000), size: 2048, cwd: String::new() }
     }
     fn key(c: KeyCode) -> KeyEvent {
         KeyEvent::new(c, KeyModifiers::NONE)
