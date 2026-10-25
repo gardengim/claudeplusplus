@@ -197,7 +197,15 @@ fn tab_line(app: &App) -> Line<'static> {
         };
         let title = if s.title.is_empty() { "new" } else { &s.title };
         let style = if i == app.active { theme::selected() } else { theme::dim() };
-        spans.push(Span::styled(format!(" {}{mark}{title} ", i + 1), style));
+        let mark_style = match (i == app.active, mark) {
+            (true, _) => style,
+            (_, "◆") => theme::attention(),
+            (_, "◐") => theme::accent(),
+            _ => style,
+        };
+        spans.push(Span::styled(format!(" {}", i + 1), style));
+        spans.push(Span::styled(mark.to_string(), mark_style));
+        spans.push(Span::styled(format!("{title} "), style));
         spans.push(Span::raw(" "));
     }
     Line::from(spans)
@@ -319,12 +327,13 @@ fn tool_lines(
     };
     let pad = if nested { "    " } else { "" };
     let summary = tool_summary(name, input, cwd);
-    let head = match tool_icon(name) {
-        Some(icon) => format!("{pad}{}{icon} {summary}", if nested { "↳ " } else { "" }),
-        None => format!("{pad}{}{name}({summary})", if nested { "↳ " } else { "● " }),
+    let (lead, text) = match tool_icon(name) {
+        Some(icon) => (format!("{pad}{}{icon} ", if nested { "↳ " } else { "" }), summary),
+        None => (format!("{pad}{}", if nested { "↳ " } else { "● " }), format!("{name}({summary})")),
     };
-    let head: String = truncate(&head, width);
-    out.push(Line::from(Span::styled(head, role.add_modifier(Modifier::BOLD))));
+    let text = truncate(&text, width.saturating_sub(lead.width()));
+    let icon_style = if tool_icon(name).is_some() { theme::tool_hue(name) } else { role }.add_modifier(Modifier::BOLD);
+    out.push(Line::from(vec![Span::styled(lead, icon_style), Span::styled(text, role.add_modifier(Modifier::BOLD))]));
     if nested {
         out.remove(0); // subagent steps render as a compact list
         return;
@@ -440,35 +449,42 @@ fn status_line(app: &App, f_height: u16) -> Line<'static> {
     if let Some(m) = mode {
         spans.push(Span::styled(format!("{m}  "), mode_style));
     }
-    let mut parts = vec![];
+    let mut parts: Vec<(String, Style)> = vec![];
     if !s.model.is_empty() && !ext {
         let base = if s.effort.is_empty() { s.model.clone() } else { format!("{} {}", s.model, s.effort) };
-        parts.push(if s.fast_mode { format!("{base} ↯") } else { base });
+        parts.push((if s.fast_mode { format!("{base} ↯") } else { base }, theme::accent()));
     }
     if s.ctx_tokens > 0 && !ext {
-        parts.push(format!("ctx {}", human(s.ctx_tokens)));
+        // the context filling up is the one number worth a warning colour
+        let hot = s.ctx_tokens * 100 >= s.ctx_window.max(200_000) * 85;
+        parts.push((format!("ctx {}", human(s.ctx_tokens)), if hot { theme::danger() } else { theme::dim() }));
     }
     if s.prompt_total > 0 {
-        parts.push(format!("hit {:.0}%", 100.0 * s.cache_read as f64 / s.prompt_total as f64));
+        parts.push((format!("hit {:.0}%", 100.0 * s.cache_read as f64 / s.prompt_total as f64), theme::ok()));
     }
     if let Some(left) = s.cache_left(app.cache_ttl) {
-        parts.push(if left.is_zero() { "◷ cold".into() } else { format!("◷ {}m", left.as_secs().div_ceil(60)) });
+        parts.push(if left.is_zero() { ("◷ cold".into(), theme::danger()) } else { (format!("◷ {}m", left.as_secs().div_ceil(60)), theme::dim()) });
     }
     if !s.profile.is_empty() && s.profile != "full" {
-        parts.insert(0, s.profile.clone());
+        parts.insert(0, (s.profile.clone(), theme::mode("acceptEdits")));
     }
     if s.cost > 0.0 && !ext {
-        parts.push(format!("${:.3}", s.cost));
+        parts.push((format!("${:.3}", s.cost), theme::ok()));
     }
     if !s.rate.is_empty() && !ext {
-        parts.push(s.rate.clone());
+        parts.push((s.rate.clone(), theme::dim()));
     }
     let backends: u64 = app.sessions.iter().map(|s| s.mem_kb).sum();
-    parts.push(format!("mem {}M+{}M", backends / 1024, app.ui_mem_kb / 1024));
+    parts.push((format!("mem {}M+{}M", backends / 1024, app.ui_mem_kb / 1024), theme::dim()));
     if let Some(msg) = &app.flash {
         spans.insert(0, Span::styled(format!("{msg}  "), theme::accent()));
     }
-    spans.push(Span::styled(parts.join(" · "), theme::dim()));
+    for (i, (text, style)) in parts.into_iter().enumerate() {
+        if i > 0 {
+            spans.push(Span::styled(" · ", theme::dim()));
+        }
+        spans.push(Span::styled(text, style));
+    }
     Line::from(spans)
 }
 

@@ -39,6 +39,18 @@ pub fn code() -> Style {
     Style::new().fg(Color::LightBlue)
 }
 
+/// Per-kind hues for tool icons, so a run of tool calls separates at a glance. The line's own colour
+/// still says how the call went; the icon says what kind it was.
+pub fn tool_hue(name: &str) -> Style {
+    Style::new().fg(match name {
+        "Bash" => Color::LightBlue,
+        "Read" | "Glob" | "Grep" => Color::Magenta,
+        "Edit" | "Write" | "NotebookEdit" => Color::Indexed(208),
+        "WebFetch" | "WebSearch" => Color::Indexed(37),
+        _ => Color::Indexed(141),
+    })
+}
+
 pub fn bold() -> Style {
     Style::new().add_modifier(Modifier::BOLD)
 }
@@ -102,7 +114,8 @@ fn key_glyph(key: &str) -> String {
 /// A bordered box. `blocking` boxes are the agent asking you something (yellow); the rest are things you
 /// opened yourself (cyan). The colour tells you who is waiting on whom.
 pub fn frame(title: &str, blocking: bool) -> Block<'static> {
-    Block::bordered().title(format!(" {title} ")).border_style(if blocking { attention() } else { accent() })
+    let hue = if blocking { attention() } else { accent() };
+    Block::bordered().title(Span::styled(format!(" {title} "), hue.add_modifier(Modifier::BOLD))).border_style(hue)
 }
 
 /// One line of key hints, always in this shape: `key action · key action`. Keys are bold, actions dim.
@@ -112,7 +125,7 @@ pub fn hints(items: &[(&str, &str)]) -> Line<'static> {
         if i > 0 {
             spans.push(Span::styled(" · ", dim()));
         }
-        spans.push(Span::styled(key_glyph(key), bold()));
+        spans.push(Span::styled(key_glyph(key), accent().add_modifier(Modifier::BOLD)));
         spans.push(Span::styled(format!(" {action}"), dim()));
     }
     Line::from(spans)

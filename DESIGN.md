@@ -48,6 +48,8 @@ Key hints are always one line in one shape, built by `theme::hints`: **`key` act
 | `$ ≡ ± + ⌕ ◎ ◈` | Bash, read, edit, write, search, web, agent: a tool call is its glyph plus what it touched. Unknown tools keep `Name(...)`. |
 | `⏎ ⎋ ␣ ⇥ ⌃ ⌥ ⇧` | Keys in hint footers (`theme::hints` converts the words). |
 
+Colour is for meaning, never decoration: keys in hints and frame titles are cyan (yours to press), tool icons carry a hue per kind (`theme::tool_hue`) while the line colour says how the call went, tab marks and the status line colour only what needs noticing (hit rate and cost green; context over 85% and a cold cache red).
+
 Glyphs are single-column and non-emoji (`theme::tests::every_glyph_is_one_column_wide`), so columns never shift. A glyph carries state; a word appears only where the glyph alone would be ambiguous.
 
 The colour of a frame tells you who is waiting on whom: yellow, the agent waits on you; cyan, you opened it.

@@ -182,7 +182,7 @@ pub struct Session {
     lines_removed: u64,
     api_ms: u64,
     started: Instant,
-    ctx_window: u64,
+    pub ctx_window: u64,
     version: String,
     output_style: String,
     last_usage: Value,

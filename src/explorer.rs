@@ -124,7 +124,12 @@ impl Explorer {
         let m = self.matches();
         self.sel = self.sel.min(m.len().saturating_sub(1));
         let mut out = vec![Line::styled(" Sessions", theme::dim())];
-        let room = height.saturating_sub(1);
+        let keys = if focused {
+            vec![theme::hints(&[("↑↓", "move"), ("⏎", "open")]), theme::hints(&[("←", "wide"), ("→", "hide"), ("esc", "back")])]
+        } else {
+            vec![theme::hints(&[("ctrl+r", "focus")])]
+        };
+        let room = height.saturating_sub(1 + keys.len());
         let first = if m.len() <= room { 0 } else { self.sel.saturating_sub(room / 2).min(m.len() - room) };
         for (k, &i) in m.iter().enumerate().skip(first).take(room) {
             let r = &self.rows[i];
@@ -138,6 +143,8 @@ impl Explorer {
             }
             out.push(panel::row(k == self.sel && focused, spans));
         }
+        out.resize(height.saturating_sub(keys.len()).max(out.len()), Line::raw(""));
+        out.extend(keys);
         out
     }
 
