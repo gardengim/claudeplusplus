@@ -1547,3 +1547,17 @@ fn permissions_panel_adds_and_deletes_in_the_chosen_file_and_confirms_a_delete()
     press(&mut app, KeyCode::Esc);
     assert!(app.perms.is_none());
 }
+
+#[test]
+fn folded_groups_are_shared_between_the_full_list_and_the_side_panel() {
+    let (mut app, _d) = fake_app("folds");
+    let sum = |id: &str| history::Summary { id: id.into(), title: "t".into(), prompt: "p".into(), modified: std::time::SystemTime::now(), size: 10 };
+    app.explorer = Some(explorer::Explorer::for_bench(vec![sum("abcdef12-0000")]));
+    press(&mut app, KeyCode::Up); // onto the "earlier" heading
+    press(&mut app, KeyCode::Enter); // fold it
+    press(&mut app, KeyCode::Esc);
+    assert!(app.explorer.is_none());
+    assert_eq!(app.list_prefs.1, vec!["○ earlier".to_string()]);
+    app.show_dock(false);
+    assert_eq!(app.dock.as_ref().unwrap().folds(), ["○ earlier".to_string()], "the side panel opens with the same folds");
+}

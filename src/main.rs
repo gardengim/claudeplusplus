@@ -171,6 +171,8 @@ pub struct App {
     mouse: bool,
     pub dock: Option<explorer::Explorer>,
     pub dock_focus: bool,
+    /// Session-list preferences shared by the side panel and the full list, and saved: grouping, folded groups.
+    list_prefs: (u8, Vec<String>),
     /// The main area shows the side panel's highlighted stored conversation instead of the tab.
     pub dock_peek: bool,
     dock_at: Instant,
@@ -369,6 +371,12 @@ fn run(opts: Opts) -> io::Result<()> {
     }
     app.cache_ttl = Duration::from_secs(opts.cache_ttl_min.or(saved_num("cache_ttl_min")).unwrap_or(60) * 60);
     image::set_mode(&saved("images").unwrap_or_default());
+    if let Some(p) = config_path.as_deref() {
+        let folds = config::get_value(p, "session_folds").and_then(|v| v.as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect()));
+        let group = saved("session_group").and_then(|g| g.parse().ok()).unwrap_or(0);
+        explorer::set_group(group);
+        app.list_prefs = (explorer::group(), folds.unwrap_or_default());
+    }
     app.dock_mode = saved("side_panel").as_deref() == Some("on");
     if let Some(n) = saved("notify").filter(|n| ["off", "bell", "desktop"].contains(&n.as_str())) {
         app.notify = n;
@@ -486,6 +494,7 @@ impl App {
             mouse: true,
             dock: None,
             dock_focus: false,
+            list_prefs: (0, vec![]),
             dock_peek: false,
             dock_at: Instant::now(),
             known_commands: vec![],
@@ -1223,7 +1232,9 @@ impl App {
     fn show_dock(&mut self, focus: bool) {
         if self.dock.is_none() {
             let open = self.open_states();
-            self.dock = Some(explorer::Explorer::new(self.cwd(), open));
+            let mut d = explorer::Explorer::new(self.cwd(), open);
+            d.set_folds(self.list_prefs.1.clone());
+            self.dock = Some(d);
             self.dock_at = Instant::now();
         }
         self.dock_focus = focus;
@@ -1289,7 +1300,9 @@ impl App {
 
     fn open_explorer(&mut self) {
         let open = self.open_states();
-        self.explorer = Some(explorer::Explorer::new(self.cwd(), open));
+        let mut e = explorer::Explorer::new(self.cwd(), open);
+        e.set_folds(self.list_prefs.1.clone());
+        self.explorer = Some(e);
     }
 
     /// Reopen a stored conversation: switch to its tab if it is open, else use this tab when it is
@@ -1329,6 +1342,28 @@ impl App {
     }
 
     fn handle_key(&mut self, k: KeyEvent) {
+        self.handle_key_inner(k);
+        self.sync_list_prefs();
+    }
+
+    /// Whichever list the key touched, make the other agree and save: folds and grouping outlive both.
+    fn sync_list_prefs(&mut self) {
+        let from_ui = self.explorer.as_ref().or(self.dock.as_ref()).map(|e| e.folds().to_vec());
+        let prefs = (explorer::group(), from_ui.unwrap_or_else(|| self.list_prefs.1.clone()));
+        if prefs == self.list_prefs {
+            return;
+        }
+        self.list_prefs = prefs;
+        for e in self.dock.iter_mut().chain(self.explorer.iter_mut()) {
+            e.set_folds(self.list_prefs.1.clone());
+        }
+        if !cfg!(test) && let Some(p) = &self.config_path {
+            let _ = config::set_str(p, "session_group", &self.list_prefs.0.to_string());
+            let _ = config::set_value(p, "session_folds", serde_json::json!(self.list_prefs.1));
+        }
+    }
+
+    fn handle_key_inner(&mut self, k: KeyEvent) {
         let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
         let alt = k.modifiers.contains(KeyModifiers::ALT);
         if let Some(ex) = self.explorer.as_mut() {

@@ -28,6 +28,15 @@ enum Entry {
     Row(usize),
 }
 
+/// The grouping (0 by state, 1 recent, 2 by folder) is shared by every list; the app saves it.
+pub fn group() -> u8 {
+    GROUP.load(Ordering::Relaxed)
+}
+
+pub fn set_group(n: u8) {
+    GROUP.store(n % 3, Ordering::Relaxed);
+}
+
 pub enum Outcome {
     Stay,
     Close,
@@ -194,6 +203,15 @@ impl Explorer {
     fn seek(&mut self, id: Option<String>) {
         let e = self.entries();
         self.sel = id.and_then(|id| e.iter().position(|x| matches!(x, Entry::Row(i) if self.rows[*i].id == id))).unwrap_or(self.sel.min(e.len().saturating_sub(1)));
+    }
+
+    /// Folded headings are shared between the side panel and the full list, so the app hands them in.
+    pub fn set_folds(&mut self, folds: Vec<String>) {
+        self.folded = folds;
+    }
+
+    pub fn folds(&self) -> &[String] {
+        &self.folded
     }
 
     /// The first session, skipping headings (after typing in the filter).
