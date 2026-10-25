@@ -58,6 +58,7 @@ does this is `src/panel.rs` and nothing else draws a panel. A surface only build
 | permission, `AskUserQuestion` | `prompt.rs` | yellow | the panel's |
 | model / effort / fast mode | `ui::model_view` | cyan | the panel's |
 | config (`/config`) | `settings.rs` | cyan | the panel's |
+| optimize | `optimize.rs` | level chips in the head; ticked rows are applied; sizes dim at the right | the panel's |
 | permissions | `permissions.rs` | tabs Allow/Ask/Deny in the head; the file a rule comes from is dim; delete asks in red | the panel's |
 | instructions | `instructions.rs` | checkbox tree: `[x]` in, `[-]` partly, `[ ]` hidden (dim) | the panel's |
 | usage | `usage.rs` | the panel's; plan bars turn yellow at 70%, red at 90% | the panel's |

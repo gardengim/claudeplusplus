@@ -27,6 +27,8 @@ pub struct Ctx {
     pub tool_results: u64,
     pub attachments: u64,
     pub skills: (u64, u64),
+    /// (name, tokens) of each skill in the listing.
+    pub skill_list: Vec<(String, u64)>,
 }
 
 #[derive(Clone)]
@@ -68,6 +70,7 @@ pub fn parse_context(r: &Value) -> Option<Ctx> {
         tool_results: n(&mb["toolResultTokens"]),
         attachments: n(&mb["attachmentTokens"]),
         skills: (n(&r["skills"]["totalSkills"]), n(&r["skills"]["tokens"])),
+        skill_list: r["skills"]["skillFrontmatter"].as_array().into_iter().flatten().filter_map(|k| Some((k["name"].as_str()?.to_string(), n(&k["tokens"])))).collect(),
     })
 }
 

@@ -4,6 +4,7 @@ mod explorer;
 mod jobs;
 mod profile;
 mod instructions;
+mod optimize;
 mod permissions;
 mod tabcfg;
 mod usage;
@@ -94,7 +95,7 @@ IMAGES    ctrl+v, drag a file into the window or /img <path> to attach; pictures
           inline in kitty/Ghostty (CLAUDEPP_IMAGES=on|off overrides detection)";
 
 /// Commands claude++ handles itself: (name, argument hint, description).
-const LOCAL_COMMANDS: [(&str, &str, &str); 20] = [
+const LOCAL_COMMANDS: [(&str, &str, &str); 21] = [
     ("new", "[profile]", "open a new tab"),
     ("profile", "[name] [--hard]", "show or change this tab's profile"),
     ("close", "", "close this tab"),
@@ -110,6 +111,7 @@ const LOCAL_COMMANDS: [(&str, &str, &str); 20] = [
     ("config", "", "claude++'s own config"),
     ("session", "", "this tab's permission mode and tool rules"),
     ("usage", "", "where this tab's context goes, and your plan limits"),
+    ("optimize", "[light|balanced|aggressive|off|now]", "trim this project's start-up context from evidence (reversible)"),
     ("permissions", "", "saved allow/ask/deny rules from your settings files: add and delete"),
     ("instructions", "", "tick CLAUDE.md / AGENTS.md files and sections in or out of new sessions"),
     ("statusline", "[claude|builtin]", "choose which status line to show"),
@@ -182,6 +184,7 @@ pub struct App {
     pub tabcfg: Option<tabcfg::Ui>,
     pub instr: Option<instructions::Ui>,
     pub perms: Option<permissions::Ui>,
+    pub opt: Option<optimize::Ui>,
     pub usage_open: bool,
     /// File index for `@`, rebuilt when the popup opens and the list is older than 30 s.
     files: Vec<String>,
@@ -490,6 +493,7 @@ impl App {
             tabcfg: None,
             instr: None,
             perms: None,
+            opt: None,
             usage_open: false,
             files: vec![],
             files_at: None,
@@ -530,7 +534,7 @@ impl App {
     pub fn placeholder(&self) -> &'static str {
         if !self.sessions[self.active].pending.is_empty() {
             "answer in the panel above…"
-        } else if self.explorer.is_some() || self.model_picker.is_some() || self.settings.is_some() || self.tabcfg.is_some() || self.instr.is_some() || self.perms.is_some() || self.usage_open {
+        } else if self.explorer.is_some() || self.model_picker.is_some() || self.settings.is_some() || self.tabcfg.is_some() || self.instr.is_some() || self.perms.is_some() || self.opt.is_some() || self.usage_open {
             "use the panel above…"
         } else {
             "message Claude…  (/help)"
@@ -547,8 +551,18 @@ impl App {
             args.extend(["--system-prompt-snapshot".to_string(), "off".to_string()]);
         }
         args.append(&mut l.args);
+        let mut settings = serde_json::Map::new();
+        let cwd = self.sessions[i].cwd.clone().unwrap_or_else(|| self.cwd.clone());
+        let saved = optimize::load(&cwd);
+        if let Some(o) = &saved {
+            o.apply(&mut settings, &mut args);
+        }
         if let (Some(f), Some(cache)) = (instructions::rules_path(), config::cache_dir()) {
-            instructions::apply(&instructions::load_rules(&f), &cache, &mut args);
+            let rules = instructions::merge(&instructions::load_rules(&f), &saved.map(|o| o.instructions).unwrap_or_default());
+            instructions::apply(&rules, &cache, &mut args, &mut settings);
+        }
+        if !settings.is_empty() {
+            args.extend(["--settings".into(), serde_json::Value::Object(settings).to_string()]);
         }
         l.args = args;
         l.cwd = self.sessions[i].cwd.clone();
@@ -776,6 +790,7 @@ impl App {
 
     fn tick(&mut self) {
         self.pump_statusline();
+        self.opt_poll();
         if self.dock_at.elapsed() > Duration::from_secs(5) && self.dock.is_some() {
             let (here, open) = (self.cwd().to_string(), self.sessions.iter().filter_map(|s| s.session_id.clone()).collect());
             if let Some(d) = self.dock.as_mut() {
@@ -850,7 +865,7 @@ impl App {
     }
 
     fn on_paste(&mut self, p: String) {
-        if self.explorer.is_some() || self.model_picker.is_some() || self.settings.is_some() || self.tabcfg.is_some() || self.instr.is_some() || self.perms.is_some() || self.usage_open {
+        if self.explorer.is_some() || self.model_picker.is_some() || self.settings.is_some() || self.tabcfg.is_some() || self.instr.is_some() || self.perms.is_some() || self.opt.is_some() || self.usage_open {
             return;
         }
         // A question takes pasted text as its typed answer; a permission prompt takes nothing (a pasted "y"
@@ -982,7 +997,7 @@ impl App {
     }
 
     fn on_key(&mut self, k: KeyEvent) {
-        let box_is_free = self.explorer.is_none() && self.model_picker.is_none() && self.settings.is_none() && self.tabcfg.is_none() && self.instr.is_none() && self.perms.is_none() && !self.usage_open && self.sessions[self.active].pending.is_empty();
+        let box_is_free = self.explorer.is_none() && self.model_picker.is_none() && self.settings.is_none() && self.tabcfg.is_none() && self.instr.is_none() && self.perms.is_none() && self.opt.is_none() && !self.usage_open && self.sessions[self.active].pending.is_empty();
         if box_is_free && k.code == KeyCode::Char('z') && k.modifiers.contains(KeyModifiers::CONTROL) {
             return match self.undo.pop() {
                 Some((text, cursor)) => (self.input, self.cursor) = (text, cursor),
@@ -1037,7 +1052,7 @@ impl App {
 
     /// Keep the `@` popup's rows in step with the word under the cursor.
     fn refresh_files(&mut self) {
-        let tok = if self.explorer.is_some() || self.model_picker.is_some() || self.settings.is_some() || self.tabcfg.is_some() || self.instr.is_some() || self.perms.is_some() || self.usage_open { None } else { self.at_token() };
+        let tok = if self.explorer.is_some() || self.model_picker.is_some() || self.settings.is_some() || self.tabcfg.is_some() || self.instr.is_some() || self.perms.is_some() || self.opt.is_some() || self.usage_open { None } else { self.at_token() };
         let Some((_, q)) = tok else {
             self.file_rows.clear();
             self.file_key = None;
@@ -1305,7 +1320,7 @@ impl App {
         if self.model_picker.is_some() {
             return self.picker_key(k);
         }
-        if self.dock_focus && self.dock.is_some() && self.settings.is_none() && self.tabcfg.is_none() && self.instr.is_none() && self.perms.is_none() && !self.usage_open && self.sessions[self.active].pending.is_empty() {
+        if self.dock_focus && self.dock.is_some() && self.settings.is_none() && self.tabcfg.is_none() && self.instr.is_none() && self.perms.is_none() && self.opt.is_none() && !self.usage_open && self.sessions[self.active].pending.is_empty() {
             use KeyCode::*;
             if matches!(k.code, Up | Down | PageUp | PageDown | Home | End | Enter | Right | Esc | Left) && !ctrl && !alt {
                 return self.dock_key(k);
@@ -1323,6 +1338,9 @@ impl App {
         }
         if self.perms.is_some() {
             return self.perms_key(k);
+        }
+        if self.opt.is_some() {
+            return self.opt_key(k);
         }
         if self.usage_open {
             match k.code {
@@ -1546,12 +1564,99 @@ impl App {
     /// which fills in when the replies arrive.
     fn open_usage(&mut self) {
         self.usage_open = true;
+        self.ask_usage();
+    }
+
+    fn ask_usage(&mut self) {
         let (launch, tx) = (self.launch_for(self.active), self.tx.clone());
         let s = self.s();
         s.usage = Default::default();
         s.warm(&launch, &tx);
         s.control("get_context_usage", json!({}));
         s.control("get_usage", json!({}));
+    }
+
+    /// `/optimize [level|off|now]`.
+    fn optimize_cmd(&mut self, arg: &str) {
+        let cwd = self.cwd().to_string();
+        match arg {
+            "off" => {
+                let had = optimize::clear(&cwd);
+                self.flash(if had { "optimize removed for this project: new tabs load everything again" } else { "nothing to remove: this project has no saved optimize settings" });
+            }
+            "now" => {
+                let k = self.s().ctx_tokens / 1000;
+                match self.s().restart_later() {
+                    Ok(()) => {
+                        self.s().unpinned = true;
+                        self.s().note(format!("re-rendering this conversation with the project's optimize settings; the next message re-caches up to ~{k}k tokens"));
+                    }
+                    Err(e) => self.flash(e),
+                }
+            }
+            _ => {
+                let level = optimize::Level::parse(arg).or_else(|| optimize::load(&cwd).and_then(|o| o.level)).unwrap_or(optimize::Level::Balanced);
+                if !arg.is_empty() && optimize::Level::parse(arg).is_none() {
+                    return self.flash("usage: /optimize [light|balanced|aggressive|off|now]");
+                }
+                self.opt = Some(optimize::Ui::open(&cwd, level));
+                self.ask_usage();
+            }
+        }
+    }
+
+    fn opt_poll(&mut self) {
+        let Some(ui) = self.opt.as_mut() else { return };
+        let u = &self.sessions[self.active].usage;
+        let (skills, total) = u.ctx.as_ref().map_or((None, 0), |c| (Some(c.skill_list.as_slice()), c.total));
+        ui.poll(skills, total);
+    }
+
+    fn opt_key(&mut self, k: KeyEvent) {
+        let Some(mut ui) = self.opt.take() else { return };
+        let ctrl_c = k.code == KeyCode::Char('c') && k.modifiers.contains(KeyModifiers::CONTROL);
+        if matches!(k.code, KeyCode::Esc | KeyCode::Char('q')) || ctrl_c {
+            return;
+        }
+        if ui.loading {
+            self.opt = Some(ui);
+            return;
+        }
+        let n = ui.items.len();
+        match k.code {
+            KeyCode::Up if n > 0 => ui.sel = (ui.sel + n - 1) % n,
+            KeyCode::Down if n > 0 => ui.sel = (ui.sel + 1) % n,
+            KeyCode::Left | KeyCode::BackTab => ui.step_level(-1),
+            KeyCode::Right | KeyCode::Tab => ui.step_level(1),
+            KeyCode::Char(' ') | KeyCode::Char('x') => {
+                if let Some(it) = ui.items.get_mut(ui.sel) {
+                    it.on = !it.on;
+                }
+            }
+            KeyCode::Enter => {
+                let cwd = self.cwd().to_string();
+                match optimize::save(&cwd, &ui.saved()) {
+                    Err(e) => self.flash(format!("could not save: {e}")),
+                    Ok(()) => {
+                        let started = self.sessions[self.active].ctx_tokens > 0;
+                        let cold = self.sessions[self.active].last_req_at.is_none_or(|t| t.elapsed() > self.sessions[self.active].cache_ttl);
+                        let msg = format!("optimize {} saved (≈ −{} at start). ", ui.level.name(), crate::usage::tokens(ui.saves()));
+                        if !started || cold {
+                            if self.s().restart_later().is_ok() {
+                                self.s().unpinned = true;
+                            }
+                            self.flash(msg + "applied to this tab");
+                        } else {
+                            let k = self.s().ctx_tokens / 1000;
+                            self.flash(msg + &format!("New tabs use it; this conversation keeps its prompt. `/optimize now` re-renders it (re-caches ~{k}k)"));
+                        }
+                        return;
+                    }
+                }
+            }
+            _ => {}
+        }
+        self.opt = Some(ui);
     }
 
     fn perms_key(&mut self, k: KeyEvent) {
@@ -1668,6 +1773,7 @@ impl App {
                     ui.open.remove(&f);
                     ui.sel = ui.rows().iter().position(|r| *r == instructions::Row::File(f)).unwrap_or(0);
                 }
+                KeyCode::Char('b') => ui.toggle_brief(row),
                 KeyCode::Char(' ') | KeyCode::Enter | KeyCode::Char('x') => {
                     if let Err(e) = ui.toggle(row) {
                         self.flash(e);
@@ -1984,6 +2090,7 @@ impl App {
             },
             "/config" => self.settings = Some(settings::Ui::default()),
             "/session" => self.tabcfg = Some(tabcfg::Ui::default()),
+            "/optimize" => self.optimize_cmd(&arg),
             "/permissions" => self.perms = Some(permissions::Ui::new(self.cwd(), &self.sessions[self.active])),
             "/instructions" => self.instr = Some(instructions::Ui::new(self.cwd(), instructions::rules_path().map(|f| instructions::load_rules(&f)).unwrap_or_default())),
             "/usage" => self.open_usage(),

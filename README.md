@@ -188,6 +188,23 @@ Release binary: ~0.9 MB.
   skills, memory files, messages, with on-demand and reserved parts dimmed), tool-result and hook-output sizes, and
   your 5-hour and weekly limits with time to reset. When skills are a big share of every request it says so and
   points at `/profile sources`. On this machine skills were ~10k of 17k tokens.
+- **Optimize** (`/optimize [light|balanced|aggressive|off|now]`): trims what a *new* session loads, for this project,
+  from evidence and without a model call. It reads this project's past transcripts (tools and skills actually used,
+  plus the words the project's files and prompts use) and Claude Code's own skill list, proposes changes as a checkbox
+  list with the tokens each saves, and saves the ticked ones to `<project>/.claude++/optimize.json` on Enter.
+  `/optimize off` deletes it; no file of yours is touched. Levels (←→ in the panel): **light** caps skill descriptions
+  (`skillListingMaxDescChars` 160); **balanced** also lists skills the project never used by name only
+  (`skillOverrides: name-only`, `/name` still works) and shortens instruction sections unrelated to the project to their
+  heading and first line plus a pointer to the file (the model reads the rest when it needs it; `[~]` in
+  `/instructions`, `b` toggles it there); **aggressive** hides unused skills, shortens more, and narrows `--tools` to the
+  core set plus what the project used (MCP servers left out when none was ever called). With under 3 past sessions it
+  only caps descriptions: "never used" proves nothing yet. Checked on this machine from a directory under `~`: a fresh
+  haiku session's first turn went 86.3k → 37.8k tokens of context (first-turn cost $0.015 → $0.005), with a question
+  about a shortened section answered by the model going to the file. A conversation already under way keeps the prompt
+  it started with (measured: applying the same setting live changed nothing), so `/optimize` applies at once to a tab
+  that has not started or whose cache has expired, and otherwise says so and offers `/optimize now`, which re-renders
+  the conversation once (re-caches its context). Past use is a heuristic: borderline cases get the gentle treatment
+  (name-only, shortened) and every proposal shows its evidence.
 - **Permissions** (`/permissions`): the saved `allow` / `ask` / `deny` rules from your user, project and local
   settings files, one tab per behavior with the file each rule comes from (and "overridden by deny" where a stronger
   behavior holds the same rule; deny beats ask beats allow). `+ add a new rule…` asks for the rule, then which file;

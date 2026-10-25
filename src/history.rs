@@ -46,6 +46,20 @@ pub fn find(id: &str) -> Option<PathBuf> {
         .find(|p| p.is_file())
 }
 
+/// Transcript files of a working directory's sessions, newest first.
+pub fn transcripts(cwd: &str, n: usize) -> Vec<PathBuf> {
+    let Some(dir) = projects_dir().map(|d| d.join(encode_cwd(cwd))) else { return vec![] };
+    let mut files: Vec<(PathBuf, SystemTime)> = std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|e| e.path().extension().is_some_and(|x| x == "jsonl"))
+        .filter_map(|e| Some((e.path(), e.metadata().ok()?.modified().ok()?)))
+        .collect();
+    files.sort_by_key(|f| std::cmp::Reverse(f.1));
+    files.into_iter().take(n).map(|f| f.0).collect()
+}
+
 /// Most recent sessions for a working directory, newest first.
 pub fn recent(cwd: &str, n: usize) -> Vec<Summary> {
     projects_dir().map(|d| recent_in(&d.join(encode_cwd(cwd)), n)).unwrap_or_default()

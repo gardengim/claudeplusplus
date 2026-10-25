@@ -169,7 +169,7 @@ fn completion_ranks_prefix_first_and_dedupes_local_commands() {
     press(&mut app, KeyCode::Backspace);
     typed(&mut app, "m");
     // prefix matches ("mode", "model") before names that merely contain "m"; ours before theirs
-    assert_eq!(names(&app), ["mode", "model", "img", "permissions", "resume", "compact"]);
+    assert_eq!(names(&app), ["mode", "model", "img", "optimize", "permissions", "resume", "compact"]);
     let model = app.completions().into_iter().find(|c| c.name == "model").unwrap();
     assert_eq!(model.desc, "pick a model and effort, or switch directly", "ours wins over Claude Code's same-named command");
     assert!(names(&app).iter().filter(|n| *n == "model").count() == 1);

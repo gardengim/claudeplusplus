@@ -212,7 +212,7 @@ pub struct Session {
     caching_observed: bool,
     /// Tokens the previous request had cached (read + written): what the next one could have read.
     prev_cached: u64,
-    last_req_at: Option<Instant>,
+    pub last_req_at: Option<Instant>,
     /// A /compact just happened, so the next shortfall in cache reads is expected, not a miss.
     rebuild_expected: bool,
     /// Control requests to send once a backend exists (mode/model changes while suspended).

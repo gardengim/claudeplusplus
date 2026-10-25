@@ -12,7 +12,7 @@ use crate::panel::{View, row_with};
 use crate::theme;
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
@@ -89,18 +89,63 @@ fn hidden(secs: &[Section], set: &BTreeSet<String>, i: usize) -> bool {
     secs[..i].iter().any(|p| p.to >= secs[i].to && p.from <= secs[i].from && p.depth < secs[i].depth && set.contains(&p.id))
 }
 
-/// `text` without the hidden sections.
+/// Prefix of a rule id meaning "keep the heading and first line only".
+pub const BRIEF: &str = "~";
+
+fn brief(secs: &[Section], set: &BTreeSet<String>, i: usize) -> bool {
+    let is = |s: &Section| set.contains(&format!("{BRIEF}{}", s.id));
+    is(&secs[i]) || secs[..i].iter().any(|p| p.to >= secs[i].to && p.from <= secs[i].from && p.depth < secs[i].depth && is(p))
+}
+
+/// `text` without the hidden sections, and with each brief section cut to its heading and first line.
+#[cfg(test)]
 pub fn filtered(text: &str, secs: &[Section], set: &BTreeSet<String>) -> String {
+    filtered_at(text, secs, set, "")
+}
+
+/// Like [`filtered`], naming `path` in the note left where a section was cut so the model can read the rest.
+pub fn filtered_at(text: &str, secs: &[Section], set: &BTreeSet<String>, path: &str) -> String {
     if set.contains(WHOLE) {
         return String::new();
     }
-    let mut drop = vec![false; text.lines().count()];
+    let lines: Vec<&str> = text.lines().collect();
+    let mut drop = vec![false; lines.len()];
+    let mut note: Vec<Option<String>> = vec![None; lines.len()];
     for (i, s) in secs.iter().enumerate() {
         if hidden(secs, set, i) {
             drop[s.from..s.to].iter_mut().for_each(|d| *d = true);
+        } else if brief(secs, set, i) && !drop[s.from] {
+            let first = lines[s.from + 1..s.to].iter().find(|l| !l.trim().is_empty() && !l.trim_start().starts_with('#')).map_or("", |l| l.trim());
+            let first: String = first.chars().take(200).collect();
+            let at = if path.is_empty() { "the source file".to_string() } else { path.to_string() };
+            if secs[..i].iter().any(|p| p.to >= s.to && p.from <= s.from && p.depth < s.depth && brief(secs, set, secs.iter().position(|x| x.id == p.id).unwrap_or(0))) {
+                drop[s.from..s.to].iter_mut().for_each(|d| *d = true); // inside a brief parent: gone
+            } else {
+                drop[s.from + 1..s.to].iter_mut().for_each(|d| *d = true);
+                note[s.from] = Some(format!("{}\n{first}\n*(shortened by claude++; the full section is in {at}: read it if you need it)*", lines[s.from]));
+            }
         }
     }
-    text.lines().zip(drop).filter(|(_, d)| !d).map(|(l, _)| format!("{l}\n")).collect()
+    let mut out = String::new();
+    for (n, l) in lines.iter().enumerate() {
+        if let Some(t) = &note[n] {
+            out += t;
+            out.push('\n');
+        } else if !drop[n] {
+            out += l;
+            out.push('\n');
+        }
+    }
+    out
+}
+
+/// Every rule in `a` and `b`.
+pub fn merge(a: &Rules, b: &Rules) -> Rules {
+    let mut out = a.clone();
+    for (k, v) in b {
+        out.entry(k.clone()).or_default().extend(v.iter().cloned());
+    }
+    out
 }
 
 /// Instruction files that exist for `cwd`: the user's own, then each directory from `cwd` up.
@@ -133,15 +178,15 @@ pub fn save_rules(file: &Path, rules: &Rules) {
     let _ = crate::config::set_value(file, "hidden", json!(rules));
 }
 
-/// Adjust a launch's flags for the hidden rules in `rules`: exclude those files from Claude Code's own
-/// loading and append the filtered copies of the partly hidden ones (merged into any append prompt the
+/// Adjust a launch for the hidden rules in `rules`: exclude those files from Claude Code's own
+/// loading (`claudeMdExcludes`, put in `settings`, which the caller passes as one `--settings`) and append the filtered copies of the partly hidden ones (merged into any append prompt the
 /// profile already sets, since Claude Code takes one). Does nothing when nothing is hidden.
-pub fn apply(rules: &Rules, cache: &Path, args: &mut Vec<String>) {
+pub fn apply(rules: &Rules, cache: &Path, args: &mut Vec<String>, settings: &mut Map<String, Value>) {
     let (mut excluded, mut copies) = (vec![], String::new());
     for (path, set) in rules {
         let Ok(text) = std::fs::read_to_string(path) else { continue };
         let secs = sections(&text);
-        let keep = filtered(&text, &secs, set);
+        let keep = filtered_at(&text, &secs, set, path);
         if keep == text {
             continue;
         }
@@ -153,7 +198,7 @@ pub fn apply(rules: &Rules, cache: &Path, args: &mut Vec<String>) {
     if excluded.is_empty() {
         return;
     }
-    args.extend(["--settings".into(), json!({"claudeMdExcludes": excluded}).to_string()]);
+    settings.insert("claudeMdExcludes".into(), json!(excluded));
     if copies.is_empty() {
         return;
     }
@@ -229,7 +274,7 @@ impl Ui {
     /// Bytes still sent, and bytes hidden, for one file.
     pub fn sizes(&self, f: usize) -> (usize, usize) {
         let src = &self.files[f];
-        let keep = filtered(&src.text, &src.secs, &self.set(f)).len();
+        let keep = filtered_at(&src.text, &src.secs, &self.set(f), &src.path).len();
         (keep, src.text.len() - keep)
     }
 
@@ -266,6 +311,21 @@ impl Ui {
         if cur.is_empty() { self.rules.remove(&path) } else { self.rules.insert(path, cur) };
         self.dirty = true;
         Ok(())
+    }
+
+    /// Keep a section as its heading and first line (or go back to the full text).
+    pub fn toggle_brief(&mut self, row: Row) {
+        let Row::Sec(f, sidx) = row else { return };
+        let mut cur = self.set(f);
+        let (id, b) = (self.files[f].secs[sidx].id.clone(), format!("{BRIEF}{}", self.files[f].secs[sidx].id));
+        if !cur.remove(&b) {
+            cur.remove(&id);
+            cur.remove(WHOLE);
+            cur.insert(b);
+        }
+        let path = self.files[f].path.clone();
+        if cur.is_empty() { self.rules.remove(&path) } else { self.rules.insert(path, cur) };
+        self.dirty = true;
     }
 
     pub fn total(&self) -> (usize, usize) {
@@ -306,7 +366,8 @@ pub fn view(ui: &Ui, width: usize) -> View {
                 Row::Sec(f, s) => {
                     let sec = &ui.files[f].secs[s];
                     let off = hidden(&ui.files[f].secs, &ui.set(f), s);
-                    (if off { "[ ]" } else { "[x]" }, format!("{}{}", "  ".repeat(sec.depth + 1), sec.title), est(sec.bytes))
+                    let short = !off && brief(&ui.files[f].secs, &ui.set(f), s);
+                    (if off { "[ ]" } else if short { "[~]" } else { "[x]" }, format!("{}{}", "  ".repeat(sec.depth + 1), sec.title), est(sec.bytes))
                 }
             };
             let off = mark == "[ ]";
@@ -331,7 +392,7 @@ pub fn view(ui: &Ui, width: usize) -> View {
         }
         Row::File(f) => vec![Line::styled(ui.files[f].path.clone(), theme::dim())],
     };
-    View::new("Instructions", body, sel, theme::hints(&[("↑↓", "move"), ("space", "show/hide"), ("→←", "sections"), ("esc", "close")])).with_tail(tail).with_side(side).rows(0, 16)
+    View::new("Instructions", body, sel, theme::hints(&[("↑↓", "move"), ("space", "show/hide"), ("b", "brief"), ("→←", "sections"), ("esc", "close")])).with_tail(tail).with_side(side).rows(0, 16)
 }
 
 #[cfg(test)]
@@ -377,6 +438,27 @@ mod tests {
         assert!(v.tail.iter().any(|l| text(l).contains("hidden")));
     }
 
+    #[test]
+    fn a_brief_section_keeps_its_heading_and_first_line_and_points_at_the_file() {
+        let s = sections(DOC);
+        let set: BTreeSet<String> = ["~A".to_string()].into();
+        let out = filtered_at(DOC, &s, &set, "/x/AGENTS.md");
+        assert!(out.contains("# A\na text\n*(shortened by claude++; the full section is in /x/AGENTS.md"), "{out}");
+        assert!(!out.contains("a1 text") && !out.contains("a2 text") && out.contains("# B") && out.contains("dup"));
+        assert!(out.len() < DOC.len() + 90);
+        // hiding wins over brief, and toggling brief twice goes back to the full text
+        let both: BTreeSet<String> = ["~A".to_string(), "A".to_string()].into();
+        assert!(!filtered(DOC, &s, &both).contains("# A\na text"));
+        let d = temp("brief");
+        std::fs::write(d.join("AGENTS.md"), DOC).unwrap();
+        let mut ui = Ui::new(d.to_str().unwrap(), Rules::new());
+        let f = ui.files.iter().position(|x| x.path.ends_with("AGENTS.md")).unwrap();
+        ui.toggle_brief(Row::Sec(f, 1));
+        assert!(ui.rules.values().next().unwrap().contains("~A"));
+        ui.toggle_brief(Row::Sec(f, 1));
+        assert!(ui.rules.is_empty());
+    }
+
     fn temp(name: &str) -> PathBuf {
         let d = std::env::temp_dir().join(format!("claudeplusplus-instr-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
@@ -414,18 +496,19 @@ mod tests {
         std::fs::write(&file, DOC).unwrap();
         let path = file.to_string_lossy().into_owned();
         let mut args: Vec<String> = vec!["--append-system-prompt".into(), "from profile".into(), "--x".into()];
-        apply(&Rules::new(), &d, &mut args);
-        assert_eq!(args.len(), 3, "no rules, no change");
+        let mut settings = Map::new();
+        apply(&Rules::new(), &d, &mut args, &mut settings);
+        assert!(args.len() == 3 && settings.is_empty(), "no rules, no change");
         let rules: Rules = [(path.clone(), ["B".to_string()].into())].into();
-        apply(&rules, &d, &mut args);
+        apply(&rules, &d, &mut args, &mut settings);
         let at = |f: &str| args.iter().position(|a| a == f).unwrap();
-        assert!(args[at("--settings") + 1].contains(&path));
+        assert!(settings["claudeMdExcludes"].to_string().contains(&path));
         assert!(!args.contains(&"--append-system-prompt".to_string()), "profile prompt folded into the file");
         let body = std::fs::read_to_string(&args[at("--append-system-prompt-file") + 1]).unwrap();
         assert!(body.contains("from profile") && body.contains("a text") && !body.contains("b text"));
         // a whole-file rule only excludes
-        let mut args = vec![];
-        apply(&[(path, [WHOLE.to_string()].into())].into(), &d, &mut args);
-        assert_eq!(args.len(), 2);
+        let (mut args, mut settings) = (vec![], Map::new());
+        apply(&[(path, [WHOLE.to_string()].into())].into(), &d, &mut args, &mut settings);
+        assert!(args.is_empty() && settings.contains_key("claudeMdExcludes"));
     }
 }
