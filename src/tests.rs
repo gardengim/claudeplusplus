@@ -403,6 +403,53 @@ fn the_message_is_sent_with_text_and_pictures_in_the_order_written() {
 }
 
 #[test]
+fn a_bang_command_runs_here_without_a_turn_and_its_output_goes_with_the_next_message() {
+    let dir = std::env::temp_dir().join(format!("claudeplusplus-bang-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let script = dir.join("claude");
+    std::fs::write(&script, format!("#!/bin/sh\ncat >> {}/stdin\n", dir.display())).unwrap();
+    std::process::Command::new("chmod").arg("+x").arg(&script).status().unwrap();
+    let launch = Launch { bin: script.to_string_lossy().into(), ..Default::default() };
+    let (tx, rx) = mpsc::channel();
+    let mut app = App::new(launch, dir.to_string_lossy().into(), tx, Duration::ZERO);
+    app.new_tab();
+
+    typed(&mut app, "!echo hi; pwd");
+    press(&mut app, KeyCode::Enter);
+    let ev = (0..100).find_map(|_| match rx.recv_timeout(Duration::from_secs(5)) {
+        Ok(e @ AppEvent::Shell(..)) => Some(e),
+        _ => None,
+    });
+    app.on_event(ev.expect("the command finished"));
+    let sent = std::fs::read_to_string(dir.join("stdin")).unwrap_or_default();
+    assert!(!sent.contains("\"user\""), "no model turn for a ! command");
+    let shown = match &app.sessions[0].items[0].entry {
+        session::Entry::Tool { name, result: Some((r, false)), .. } if name == "Bash" => r.clone(),
+        _ => panic!("shown as a finished Bash call"),
+    };
+    assert!(shown.starts_with("hi\n") && shown.contains("claudeplusplus-bang-"), "it ran in the tab's folder: {shown}");
+
+    typed(&mut app, "/compact");
+    press(&mut app, KeyCode::Enter);
+    typed(&mut app, "what did it print?");
+    press(&mut app, KeyCode::Enter);
+    let log = (0..60)
+        .find_map(|_| {
+            std::thread::sleep(Duration::from_millis(50));
+            std::fs::read_to_string(dir.join("stdin")).ok().filter(|t| t.matches("\"user\"").count() >= 2)
+        })
+        .expect("both messages reached the process");
+    let users: Vec<serde_json::Value> = log.lines().filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok()).filter(|v| v["type"] == "user").collect();
+    assert_eq!(users[0]["message"]["content"], "/compact", "a command stays a command; the output waits");
+    let msg = &users[1];
+    let text = msg["message"]["content"].as_str().unwrap();
+    assert!(text.starts_with("<bash-input>echo hi; pwd</bash-input>\n<bash-stdout>hi\n") && text.ends_with("what did it print?"), "{text}");
+    assert_eq!(history::user_text(msg).as_deref(), Some("what did it print?"), "a resumed transcript shows only the words typed");
+}
+
+
+#[test]
 fn previews_are_drawn_under_their_token_in_the_input_and_in_the_transcript() {
     use ratatui::{Terminal, backend::TestBackend, layout::Position};
     let (mut app, _d) = fake_app("prev");

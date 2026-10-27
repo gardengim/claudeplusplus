@@ -97,6 +97,15 @@ fn rules_in(m: &Map<String, Value>, b: Behavior) -> Vec<String> {
     m.get("permissions").and_then(|p| p.get(b.key())).and_then(Value::as_array).into_iter().flatten().filter_map(|v| v.as_str().map(String::from)).collect()
 }
 
+/// The mode a new conversation starts in: `permissions.defaultMode` of the most specific settings file.
+pub fn default_mode(cwd: &str) -> String {
+    Scope::ALL
+        .iter()
+        .filter_map(|s| s.file(cwd).and_then(|f| read_json(&f).ok()))
+        .find_map(|m| m.get("permissions")?.get("defaultMode")?.as_str().map(String::from))
+        .unwrap_or_default()
+}
+
 /// Every saved rule for `cwd`, plus the tab's own (`tab`: name and whether it allows).
 pub fn load(cwd: &str, tab: &[(String, bool)]) -> Vec<Rule> {
     let mut out = vec![];
@@ -265,6 +274,18 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d
+    }
+
+    #[test]
+    fn the_most_specific_settings_file_names_the_starting_mode() {
+        let d = std::env::temp_dir().join(format!("claudepp-mode-{}", std::process::id()));
+        std::fs::create_dir_all(d.join(".claude")).unwrap();
+        std::fs::write(d.join(".claude/settings.json"), r#"{"permissions":{"defaultMode":"plan"}}"#).unwrap();
+        let cwd = d.to_string_lossy();
+        assert_eq!(default_mode(&cwd), "plan");
+        std::fs::write(d.join(".claude/settings.local.json"), r#"{"permissions":{"defaultMode":"acceptEdits"}}"#).unwrap();
+        assert_eq!(default_mode(&cwd), "acceptEdits");
+        std::fs::remove_dir_all(&d).unwrap();
     }
 
     #[test]

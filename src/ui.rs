@@ -95,7 +95,10 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     } else {
         input_rows.into_iter().skip(skip).collect()
     };
-    let rule = Block::new().borders(Borders::TOP).border_style(theme::dim());
+    let mut rule = Block::new().borders(Borders::TOP).border_style(theme::dim());
+    if app.input.trim_start().starts_with('!') {
+        rule = rule.title(Span::styled(" ! shell: runs here, no model turn; the output goes with your next message ", theme::tool_hue("Bash")));
+    }
     f.render_widget(Paragraph::new(text).block(rule), input_area);
     // A panel that owns the keyboard also owns the cursor: leave it hidden.
     if input_keeps_focus {
@@ -223,6 +226,21 @@ fn tab_line(app: &App) -> Line<'static> {
 }
 
 fn transcript(f: &mut Frame, s: &mut Session, area: Rect, expanded: bool, cwd: &str) {
+    if s.items.is_empty() {
+        // A blank screen gives no hint where you are or what to do; say both, quietly.
+        let home = std::env::var("HOME").unwrap_or_default();
+        let dir = match cwd.strip_prefix(home.as_str()) {
+            Some(rest) if !home.is_empty() => format!("~{rest}"),
+            _ => cwd.to_string(),
+        };
+        let lines = vec![
+            Line::raw(""),
+            Line::from(vec![Span::styled("  claude++ ", theme::accent().add_modifier(Modifier::BOLD)), Span::styled(dir, theme::dim())]),
+            Line::styled("  enter send · /help commands · ctrl+r earlier sessions · ctrl+t new tab", theme::dim()),
+        ];
+        f.render_widget(Paragraph::new(lines), area);
+        return;
+    }
     let width = area.width;
     let mut total = 0;
     for item in &mut s.items {
@@ -378,6 +396,12 @@ fn tool_lines(
         return; // the diff already says what happened
     }
     let style = if *err { theme::danger() } else { theme::dim() };
+    if name == "Read" && !err && !expanded {
+        // A file's contents are the model's business; Claude Code shows just the size too.
+        let n = text.trim_end().lines().count();
+        out.push(Line::from(vec![Span::raw("  ⎿  "), Span::styled(format!("Read {n} line{}", if n == 1 { "" } else { "s" }), style)]));
+        return;
+    }
     let text = if text.trim().is_empty() { "(no output)" } else { text.trim_end() };
     let lines: Vec<String> = wrap(text, width.saturating_sub(5));
     let limit = if expanded { usize::MAX } else { COLLAPSED_LINES };
@@ -421,6 +445,7 @@ pub fn tool_summary(name: &str, input: &Value, cwd: &str) -> String {
         "Task" | "Agent" => s("description"),
         "Skill" => s("skill"),
         "AskUserQuestion" => input["questions"][0]["question"].as_str().unwrap_or_default().to_string(),
+        "ExitPlanMode" => "plan ready for approval".into(),
         _ => String::new(),
     };
     let v = if v.is_empty() { input.to_string() } else { v };
@@ -432,9 +457,13 @@ fn prompt_view(p: &Pending, width: usize, cwd: &str) -> View {
     if p.is_question() {
         return p.ui.question_view(p.questions(), width);
     }
-    let headline = format!("Allow {}({})?", p.tool, tool_summary(&p.tool, &p.input, cwd));
-    let has_always = p.suggestions.as_array().is_some_and(|a| !a.is_empty());
-    p.ui.permission_view(&headline, p.input["plan"].as_str(), has_always, width)
+    let headline = if p.tool == "ExitPlanMode" {
+        "Claude's plan is ready. Start on it?".to_string()
+    } else {
+        format!("Allow {}({})?", p.tool, tool_summary(&p.tool, &p.input, cwd))
+    };
+    let always = crate::prompt::Ui::always_label(&p.suggestions);
+    p.ui.permission_view(&headline, p.input["plan"].as_str(), always.as_deref(), width)
 }
 
 fn status_line(app: &App, f_height: u16) -> Line<'static> {
@@ -470,7 +499,9 @@ fn status_line(app: &App, f_height: u16) -> Line<'static> {
     if s.ctx_tokens > 0 && !ext {
         // the context filling up is the one number worth a warning colour
         let hot = s.ctx_tokens * 100 >= s.ctx_window.max(200_000) * 85;
-        parts.push((format!("ctx {}", human(s.ctx_tokens)), if hot { theme::danger() } else { theme::dim() }));
+        // as a share of the window once claude has reported its size, like Claude Code's own line
+        let pct = (s.ctx_tokens * 100).checked_div(s.ctx_window).map_or(String::new(), |p| format!(" {p}%"));
+        parts.push((format!("ctx {}{pct}", human(s.ctx_tokens)), if hot { theme::danger() } else { theme::dim() }));
     }
     if s.prompt_total > 0 {
         parts.push((format!("hit {:.0}%", 100.0 * s.cache_read as f64 / s.prompt_total as f64), theme::ok()));
@@ -506,6 +537,7 @@ fn human(n: u64) -> String {
 }
 
 pub fn truncate(s: &str, width: usize) -> String {
+    let s = &s.replace('\t', "    "); // a tab has no width in the terminal buffer
     if s.width() <= width {
         return s.to_string();
     }
@@ -526,7 +558,7 @@ pub fn truncate(s: &str, width: usize) -> String {
 pub fn wrap(text: &str, width: usize) -> Vec<String> {
     let width = width.max(1);
     let mut out = Vec::new();
-    for para in text.split('\n') {
+    for para in text.replace('\t', "    ").split('\n') {
         let mut line = String::new();
         let mut w = 0;
         for tok in para.split_inclusive(' ') {
@@ -615,6 +647,7 @@ mod tests {
     fn wrap_words_and_wide_chars() {
         assert_eq!(wrap("hello world foo", 11), vec!["hello world", "foo"]);
         assert_eq!(wrap("a\n\nb", 5), vec!["a", "", "b"]);
+        assert_eq!(wrap("1\tfn", 20), vec!["1    fn"], "tabs keep their space");
         assert_eq!(wrap("안녕하세요", 4), vec!["안녕", "하세", "요"]);
         assert_eq!(wrap("abcdefgh", 3), vec!["abc", "def", "gh"]);
         assert_eq!(wrap("    indented code", 40), vec!["    indented code"]);

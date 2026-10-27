@@ -47,6 +47,8 @@ pub enum AppEvent {
     Quit,
     /// The clipboard was read off the UI thread: session id, the PNG if there was one, what to say if not.
     Clipboard(u64, Option<Vec<u8>>, &'static str),
+    /// A `!command` finished: tab id, transcript entry id, command, what it printed.
+    Shell(u64, String, String, std::io::Result<std::process::Output>),
 }
 
 /// `--profile lean` = this tool set, no MCP, and no user-level settings (user CLAUDE.md/AGENTS.md,
@@ -90,6 +92,7 @@ KEYS  enter send · alt/shift+enter or ctrl+j newline · esc/ctrl+c interrupt
 COMMANDS  /usage /find /session /new [profile] /profile [name] [--hard] /close /clear /resume [id] /model [m] /effort [level] /mode <m>
           /config /statusline [claude|builtin] /img <path> /quit
           anything else starting with / goes to Claude Code (e.g. /compact)
+          !<command> runs a shell command here (no model turn); its output goes with your next message
 @FILES    type @ to pick a file or folder; Claude Code reads what you mention (images included)
 PROFILES  your own: ~/.config/claude++/profiles/<name>.json (system prompt, tools, MCP, model, env...; see README)
 EDITING   alt+←/→ word · alt+backspace / ctrl+w delete word · ctrl+k to end · ctrl+z undo · ctrl+y or /copy [code] copies the last answer
@@ -610,6 +613,9 @@ impl App {
             s.profile = p;
         }
         s.cache_ttl = self.cache_ttl;
+        // Shown until claude reports the real mode, so a new tab does not claim "manual" by mistake.
+        let flag = self.launch.args.iter().position(|a| a == "--permission-mode").and_then(|i| self.launch.args.get(i + 1));
+        s.mode = flag.cloned().unwrap_or_else(|| permissions::default_mode(&self.cwd));
         self.save_draft();
         self.sessions.push(s);
         self.active = self.sessions.len() - 1;
@@ -692,6 +698,14 @@ impl App {
                         self.notify(&format!("{name} needs you"));
                     } else if was_busy && !s.busy {
                         self.notify(&format!("{name} finished"));
+                    }
+                }
+            }
+            AppEvent::Shell(sid, id, cmd, out) => {
+                if let Some(s) = self.sessions.iter_mut().find(|s| s.id == sid) {
+                    match out {
+                        Ok(o) => s.shell_done(&id, &cmd, &String::from_utf8_lossy(&o.stdout), &String::from_utf8_lossy(&o.stderr), o.status.success()),
+                        Err(e) => s.shell_done(&id, &cmd, "", &e.to_string(), false),
                     }
                 }
             }
@@ -2084,11 +2098,24 @@ impl App {
         if self.history.last() != Some(&words) && !words.trim().is_empty() {
             self.history.push(words);
         }
+        // `!command` runs here, as in Claude Code: no model turn, its output rides along with the next message.
+        if let Some(cmd) = text.trim().strip_prefix('!').map(str::trim).filter(|c| !c.is_empty()) {
+            let (cmd, sid, tx) = (cmd.to_string(), self.sessions[self.active].id, self.tx.clone());
+            let dir = self.sessions[self.active].cwd.clone().unwrap_or_else(|| self.cwd.clone());
+            let id = self.s().start_shell(&cmd);
+            // ponytail: no timeout or cancel; a command that never ends just never reports (the UI stays free).
+            std::thread::spawn(move || {
+                let out = std::process::Command::new("sh").args(["-c", &cmd]).current_dir(dir).stdin(std::process::Stdio::null()).output();
+                let _ = tx.send(AppEvent::Shell(sid, id, cmd, out));
+            });
+            return;
+        }
         let (cmd, arg) = text.trim().split_once(' ').unwrap_or((text.trim(), ""));
         let arg = arg.trim().to_string();
         match cmd {
             "/quit" | "/exit" => self.quit = true,
-            "/help" => self.s().note(HELP.into()),
+            // In the app only the keys and commands matter; the flags are for the command line.
+            "/help" => self.s().note(HELP[HELP.find("KEYS").unwrap_or(0)..].trim_end().into()),
             "/new" => {
                 if !arg.is_empty()
                     && let Err(e) = profile_args(&arg)

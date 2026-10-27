@@ -216,6 +216,14 @@ pub struct Session {
     pub last_req_at: Option<Instant>,
     /// A /compact just happened, so the next shortfall in cache reads is expected, not a miss.
     rebuild_expected: bool,
+    /// Messages a compaction kept; Claude Code sends them again after the boundary, already shown.
+    preserved: Vec<String>,
+    /// Output of `!command`s run since the last message; it goes to the model ahead of the next one.
+    shell_context: String,
+    /// Numbers `!command` entries; never reset, so a command finishing after /clear matches nothing.
+    shell_n: u64,
+    /// Steps already listed under each running Agent call, so the next one goes right after them.
+    children: std::collections::HashMap<String, usize>,
     /// Control requests to send once a backend exists (mode/model changes while suspended).
     deferred: Vec<(String, Value)>,
     live: Vec<(u64, usize)>,
@@ -322,6 +330,10 @@ impl Session {
             prev_cached: 0,
             last_req_at: None,
             rebuild_expected: false,
+            preserved: Vec::new(),
+            shell_context: String::new(),
+            shell_n: 0,
+            children: Default::default(),
             deferred: Vec::new(),
             live: Vec::new(),
             cur_msg: String::new(),
@@ -365,7 +377,19 @@ impl Session {
     /// tool results go through the same path as live messages.
     fn replay(&mut self, v: &Value) {
         self.replaying = true;
-        if v["type"] == "user" {
+        let text = v["message"]["content"].as_str().or_else(|| v["message"]["content"][0]["text"].as_str()).unwrap_or_default();
+        if v["type"] == "user" && text.starts_with("<task-notification>") {
+            // In a saved transcript an agent's end is this message, not the live event: settle its Agent call.
+            let tag = |name: &str| text.split(&format!("<{name}>")).nth(1).and_then(|r| r.split(&format!("</{name}>")).next()).map(str::trim);
+            if let (Some(id), Some(summary)) = (tag("tool-use-id"), tag("summary")) {
+                let running = self.items.iter().any(|i| {
+                    matches!(&i.entry, Entry::Tool { id: t, result, .. } if t == id && result.as_ref().is_none_or(|r| r.0 == "running in the background…"))
+                });
+                if running {
+                    self.set_result(id, summary.into(), tag("status") != Some("completed"));
+                }
+            }
+        } else if v["type"] == "user" {
             match history::user_text(v) {
                 Some(t) => self.push(Entry::User(t)),
                 None if v["message"]["content"].as_array().is_some_and(|a| a.iter().any(|b| b["type"] == "tool_result")) => {
@@ -717,6 +741,19 @@ impl Session {
         }
         self.scroll = 0;
         self.last_active = Instant::now();
+        // A /command must stay first to be a command; the shell output waits for a real message.
+        let ctx = if text.starts_with('/') { String::new() } else { std::mem::take(&mut self.shell_context) };
+        let content = match ctx {
+            ctx if ctx.is_empty() => content,
+            ctx => match content {
+                Value::String(t) => json!(format!("{ctx}{t}")),
+                Value::Array(mut b) => {
+                    b.insert(0, json!({"type": "text", "text": ctx}));
+                    Value::Array(b)
+                }
+                v => v,
+            },
+        };
         let res = self
             .ensure_backend(launch, tx)
             .and_then(|_| self.backend.as_mut().unwrap().user(content));
@@ -825,6 +862,8 @@ impl Session {
         self.pending.clear();
         self.busy = false;
         self.interrupted = false;
+        self.shell_context.clear();
+        self.children.clear();
         self.ctx_tokens = 0;
         self.last_api = None;
         self.cold_noted = false;
@@ -856,6 +895,13 @@ impl Session {
 
     pub fn answer(&mut self, choice: Choice) {
         let Some(p) = self.pending.pop_front() else { return };
+        // Claude Code changes mode without telling us; keep the label honest.
+        let set_mode = p.suggestions.as_array().into_iter().flatten().find(|s| s["type"] == "setMode").and_then(|s| s["mode"].as_str());
+        match (choice, set_mode) {
+            (Choice::Always, Some(m)) => self.mode = m.into(),
+            (Choice::Allow, _) if p.tool == "ExitPlanMode" => self.mode = "default".into(),
+            _ => {}
+        }
         let resp = match choice {
             Choice::Allow => json!({"behavior": "allow", "updatedInput": p.input}),
             Choice::Always => json!({
@@ -909,8 +955,13 @@ impl Session {
     pub fn handle(&mut self, v: &Value) {
         let top_level = v["parent_tool_use_id"].is_null();
         let kind = v["type"].as_str().unwrap_or("");
-        // Output after a `result` means a queued message started another turn.
-        if !self.busy && !self.replaying && matches!(kind, "stream_event" | "assistant") {
+        if let Some(i) = v["uuid"].as_str().and_then(|u| self.preserved.iter().position(|p| p == u)) {
+            self.preserved.swap_remove(i);
+            return;
+        }
+        // A new API call after a `result` means a queued message started another turn. (Only a real call
+        // starts with `message_start`; a re-sent or late message must not leave the tab looking busy.)
+        if !self.busy && !self.replaying && top_level && kind == "stream_event" && v["event"]["type"] == "message_start" {
             self.busy = true;
             self.busy_since = Instant::now();
             self.turn_text = false;
@@ -932,8 +983,34 @@ impl Session {
                         self.mode = v["permissionMode"].as_str().unwrap_or_default().into();
                     }
                 }
+                // A background agent ended: its report (or why it failed) becomes the Agent call's result.
+                "task_notification" => {
+                    let ok = v["status"] == "completed";
+                    let id = v["tool_use_id"].as_str().unwrap_or_default();
+                    let report = v["handback_report"]["text"].as_str();
+                    // Without a report, the summary only replaces the "running" placeholder (or nothing).
+                    let placeholder = self.items.iter().any(|i| {
+                        matches!(&i.entry, Entry::Tool { id: t, result, .. } if t == id && result.as_ref().is_none_or(|r| r.0 == "running in the background…"))
+                    });
+                    if report.is_some() || !ok || placeholder {
+                        let text = report.or(v["summary"].as_str()).unwrap_or_default();
+                        self.set_result(id, text.trim().into(), !ok);
+                    }
+                }
+                // A hook that failed or blocked something changes what happens next; say so, as Claude Code does.
+                "hook_response" if v["outcome"].as_str().is_some_and(|o| o != "success") => {
+                    let why = [&v["stderr"], &v["stdout"]].into_iter().filter_map(Value::as_str).find(|t| !t.trim().is_empty());
+                    let why = why.and_then(|t| t.lines().find(|l| !l.trim().is_empty())).map(|l| format!(": {}", l.trim())).unwrap_or_default();
+                    self.note(format!("hook {} {}{why}", v["hook_name"].as_str().unwrap_or("?"), v["outcome"].as_str().unwrap_or_default()));
+                }
                 "compact_boundary" => {
                     self.note("conversation compacted".into());
+                    let meta = &v["compact_metadata"];
+                    self.preserved =
+                        meta["preserved_messages"]["uuids"].as_array().into_iter().flatten().filter_map(|u| u.as_str().map(String::from)).collect();
+                    // Unknown until the next call: `post_tokens` counts only the messages, not the ~30k of
+                    // system prompt and tools every request carries, so showing it would understate the context.
+                    self.ctx_tokens = 0;
                     // Docs: current_usage is null again until the next API call, and the cache rebuild that
                     // follows is expected rather than a miss.
                     self.last_usage = Value::Null;
@@ -970,13 +1047,34 @@ impl Session {
                                 None => {}
                             }
                         }
-                        "tool_use" => self.push(Entry::Tool {
-                            id: block["id"].as_str().unwrap_or_default().into(),
-                            name: block["name"].as_str().unwrap_or("?").into(),
-                            input: block["input"].clone(),
-                            result: None,
-                            nested: !top_level,
-                        }),
+                        // The subagent's report: show it as the Agent call's result, not as a step.
+                        "tool_use" if !top_level && block["name"] == "SubagentHandback" => {
+                            let report = block["input"]["message"].as_str().unwrap_or_default().trim().to_string();
+                            self.set_result(v["parent_tool_use_id"].as_str().unwrap_or_default(), report, false);
+                        }
+                        "tool_use" => {
+                            let entry = Entry::Tool {
+                                id: block["id"].as_str().unwrap_or_default().into(),
+                                name: block["name"].as_str().unwrap_or("?").into(),
+                                input: block["input"].clone(),
+                                result: None,
+                                nested: !top_level,
+                            };
+                            // A subagent's step goes under its own Agent call, so parallel agents do not interleave.
+                            let parent = v["parent_tool_use_id"].as_str().unwrap_or_default();
+                            let at = self.items.iter().position(|i| matches!(&i.entry, Entry::Tool { id, .. } if id == parent));
+                            match at {
+                                Some(at) if !top_level => {
+                                    let n = self.children.entry(parent.to_string()).or_default();
+                                    let pos = (at + 1 + *n).min(self.items.len());
+                                    *n += 1;
+                                    self.items.insert(pos, Item { entry, cache: None });
+                                    // Text still streaming further down moved one place.
+                                    self.live.iter_mut().filter(|(_, i)| *i >= pos).for_each(|(_, i)| *i += 1);
+                                }
+                                _ => self.push(entry),
+                            }
+                        }
                         _ => {}
                     }
                 }
@@ -1018,6 +1116,14 @@ impl Session {
                                 .find(|i| matches!(&i.entry, Entry::Tool { id: t, .. } if t == id))
                             {
                                 if let Entry::Tool { result, name, input, .. } = &mut item.entry {
+                                    if result.is_some() {
+                                        continue; // a subagent's report already arrived; this is only its receipt
+                                    }
+                                    let text = if text.starts_with("Async agent launched") {
+                                        "running in the background…".to_string()
+                                    } else {
+                                        text
+                                    };
                                     if !err && !self.replaying {
                                         let (a, r) = line_delta(name, input);
                                         self.lines_added += a;
@@ -1070,6 +1176,11 @@ impl Session {
                         .map(|a| a.iter().filter_map(Value::as_str).collect::<Vec<_>>().join("\n"))
                         .unwrap_or_default();
                     let msg = [text, &errs].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join("\n");
+                    // Claude Code often says it once as a reply too: show it once, as an error.
+                    let said = !msg.trim().is_empty() && self.items.last().is_some_and(|i| matches!(&i.entry, Entry::Assistant { text, .. } if text.trim() == msg.trim()));
+                    if said {
+                        self.items.pop();
+                    }
                     if !msg.is_empty() {
                         self.error(msg);
                     }
@@ -1087,7 +1198,14 @@ impl Session {
                     self.pending.push_back(Pending {
                         request_id: rid,
                         tool: req["tool_name"].as_str().unwrap_or("?").into(),
-                        suggestions: req["permission_suggestions"].clone(),
+                        // Leaving plan mode: offer what Claude Code offers, approving and auto-accepting edits.
+                        suggestions: match req["permission_suggestions"].as_array() {
+                            Some(a) if !a.is_empty() => req["permission_suggestions"].clone(),
+                            _ if req["tool_name"] == "ExitPlanMode" => {
+                                json!([{"type": "setMode", "mode": "acceptEdits", "destination": "session"}])
+                            }
+                            _ => req["permission_suggestions"].clone(),
+                        },
                         ui: crate::prompt::Ui::for_questions(questions),
                         input,
                     });
@@ -1253,6 +1371,39 @@ fn line_delta(tool: &str, input: &Value) -> (u64, u64) {
     }
 }
 
+impl Session {
+    /// A `!command` the user ran in this tab: show it like a Bash call, and keep its output for the model,
+    /// in the form Claude Code itself uses, so the next message can refer to it.
+    pub fn start_shell(&mut self, cmd: &str) -> String {
+        self.shell_n += 1;
+        let id = format!("shell-{}", self.shell_n);
+        self.push(Entry::Tool { id: id.clone(), name: "Bash".into(), input: json!({"command": cmd}), result: None, nested: false });
+        id
+    }
+
+    pub fn shell_done(&mut self, id: &str, cmd: &str, out: &str, err: &str, ok: bool) {
+        // Claude Code keeps 30k characters of a command's output; so do we.
+        let cap = |s: &str| s.chars().take(30_000).collect::<String>();
+        let (out, err) = (cap(out), cap(err));
+        let shown = [out.trim_end(), err.trim_end()].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join("\n");
+        if !self.items.iter().any(|i| matches!(&i.entry, Entry::Tool { id: t, result: None, .. } if t == id)) {
+            return; // the conversation it belonged to was cleared
+        }
+        self.set_result(id, shown, !ok);
+        self.shell_context +=
+            &format!("<bash-input>{cmd}</bash-input>\n<bash-stdout>{out}</bash-stdout>\n<bash-stderr>{err}</bash-stderr>\n\n");
+    }
+
+    fn set_result(&mut self, tool_id: &str, text: String, err: bool) {
+        if let Some(item) = self.items.iter_mut().rev().find(|i| matches!(&i.entry, Entry::Tool { id, .. } if id == tool_id)) {
+            if let Entry::Tool { result, .. } = &mut item.entry {
+                *result = Some((text, err));
+            }
+            item.cache = None;
+        }
+    }
+}
+
 fn result_text(c: &Value) -> String {
     match c {
         Value::String(s) => s.clone(),
@@ -1348,6 +1499,34 @@ mod tests {
     }
 
     #[test]
+    fn an_error_said_as_a_reply_and_as_the_result_shows_once() {
+        let mut s = Session::new(1, String::new());
+        feed(
+            &mut s,
+            &[
+                r#"{"type":"assistant","parent_tool_use_id":null,"message":{"id":"m","content":[{"type":"text","text":"There's an issue with the selected model."}]}}"#,
+                r#"{"type":"result","subtype":"success","is_error":true,"result":"There's an issue with the selected model."}"#,
+            ],
+        );
+        assert_eq!(s.items.len(), 1);
+        assert!(matches!(&s.items[0].entry, Entry::Error(_)));
+    }
+
+    #[test]
+    fn a_hook_that_fails_is_mentioned_and_one_that_succeeds_is_not() {
+        let mut s = Session::new(1, String::new());
+        feed(
+            &mut s,
+            &[
+                r#"{"type":"system","subtype":"hook_response","hook_name":"SessionStart:startup","outcome":"success","stderr":""}"#,
+                r#"{"type":"system","subtype":"hook_response","hook_name":"PreToolUse:Bash","outcome":"error","exit_code":1,"stderr":"\nlint failed\nmore"}"#,
+            ],
+        );
+        assert_eq!(s.items.len(), 1);
+        assert!(matches!(&s.items[0].entry, Entry::Note(t) if t == "hook PreToolUse:Bash error: lint failed"));
+    }
+
+    #[test]
     fn result_only_turn_and_errors_are_shown() {
         let mut s = Session::new(1, String::new());
         feed(&mut s, &[r#"{"type":"result","subtype":"success","result":"Total cost: $0"}"#]);
@@ -1375,6 +1554,21 @@ mod tests {
         assert!(matches!(&s.items[1].entry, Entry::Assistant { text, streaming: false, .. } if text == "Looking."));
         assert!(matches!(&s.items[2].entry, Entry::Tool { result: Some((r, false)), .. } if r == "fn main(){}"));
         assert!(!s.busy && s.pending.is_empty());
+    }
+
+    #[test]
+    fn a_resumed_agent_is_finished_by_its_saved_notification_not_shown_as_a_message() {
+        let mut s = Session::new(1, String::new());
+        let lines = [
+            r#"{"type":"assistant","message":{"id":"m","content":[{"type":"tool_use","id":"a1","name":"Agent","input":{"description":"count"}}]}}"#,
+            r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"a1","content":"Async agent launched successfully."}]}}"#,
+            r#"{"type":"user","message":{"content":"<task-notification>\n<tool-use-id>a1</tool-use-id>\n<status>completed</status>\n<summary>Agent \"count\" finished</summary>\n</task-notification>"}}"#,
+        ];
+        for l in lines {
+            s.replay(&serde_json::from_str(l).unwrap());
+        }
+        assert_eq!(s.items.len(), 1, "the notification is not a user message");
+        assert!(matches!(&s.items[0].entry, Entry::Tool { result: Some((r, false)), .. } if r == "Agent \"count\" finished"));
     }
 
     #[test]
@@ -1583,7 +1777,16 @@ mod tests {
         feed(&mut s, &[&assistant("a", 0, 5000), r#"{"type":"result","subtype":"success","is_error":false,"result":"","total_cost_usd":0.4,"usage":{}}"#]);
         assert!(!s.status_json("/p")["context_window"]["current_usage"].is_null());
         s.status_dirty = false;
-        feed(&mut s, &[r#"{"type":"system","subtype":"compact_boundary"}"#]);
+        s.push(Entry::Assistant { text: "Context Usage".into(), msg_id: "m".into(), streaming: false });
+        feed(
+            &mut s,
+            &[
+                r#"{"type":"system","subtype":"compact_boundary","compact_metadata":{"post_tokens":10912,"preserved_messages":{"uuids":["u1"]}}}"#,
+                r#"{"type":"assistant","uuid":"u1","parent_tool_use_id":null,"message":{"id":"m2","content":[{"type":"text","text":"Context Usage"}]}}"#,
+            ],
+        );
+        assert_eq!(s.items.iter().filter(|i| matches!(&i.entry, Entry::Assistant { text, .. } if text == "Context Usage")).count(), 1, "kept messages are not shown twice");
+        assert_eq!(s.ctx_tokens, 0, "the old count is gone; the next call reports the new one");
         let j = s.status_json("/p");
         assert!(j["context_window"]["current_usage"].is_null(), "null again after /compact until the next API call");
         assert!(j["prompt_cache"]["recache_tokens_if_cold"].is_null());
@@ -1660,5 +1863,118 @@ mod tests {
         );
         assert_eq!(s.items.len(), 1);
         assert!(matches!(&s.items[0].entry, Entry::Tool { nested: true, .. }));
+    }
+
+    #[test]
+    fn parallel_subagents_steps_stay_under_their_own_agent_while_text_streams() {
+        let mut s = Session::new(1, String::new());
+        let agent = |id: &str| format!(r#"{{"type":"assistant","parent_tool_use_id":null,"message":{{"id":"m{id}","content":[{{"type":"tool_use","id":"{id}","name":"Agent","input":{{}}}}]}}}}"#);
+        let step = |parent: &str, id: &str| {
+            format!(r#"{{"type":"assistant","parent_tool_use_id":"{parent}","message":{{"id":"n{id}","content":[{{"type":"tool_use","id":"{id}","name":"Bash","input":{{}}}}]}}}}"#)
+        };
+        feed(&mut s, &[&agent("a"), &agent("b")]);
+        feed(
+            &mut s,
+            &[
+                r#"{"type":"stream_event","parent_tool_use_id":null,"event":{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}}"#,
+            ],
+        );
+        feed(&mut s, &[&step("b", "b1"), &step("a", "a1"), &step("b", "b2")]);
+        feed(
+            &mut s,
+            &[r#"{"type":"stream_event","parent_tool_use_id":null,"event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"hi"}}}"#],
+        );
+        let ids: Vec<String> = s
+            .items
+            .iter()
+            .map(|i| match &i.entry {
+                Entry::Tool { id, .. } => id.clone(),
+                Entry::Assistant { text, .. } => format!("text:{text}"),
+                _ => "?".into(),
+            })
+            .collect();
+        assert_eq!(ids, ["a", "a1", "b", "b1", "b2", "text:hi"]);
+    }
+
+    #[test]
+    fn a_shell_command_finishing_after_clear_leaves_the_new_conversation_alone() {
+        let mut s = Session::new(1, String::new());
+        let old = s.start_shell("cat .env");
+        s.clear();
+        let new = s.start_shell("ls");
+        assert_ne!(old, new);
+        s.shell_done(&old, "cat .env", "SECRET=1", "", true);
+        assert!(matches!(&s.items[0].entry, Entry::Tool { result: None, .. }), "the old result lands nowhere");
+        s.shell_done(&new, "ls", "a.txt", "", true);
+        assert!(s.shell_context.contains("a.txt") && !s.shell_context.contains("SECRET"));
+    }
+
+    #[test]
+    fn approving_a_plan_offers_auto_accept_and_the_mode_label_follows() {
+        let ask = |tool: &str, sugg: &str| {
+            format!(r#"{{"type":"control_request","request_id":"r","request":{{"subtype":"can_use_tool","tool_name":"{tool}","input":{{"plan":"p"}},"permission_suggestions":{sugg}}}}}"#)
+        };
+        let mut s = Session::new(1, String::new());
+        s.mode = "plan".into();
+        feed(&mut s, &[&ask("ExitPlanMode", "[]")]);
+        assert_eq!(s.pending[0].suggestions[0]["mode"], "acceptEdits", "the same choice Claude Code offers");
+        s.answer(Choice::Allow);
+        assert_eq!(s.mode, "default", "plan mode is over once the plan is approved");
+        s.mode = "plan".into();
+        feed(&mut s, &[&ask("ExitPlanMode", "[]")]);
+        s.answer(Choice::Always);
+        assert_eq!(s.mode, "acceptEdits");
+        feed(&mut s, &[&ask("Bash", r#"[{"type":"addRules","rules":[{"toolName":"Bash"}]}]"#)]);
+        s.answer(Choice::Always);
+        assert_eq!(s.mode, "acceptEdits", "remembering a rule is not a mode change");
+    }
+
+    #[test]
+    fn a_subagent_report_is_the_agent_calls_result_whether_it_ran_in_the_background_or_not() {
+        let report = |s: &Session, i: usize| match &s.items[i].entry {
+            Entry::Tool { result: Some((r, e)), .. } => (r.clone(), *e),
+            _ => panic!("no result"),
+        };
+        let mut s = Session::new(1, String::new());
+        feed(
+            &mut s,
+            &[
+                r#"{"type":"assistant","parent_tool_use_id":null,"message":{"id":"m","content":[{"type":"tool_use","id":"a1","name":"Agent","input":{"description":"count"}}]}}"#,
+                r#"{"type":"user","parent_tool_use_id":null,"message":{"content":[{"type":"tool_result","tool_use_id":"a1","content":[{"type":"text","text":"Async agent launched successfully. agentId: x"}]}]}}"#,
+                r#"{"type":"result","subtype":"success"}"#,
+            ],
+        );
+        assert_eq!(report(&s, 0).0, "running in the background…");
+        assert!(!s.busy, "a subagent working after the turn does not make the tab busy");
+        feed(
+            &mut s,
+            &[
+                r#"{"type":"assistant","parent_tool_use_id":"a1","message":{"id":"n","content":[{"type":"tool_use","id":"h","name":"SubagentHandback","input":{"message":"2 lines\n"}}]}}"#,
+                r#"{"type":"system","subtype":"task_notification","tool_use_id":"a1","status":"completed","summary":"delivered","handback_report":{"text":"2 lines"}}"#,
+            ],
+        );
+        assert_eq!(s.items.len(), 1, "the handback is not listed as a step");
+        assert_eq!(report(&s, 0), ("2 lines".into(), false));
+        // In the foreground the report comes first and the tool result is only a receipt.
+        feed(
+            &mut s,
+            &[
+                r#"{"type":"assistant","parent_tool_use_id":null,"message":{"id":"m2","content":[{"type":"tool_use","id":"a2","name":"Agent","input":{}}]}}"#,
+                r#"{"type":"assistant","parent_tool_use_id":"a2","message":{"id":"n2","content":[{"type":"tool_use","id":"h2","name":"SubagentHandback","input":{"message":"done"}}]}}"#,
+                r#"{"type":"user","parent_tool_use_id":null,"message":{"content":[{"type":"tool_result","tool_use_id":"a2","content":"This agent's report was delivered to you as a message"}]}}"#,
+                r#"{"type":"system","subtype":"task_notification","tool_use_id":"a3","status":"failed","summary":"boom"}"#,
+            ],
+        );
+        assert_eq!(report(&s, 1), ("done".into(), false));
+        // A background agent that ends without a report: its summary, not "running" forever.
+        feed(
+            &mut s,
+            &[
+                r#"{"type":"assistant","parent_tool_use_id":null,"message":{"id":"m3","content":[{"type":"tool_use","id":"a4","name":"Agent","input":{}}]}}"#,
+                r#"{"type":"user","parent_tool_use_id":null,"message":{"content":[{"type":"tool_result","tool_use_id":"a4","content":"Async agent launched successfully."}]}}"#,
+                r#"{"type":"system","subtype":"task_notification","tool_use_id":"a4","status":"completed","summary":"Agent finished"}"#,
+            ],
+        );
+        assert_eq!(report(&s, 2), ("Agent finished".into(), false));
     }
 }

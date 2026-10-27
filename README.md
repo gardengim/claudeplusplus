@@ -50,14 +50,19 @@ Release binary: ~1.7 MB.
 - Streaming responses (token deltas) with a live activity line: requesting, thinking,
   calling a tool, elapsed time.
 - Tool calls rendered Claude-Code style: `● Bash(cmd)`, `⎿` result preview, inline diffs for
-  `Edit` and `Write`, nested subagent steps, and ctrl+o to expand everything.
+  `Edit` and `Write`, and ctrl+o to expand everything. `Read` shows only its size, as Claude Code does.
+- **Subagents**: each one's steps are listed under its own `Agent` call (parallel agents do not interleave), and
+  its report becomes that call's result, whether it ran in the foreground or in the background (headless Claude
+  Code runs agents in the background: the turn ends, the agent keeps working, and its report starts a new turn).
 - **Panels**: every interactive surface (prompts, suggestions, model picker, config, session browser) is drawn by
   one shared component at the bottom of the screen above the input, so they look and behave alike; see
   [DESIGN.md](DESIGN.md). **`/config`** edits claude++'s own config in such a panel: status line, profile for
   new tabs, inline images, prompt-cache lifetime, idle-suspend time and memory budget. ←→ changes a value, it
   applies at once and is saved to `~/.config/claude++/config.json`; a command-line flag still wins for that run.
 - Prompts the agent waits on, as one choice-list panel (see [DESIGN.md](DESIGN.md)): permission requests (↑↓ + Enter,
-  or y / a / n at once; plan approval shows the plan) and `AskUserQuestion` with tabs for several questions, a
+  or y / a / n at once; the "always" row says what it remembers, e.g. "auto-accept edits for this session" or
+  "don't ask again for Bash(npm test:*)"; plan approval shows the plan as markdown and also offers auto-accept, as
+  Claude Code does) and `AskUserQuestion` with tabs for several questions, a
   review step, checkboxes for multi-select, an inline "Other" answer (just start typing, or paste), and option
   previews. Esc declines. Pasted text can never act as a hotkey.
 - Multi-turn conversations, Esc / ctrl+c interrupt (the process survives, and the next turn works).
@@ -71,6 +76,9 @@ Release binary: ~1.7 MB.
   or Delete next to a token removes it whole (and drops the picture); deleting the text is how you un-attach.
   History recall keeps the words only. Images over the API's 5 MB limit are re-encoded smaller first (macOS `sips`). A terminal that sends an *empty* paste for an image-only
   clipboard is handled the same way as ctrl+v (not verified in Ghostty; ctrl+v is the reliable key).
+- **`!` shell commands**: `!git status` runs in the tab's folder right away, without a model turn, and shows like a Bash
+  call. Its output (up to 30k characters, as in Claude Code) is sent ahead of your next message in Claude Code's own
+  `<bash-input>`/`<bash-stdout>` form, so you can ask about it. No timeout: a command that never ends never reports.
 - **`@` file picker**: type `@` (at the start of a word) for a popup of the project's files and folders: tracked
   and untracked-but-not-ignored files from git, else a bounded directory walk. Fuzzy match on the whole path
   (file name and word starts weigh most). Tab or Enter inserts it, a folder keeps the popup open for the next level, Esc hides it.

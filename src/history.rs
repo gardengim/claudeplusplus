@@ -255,8 +255,12 @@ pub fn user_text(v: &Value) -> Option<String> {
             .join(" "),
         _ => return None,
     };
-    let t = text.trim();
-    let noise = ["<command-", "<local-command", "<system-reminder", "Caveat:", "[Request interrupted"];
+    let mut t = text.trim();
+    // A message sent after `!command`s carries their output first; the words typed come after it.
+    if t.starts_with("<bash-input>") {
+        t = t.rfind("</bash-").and_then(|i| t[i..].find('>').map(|j| t[i + j + 1..].trim())).unwrap_or("");
+    }
+    let noise = ["<command-", "<local-command", "<system-reminder", "Caveat:", "[Request interrupted", "<bash-", "<task-notification>"];
     (!t.is_empty() && !noise.iter().any(|n| t.starts_with(n))).then(|| t.to_string())
 }
 

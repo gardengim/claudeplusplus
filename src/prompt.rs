@@ -368,6 +368,41 @@ impl Ui {
 
     // ---------- permissions ----------
 
+    /// The "always" row says what it will remember, as Claude Code's own prompt does.
+    pub fn always_label(suggestions: &Value) -> Option<String> {
+        let parts: Vec<String> = suggestions
+            .as_array()?
+            .iter()
+            .filter_map(|s| match s["type"].as_str()? {
+                "setMode" => Some(match s["mode"].as_str()? {
+                    "acceptEdits" => "auto-accept edits".to_string(),
+                    m => format!("switch to {m} mode"),
+                } + if s["destination"] == "session" { " for this session" } else { "" }),
+                "addRules" => {
+                    let rules: Vec<String> = s["rules"]
+                        .as_array()?
+                        .iter()
+                        .filter_map(|r| {
+                            let tool = r["toolName"].as_str()?;
+                            Some(r["ruleContent"].as_str().map_or(tool.to_string(), |c| format!("{tool}({})", truncate(c, 48))))
+                        })
+                        .collect();
+                    (!rules.is_empty()).then(|| format!("don't ask again for {}", rules.join(", ")))
+                }
+                "addDirectories" => {
+                    let dirs: Vec<&str> = s["directories"].as_array()?.iter().filter_map(Value::as_str).collect();
+                    (!dirs.is_empty()).then(|| format!("allow access to {}", dirs.join(", ")))
+                }
+                _ => None,
+            })
+            .collect();
+        match (parts.is_empty(), suggestions.as_array().is_some_and(|a| !a.is_empty())) {
+            (false, _) => Some(format!("Yes, and {}", parts.join(" and "))),
+            (true, true) => Some("Yes, and don't ask again".into()),
+            (true, false) => None,
+        }
+    }
+
     /// Rows of a permission prompt, as the choice each one makes.
     fn permission_rows(has_always: bool) -> Vec<(Choice, &'static str, &'static str)> {
         let mut rows = vec![(Choice::Allow, "Yes", "y")];
@@ -410,27 +445,33 @@ impl Ui {
         }
     }
 
-    pub fn permission_view(&self, headline: &str, plan: Option<&str>, has_always: bool, width: usize) -> View {
+    /// `always`: what the second row does, from `always_label`; `None` when claude offered nothing to remember.
+    pub fn permission_view(&self, headline: &str, plan: Option<&str>, always: Option<&str>, width: usize) -> View {
         let mut body: Vec<Line<'static>> = Vec::new();
         for l in wrap(headline, width) {
             body.push(Line::styled(l, theme::bold()));
         }
         if let Some(plan) = plan {
-            for l in wrap(plan, width).into_iter().take(20) {
-                body.push(Line::raw(l));
+            let lines = crate::markdown::render(plan, width);
+            let n = lines.len();
+            body.extend(lines.into_iter().take(30));
+            if n > 30 {
+                body.push(Line::styled(format!("… +{} more lines", n - 30), theme::dim()));
             }
         }
-        let rows = Self::permission_rows(has_always);
+        let rows = Self::permission_rows(always.is_some());
         let cur = self.perm.min(rows.len() - 1);
         let mut focus = 0;
-        for (i, (_, text, key)) in rows.iter().enumerate() {
+        for (i, (choice, text, key)) in rows.iter().enumerate() {
+            let text = if matches!(choice, Choice::Always) { always.unwrap_or(text) } else { text };
             let on = i == cur;
             if on {
                 focus = body.len();
             }
             body.push(row(on, vec![Span::raw(format!("{}. {text}", i + 1)), Span::styled(format!("  ({key})"), theme::dim())]));
         }
-        let footer = theme::hints(&[("↑↓", "move"), ("enter", "choose"), ("y/a/n", "answer at once"), ("esc", "deny")]);
+        let keys = if always.is_some() { "y/a/n" } else { "y/n" };
+        let footer = theme::hints(&[("↑↓", "move"), ("enter", "choose"), (keys, "answer at once"), ("esc", "deny")]);
         finish(View::new("Permission", body, focus, footer), width)
     }
 }
@@ -672,10 +713,22 @@ mod tests {
         ui.permission_key(false, k(KeyCode::Up));
         assert!(matches!(ui.permission_key(false, k(KeyCode::Enter)), Some(Choice::Deny)), "up from the top wraps to No");
         assert!(ui.permission_key(true, KeyEvent::new(KeyCode::Char('y'), KeyModifiers::CONTROL)).is_none(), "ctrl keys belong to the app");
-        let v = Ui::default().permission_view("Allow Bash(ls)?", Some("plan line"), true, 50);
+        let v = Ui::default().permission_view("Allow Bash(ls)?", Some("plan line"), Some("Yes, and don't ask again"), 50);
         let t = text(&v);
         assert_eq!((t[0].as_str(), t[1].as_str()), ("Allow Bash(ls)?", "plan line"));
         assert!(t[2].starts_with("❯ 1. Yes") && t[3].contains("2. Yes, and don't ask again") && t[4].contains("3. No"));
         assert_eq!(v.title, "Permission");
+    }
+
+    #[test]
+    fn the_always_row_names_what_it_remembers() {
+        let l = |v: Value| Ui::always_label(&v);
+        assert_eq!(l(json!([{"type":"setMode","mode":"acceptEdits","destination":"session"}])).unwrap(), "Yes, and auto-accept edits for this session");
+        assert_eq!(
+            l(json!([{"type":"addRules","rules":[{"toolName":"Bash","ruleContent":"npm test:*"}],"behavior":"allow","destination":"localSettings"}])).unwrap(),
+            "Yes, and don't ask again for Bash(npm test:*)"
+        );
+        assert_eq!(l(json!([{"type":"somethingNew"}])).unwrap(), "Yes, and don't ask again", "unknown kinds keep the generic label");
+        assert_eq!(l(json!([])), None, "nothing to remember, no row");
     }
 }
