@@ -96,7 +96,6 @@ Adding a surface means writing a function that returns a `View`. Adding a config
 
 ## Known gaps (honest list, not promises)
 
-- Clipboard image paste runs `osascript` on the UI thread (~100–200 ms freeze on ctrl+v).
 - No light-theme variant; roles are chosen for dark terminals.
 - Config options are choice lists only; free-form values (a number, a path) will need a text-entry row.
 - The transcript's tool/diff rendering predates the theme and is only partly cleaned up.

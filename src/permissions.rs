@@ -111,20 +111,8 @@ pub fn load(cwd: &str, tab: &[(String, bool)]) -> Vec<Rule> {
 }
 
 fn write_json(file: &Path, m: Map<String, Value>) -> Result<(), String> {
-    let target = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
-    if let Some(dir) = target.parent() {
-        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
-    }
     let text = serde_json::to_string_pretty(&Value::Object(m)).map_err(|e| e.to_string())? + "\n";
-    let tmp = target.with_extension(format!("json.claudepp-{}", std::process::id()));
-    std::fs::write(&tmp, text).map_err(|e| e.to_string())?;
-    if let Ok(meta) = std::fs::metadata(&target) {
-        let _ = std::fs::set_permissions(&tmp, meta.permissions());
-    }
-    std::fs::rename(&tmp, &target).map_err(|e| {
-        let _ = std::fs::remove_file(&tmp);
-        e.to_string()
-    })
+    crate::config::write_atomic(file, &text).map_err(|e| e.to_string())
 }
 
 /// Add `rule` to the file for `scope` (no duplicates). Returns false when it was there already.

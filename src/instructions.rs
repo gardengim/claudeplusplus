@@ -187,7 +187,7 @@ pub fn apply(rules: &Rules, cache: &Path, args: &mut Vec<String>, settings: &mut
         let Ok(text) = std::fs::read_to_string(path) else { continue };
         let secs = sections(&text);
         let keep = filtered_at(&text, &secs, set, path);
-        if keep == text {
+        if keep == filtered_at(&text, &secs, &BTreeSet::new(), path) {
             continue;
         }
         excluded.push(path.clone());
@@ -214,11 +214,8 @@ pub fn apply(rules: &Rules, cache: &Path, args: &mut Vec<String>, settings: &mut
     let mut h = std::collections::hash_map::DefaultHasher::new();
     body.hash(&mut h);
     let file = cache.join("instructions").join(format!("{:016x}.md", h.finish()));
-    if !file.exists() {
-        let _ = std::fs::create_dir_all(cache.join("instructions"));
-        if std::fs::write(&file, &body).is_err() {
-            return;
-        }
+    if !file.exists() && crate::config::write_atomic(&file, &body).is_err() {
+        return;
     }
     args.extend(["--append-system-prompt-file".into(), file.to_string_lossy().into_owned()]);
 }
@@ -275,16 +272,20 @@ impl Ui {
     pub fn sizes(&self, f: usize) -> (usize, usize) {
         let src = &self.files[f];
         let keep = filtered_at(&src.text, &src.secs, &self.set(f), &src.path).len();
-        (keep, src.text.len() - keep)
+        (keep, src.text.len().saturating_sub(keep))
     }
 
     /// 0 none shown, 1 some, 2 all.
     fn state(&self, f: usize) -> u8 {
-        match self.sizes(f) {
-            (_, 0) => 2,
-            (0, _) => 0,
-            (k, _) if self.files[f].text.trim().is_empty() || k == 0 => 0,
-            _ => 1,
+        let src = &self.files[f];
+        let keep = filtered_at(&src.text, &src.secs, &self.set(f), &src.path);
+        // Compared with the unfiltered rendering, not the raw text, which may lack a final newline.
+        if keep == filtered_at(&src.text, &src.secs, &BTreeSet::new(), &src.path) {
+            2
+        } else if keep.trim().is_empty() {
+            0
+        } else {
+            1
         }
     }
 
@@ -301,7 +302,9 @@ impl Ui {
                     return Err("hidden along with its parent section");
                 }
                 if cur.remove(WHOLE) {
-                    cur = secs.iter().map(|x| x.id.clone()).filter(|id| *id != secs[s].id).collect();
+                    // Everything else stays hidden; its parents must show, or they would hide it again.
+                    let me = &secs[s];
+                    cur = secs.iter().filter(|p| !(p.from <= me.from && p.to >= me.to && p.depth <= me.depth)).map(|x| x.id.clone()).collect();
                 } else if !cur.remove(&secs[s].id) {
                     cur.insert(secs[s].id.clone());
                 }
@@ -487,6 +490,23 @@ mod tests {
         ui.toggle(Row::File(f)).unwrap(); // partial → all shown again
         ui.toggle(Row::Sec(f, 1)).unwrap(); // hide A
         assert_eq!(ui.toggle(Row::Sec(f, 2)), Err("hidden along with its parent section"));
+    }
+
+    #[test]
+    fn a_file_without_a_final_newline_counts_as_all_shown_and_a_child_can_be_shown_from_a_hidden_file() {
+        let d = temp("nonl");
+        std::fs::write(d.join("AGENTS.md"), DOC.trim_end()).unwrap();
+        let mut ui = Ui::new(d.to_str().unwrap(), Rules::new());
+        let f = ui.files.iter().position(|s| s.path.ends_with("AGENTS.md")).unwrap();
+        assert_eq!((ui.state(f), ui.sizes(f).1), (2, 0), "no phantom hidden bytes, no underflow");
+        let (mut args, mut settings) = (vec![], Map::new());
+        apply(&[(ui.files[f].path.clone(), ["Z".to_string()].into())].into(), &d, &mut args, &mut settings);
+        assert!(args.is_empty() && settings.is_empty(), "a rule that hides nothing excludes nothing");
+        ui.toggle(Row::File(f)).unwrap(); // whole file hidden
+        ui.toggle(Row::Sec(f, 2)).unwrap(); // show A > A1
+        let src = &ui.files[f];
+        let out = filtered_at(&src.text, &src.secs, &ui.set(f), "");
+        assert!(out.contains("a1 text") && !out.contains("a2 text") && !out.contains("b text"), "{out}");
     }
 
     #[test]

@@ -99,7 +99,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     f.render_widget(Paragraph::new(text).block(rule), input_area);
     // A panel that owns the keyboard also owns the cursor: leave it hidden.
     if input_keeps_focus {
-        f.set_cursor_position(Position::new(input_area.x + 2 + cursor.0 as u16, input_area.y + 1 + (cursor_row - skip) as u16));
+        f.set_cursor_position(Position::new(input_area.x + 2 + cursor.0 as u16, input_area.y + 1 + cursor_row.saturating_sub(skip) as u16));
     }
     f.render_widget(Paragraph::new(status_line(app, area.height)), status);
 }
@@ -368,7 +368,7 @@ fn tool_lines(
     let n = diff.len();
     for (sign, l) in diff.into_iter().take(limit) {
         let style = if sign == '-' { theme::danger() } else { theme::ok() };
-        out.push(Line::from(vec![Span::raw("    "), Span::styled(truncate(&format!("{sign} {l}"), width - 4), style)]));
+        out.push(Line::from(vec![Span::raw("    "), Span::styled(truncate(&format!("{sign} {l}"), width.saturating_sub(4)), style)]));
     }
     if n > limit {
         out.push(Line::styled(format!("    … +{} lines (ctrl+o to expand)", n - limit), theme::dim()));
@@ -581,6 +581,11 @@ fn input_layout(text: &str, cursor: usize, width: usize) -> (Vec<String>, (usize
     let mut w = 0;
     let mut pos = (0, 0);
     for (i, ch) in text.chars().enumerate() {
+        let cw = ch.width().unwrap_or(0);
+        if ch != '\n' && w + cw > width {
+            lines.push(String::new());
+            w = 0;
+        }
         if i == cursor {
             pos = (w, lines.len() - 1);
         }
@@ -588,11 +593,6 @@ fn input_layout(text: &str, cursor: usize, width: usize) -> (Vec<String>, (usize
             lines.push(String::new());
             w = 0;
             continue;
-        }
-        let cw = ch.width().unwrap_or(0);
-        if w + cw > width {
-            lines.push(String::new());
-            w = 0;
         }
         lines.last_mut().unwrap().push(ch);
         w += cw;
@@ -625,6 +625,7 @@ mod tests {
         assert_eq!(input_layout("abc", 3, 10).1, (3, 0));
         assert_eq!(input_layout("ab\ncd", 3, 10).1, (0, 1));
         assert_eq!(input_layout("abcd", 4, 4), (vec!["abcd".into(), "".into()], (0, 1)));
+        assert_eq!(input_layout("abcde", 4, 4).1, (0, 1), "a cursor on the wrapped char is on the next row");
         assert_eq!(input_layout("한글", 1, 10).1, (2, 0));
     }
 

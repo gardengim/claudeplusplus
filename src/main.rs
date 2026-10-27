@@ -45,6 +45,8 @@ pub enum AppEvent {
     Stopped(Result<String, String>, Option<(String, String, Option<String>)>),
     /// SIGTERM or SIGHUP: leave through the normal path so the terminal is restored.
     Quit,
+    /// The clipboard was read off the UI thread: session id, the PNG if there was one, what to say if not.
+    Clipboard(u64, Option<Vec<u8>>, &'static str),
 }
 
 /// `--profile lean` = this tool set, no MCP, and no user-level settings (user CLAUDE.md/AGENTS.md,
@@ -421,7 +423,10 @@ fn run(opts: Opts) -> io::Result<()> {
     // A crash must not leave the terminal reporting the mouse or swallowing paste: undo everything first.
     let previous = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
-        restore_terminal();
+        // Only the UI thread's panic ends the program; a worker's must not leave the UI drawing into a cooked terminal.
+        if thread::current().name() == Some("main") {
+            restore_terminal();
+        }
         previous(info);
     }));
     thread::spawn(move || {
@@ -454,6 +459,7 @@ fn run(opts: Opts) -> io::Result<()> {
     // EOF every backend first so they shut down in parallel, then wait for each.
     app.sessions.iter_mut().filter_map(|s| s.backend.as_mut()).for_each(Backend::close);
     drop(app);
+    backend::wait_for_exits();
     res
 }
 
@@ -533,7 +539,7 @@ impl App {
     fn warm(&mut self) {
         // Typing `/` only starts a backend when completion still has no command list to offer.
         let wanted = !self.input.is_empty() && (!self.input.starts_with('/') || self.known_commands.is_empty());
-        if wanted {
+        if wanted && self.sessions[self.active].backend.is_none() {
             let (launch, tx) = (self.launch_for(self.active), self.tx.clone());
             self.s().warm(&launch, &tx);
         }
@@ -689,6 +695,15 @@ impl App {
                     }
                 }
             }
+            AppEvent::Clipboard(sid, png, miss) => match png {
+                // A picture lands in the box it was pasted into, or nowhere.
+                Some(png) if self.sessions[self.active].id == sid => {
+                    self.clip_n += 1;
+                    self.attach_bytes(format!("clipboard-{}.png", self.clip_n), png, "image/png");
+                }
+                Some(_) => self.flash("pasted image dropped: the tab changed while it was read"),
+                None => self.flash(miss),
+            },
             AppEvent::Stopped(res, then) => match res {
                 Ok(msg) => {
                     self.flash(msg);
@@ -891,9 +906,7 @@ impl App {
         }
         if p.is_empty() {
             // Terminals send an empty paste when the clipboard holds an image and no text.
-            if !self.paste_image() {
-                self.flash("nothing to paste");
-            }
+            self.paste_image("nothing to paste");
             return;
         }
         let p = p.replace("\r\n", "\n").replace('\r', "\n");
@@ -914,11 +927,12 @@ impl App {
         if back { image::token_ending_at(&chars, self.cursor) } else { image::token_starting_at(&chars, self.cursor) }
     }
 
-    fn paste_image(&mut self) -> bool {
-        let Some(png) = image::clipboard_png() else { return false };
-        self.clip_n += 1;
-        self.attach_bytes(format!("clipboard-{}.png", self.clip_n), png, "image/png");
-        true
+    /// Read the clipboard's image on a thread (osascript takes ~100–200 ms); it is attached when it arrives.
+    fn paste_image(&mut self, miss: &'static str) {
+        let (sid, tx) = (self.sessions[self.active].id, self.tx.clone());
+        thread::spawn(move || {
+            let _ = tx.send(AppEvent::Clipboard(sid, image::clipboard_png(), miss));
+        });
     }
 
     fn attach(&mut self, path: &str) {
@@ -1032,17 +1046,19 @@ impl App {
         }
         if self.input != before.0 {
             self.sel = 0;
-            self.drop_orphan_images();
+            self.drop_orphan_images("");
         }
         self.refresh_files();
     }
 
-    /// Attachments whose `[Image #n]` token was deleted from the text are not sent; free them now.
-    fn drop_orphan_images(&mut self) {
+    /// Free attachments whose `[Image #n]` token is in neither the input, `also`, nor anything ctrl+z can bring back.
+    fn drop_orphan_images(&mut self, also: &str) {
         if self.sessions[self.active].attachments.is_empty() {
             return;
         }
-        let present = image::tokens_in(&self.input);
+        let mut present = image::tokens_in(&self.input);
+        present.extend(image::tokens_in(also));
+        present.extend(self.undo.iter().flat_map(|(t, _)| image::tokens_in(t)));
         self.s().attachments.retain(|a| {
             let keep = present.contains(&a.n);
             if !keep {
@@ -1467,9 +1483,7 @@ impl App {
             KeyCode::Char('t') if ctrl => self.new_tab(),
             KeyCode::Char('r') if ctrl => self.toggle_sessions(),
             KeyCode::Char('v') if ctrl => {
-                if !self.paste_image() {
-                    self.flash("no image on the clipboard (ctrl+v pastes images; paste text with your terminal's paste)");
-                }
+                self.paste_image("no image on the clipboard (ctrl+v pastes images; paste text with your terminal's paste)");
             }
             KeyCode::Char('n') if ctrl => self.switch(1),
             KeyCode::Char('p') if ctrl => self.switch(-1),
@@ -1994,7 +2008,9 @@ impl App {
 
     fn picker_key(&mut self, k: KeyEvent) {
         let n = self.model_list().len();
-        let Some(p) = self.model_picker else { return };
+        let Some(mut p) = self.model_picker else { return };
+        // The list can shrink under an open picker (the backend's own list replaces the cached one).
+        p.sel = p.sel.min(n.saturating_sub(1));
         let levels = |sel: usize| self.model_list().get(sel).map_or(0, |m| m.efforts.len());
         let next = match k.code {
             KeyCode::Esc => return self.model_picker = None,
@@ -2205,6 +2221,8 @@ impl App {
             _ => {
                 let (launch, tx) = (self.launch_for(self.active), self.tx.clone());
                 let mentioned = self.mentioned_images(&text);
+                self.undo.clear(); // sent: what was only kept for undo goes now
+                self.drop_orphan_images(&text);
                 self.s().submit(text, &mentioned, &launch, &tx);
             }
         }

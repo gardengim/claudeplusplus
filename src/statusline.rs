@@ -10,6 +10,7 @@ use ratatui::text::{Line, Span};
 use serde_json::{Value, json};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::os::unix::process::CommandExt;
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
@@ -185,7 +186,8 @@ pub fn run(command: &str, input: &str, size: (u16, u16), cwd: &str, cancel: &Ato
     if Path::new(cwd).is_dir() {
         cmd.current_dir(cwd);
     }
-    let mut child = cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().ok()?;
+    // Its own process group, so a timeout kills the whole pipeline, not just the shell.
+    let mut child = cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null()).process_group(0).spawn().ok()?;
     let mut stdin = child.stdin.take()?;
     let input = input.to_string();
     // A script that never reads stdin must not block us: write from a thread.
@@ -204,7 +206,8 @@ pub fn run(command: &str, input: &str, size: (u16, u16), cwd: &str, cancel: &Ato
             Ok(Some(_)) => break,
             Ok(None) if start.elapsed() < TIMEOUT && !cancel.load(Ordering::Relaxed) => std::thread::sleep(Duration::from_millis(5)),
             _ => {
-                let _ = child.kill();
+                // SAFETY: plain syscall; the group id is the child's pid (process_group(0) above).
+                unsafe { libc::kill(-(child.id() as i32), libc::SIGKILL) };
                 let _ = child.wait();
                 return None;
             }
@@ -586,6 +589,9 @@ mod tests {
         let t = Instant::now();
         assert!(run("sleep 30", "{}", (80, 24), "/", &no_cancel()).is_none());
         assert!(t.elapsed() < Duration::from_secs(4), "{:?}", t.elapsed());
+        assert!(run("sleep 37.123 | cat", "{}", (80, 24), "/", &no_cancel()).is_none());
+        let orphans = Command::new("pgrep").args(["-f", "sleep 37.123"]).output().unwrap();
+        assert!(orphans.stdout.is_empty(), "the whole pipeline is killed, not only the shell");
         let big = "x".repeat(2_000_000); // far more than a pipe buffer holds
         let t = Instant::now();
         assert_eq!(run("echo fast", &big, (80, 24), "/", &no_cancel()).unwrap(), ["fast"]);

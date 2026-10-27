@@ -3,8 +3,9 @@
 
 use serde_json::{Value, json};
 use std::io::{self, BufRead, BufReader, Read, Write};
-use std::process::{Child, ChildStdin, Command, Stdio};
-use std::sync::mpsc::Sender;
+use std::process::{Child, Command, Stdio};
+use std::sync::Mutex;
+use std::sync::mpsc::{self, Sender};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -15,8 +16,9 @@ pub enum Msg {
 }
 
 pub struct Backend {
-    child: Child,
-    stdin: Option<ChildStdin>,
+    child: Option<Child>,
+    /// Lines for the writer thread; dropping it closes claude's stdin once the queue is written.
+    stdin: Option<Sender<Vec<u8>>>,
     pub pid: u32,
     next_id: u64,
 }
@@ -87,12 +89,21 @@ impl Backend {
             lines[lines.len().saturating_sub(15)..].join("\n")
         });
         thread::spawn(move || {
-            for line in BufReader::new(stdout).lines() {
-                let Ok(line) = line else { break };
+            // Bytes, not `lines()`: one non-UTF-8 line must not stop the reader (and stall the child).
+            let mut out = BufReader::new(stdout);
+            let mut buf = Vec::new();
+            loop {
+                buf.clear();
+                match out.read_until(b'\n', &mut buf) {
+                    Ok(0) | Err(_) => break,
+                    Ok(_) => {}
+                }
+                let line = String::from_utf8_lossy(&buf);
+                let line = line.trim_end_matches(['\n', '\r']);
                 if line.trim().is_empty() {
                     continue;
                 }
-                let v = serde_json::from_str(&line)
+                let v = serde_json::from_str(line)
                     .unwrap_or_else(|_| json!({"type": "_raw", "text": line}));
                 if tx.send(wrap(pid, Msg::Line(v))).is_err() {
                     return;
@@ -102,8 +113,19 @@ impl Backend {
             let _ = tx.send(wrap(pid, Msg::Exited { status: "exited".into(), stderr_tail }));
         });
 
-        let stdin = child.stdin.take();
-        let mut b = Backend { child, stdin, pid, next_id: 0 };
+        // Writes go through a thread: a multi-megabyte image message, or a child that stops
+        // reading, must not block the UI on a full pipe.
+        let mut pipe = child.stdin.take().unwrap();
+        let (stdin_tx, stdin_rx) = mpsc::channel::<Vec<u8>>();
+        thread::spawn(move || {
+            for line in stdin_rx {
+                if pipe.write_all(&line).is_err() {
+                    break;
+                }
+            }
+        });
+        let stdin = Some(stdin_tx);
+        let mut b = Backend { child: Some(child), stdin, pid, next_id: 0 };
         b.control("initialize", json!({}))?;
         Ok(b)
     }
@@ -114,14 +136,11 @@ impl Backend {
     }
 
     fn send(&mut self, v: &Value) -> io::Result<()> {
-        let stdin = self
-            .stdin
-            .as_mut()
-            .ok_or_else(|| io::Error::new(io::ErrorKind::BrokenPipe, "backend stdin closed"))?;
+        let closed = || io::Error::new(io::ErrorKind::BrokenPipe, "backend stdin closed");
+        let stdin = self.stdin.as_ref().ok_or_else(closed)?;
         let mut line = serde_json::to_vec(v)?;
         line.push(b'\n');
-        stdin.write_all(&line)?;
-        stdin.flush()
+        stdin.send(line).map_err(|_| closed())
     }
 
     /// `content` is a string or an array of content blocks (text/image).
@@ -159,20 +178,39 @@ impl Backend {
     }
 }
 
+/// Threads still waiting for a dropped backend to exit; `wait_for_exits` joins them at quit.
+static REAPERS: Mutex<Vec<thread::JoinHandle<()>>> = Mutex::new(Vec::new());
+
 impl Drop for Backend {
     /// Close stdin so claude can finish writing its transcript and exit on its own;
-    /// kill it only if it lingers.
+    /// kill it only if it lingers. The wait runs off the UI thread (closing tabs or
+    /// suspending several must not freeze it).
     fn drop(&mut self) {
         self.stdin = None;
-        let deadline = Instant::now() + Duration::from_millis(800);
-        while Instant::now() < deadline {
-            if let Ok(Some(_)) = self.child.try_wait() {
-                return;
+        let Some(mut child) = self.child.take() else { return };
+        let reaper = thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_millis(800);
+            while Instant::now() < deadline {
+                if let Ok(Some(_)) = child.try_wait() {
+                    return;
+                }
+                thread::sleep(Duration::from_millis(20));
             }
-            thread::sleep(Duration::from_millis(20));
+            let _ = child.kill();
+            let _ = child.wait();
+        });
+        if let Ok(mut r) = REAPERS.lock() {
+            r.retain(|h| !h.is_finished());
+            r.push(reaper);
         }
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+    }
+}
+
+/// Block until every dropped backend has exited or been killed (at quit, so none is left behind).
+pub fn wait_for_exits() {
+    let reapers = REAPERS.lock().map(|mut r| std::mem::take(&mut *r)).unwrap_or_default();
+    for r in reapers {
+        let _ = r.join();
     }
 }
 
@@ -215,13 +253,27 @@ echo bye >&2"#,
     }
 
     #[test]
+    fn a_big_message_to_a_child_that_is_not_reading_never_blocks_the_sender() {
+        let launch = fake("deaf", "sleep 30");
+        let (tx, _rx) = mpsc::channel();
+        let mut b = Backend::spawn(&launch, Resume::New, tx, |_, m| m).unwrap();
+        let t = Instant::now();
+        b.user(json!("x".repeat(2_000_000))).unwrap(); // far more than a pipe buffer holds
+        assert!(t.elapsed() < Duration::from_millis(500), "{:?}", t.elapsed());
+    }
+
+    #[test]
     fn lingering_process_is_killed_on_drop() {
         let launch = fake("hang", "trap '' TERM; while :; do sleep 1; done");
         let (tx, _rx) = mpsc::channel();
         let b = Backend::spawn(&launch, Resume::New, tx, |_, m| m).unwrap();
-        let t = Instant::now();
+        let (t, pid) = (Instant::now(), b.pid.to_string());
         drop(b);
+        assert!(t.elapsed() < Duration::from_millis(100), "dropping never waits on the caller's thread");
+        wait_for_exits();
         assert!(t.elapsed() < Duration::from_secs(3));
+        let alive = Command::new("kill").args(["-0", &pid]).stderr(Stdio::null()).status().is_ok_and(|s| s.success());
+        assert!(!alive, "the lingering process was killed");
     }
 
     #[test]

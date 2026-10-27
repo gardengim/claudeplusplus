@@ -32,8 +32,26 @@ fn projects_dir() -> Option<PathBuf> {
 }
 
 /// Claude Code names a project's folder after its path, every non-alphanumeric char becoming `-`.
+/// Claude Code's project folder name: every UTF-16 unit that isn't ASCII alphanumeric becomes '-';
+/// past 200 units it cuts there and appends a base-36 Java-style hash of the path.
 fn encode_cwd(cwd: &str) -> String {
-    cwd.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect()
+    let name: String = cwd
+        .chars()
+        .flat_map(|c| if c.is_ascii_alphanumeric() { vec![c] } else { vec!['-'; c.len_utf16()] })
+        .collect();
+    if name.len() <= 200 {
+        return name;
+    }
+    let h = cwd.encode_utf16().fold(0i32, |h, u| h.wrapping_mul(31).wrapping_add(u as i32));
+    let (mut n, mut digits) = ((h as i64).unsigned_abs(), Vec::new());
+    loop {
+        digits.push(char::from_digit((n % 36) as u32, 36).unwrap());
+        n /= 36;
+        if n == 0 {
+            break;
+        }
+    }
+    format!("{}-{}", &name[..200], digits.iter().rev().collect::<String>())
 }
 
 /// Locate a session's transcript by id, whichever project folder holds it.
@@ -292,6 +310,11 @@ mod tests {
     fn folder_names_match_claude_codes_encoding() {
         // Observed on disk for this very project.
         assert_eq!(encode_cwd("/Users/jeongwonkim/Projects/claude++"), "-Users-jeongwonkim-Projects-claude--");
+        // Expected values computed by Claude Code's own function (2.1.311) under node.
+        assert_eq!(encode_cwd("/a/😀b"), "-a---b");
+        let long = format!("/Users/me/{}😀x", "deeply-nested-folder/".repeat(10));
+        let want = format!("-Users-me-{}d-71wv3g", "deeply-nested-folder-".repeat(9));
+        assert_eq!(encode_cwd(&long), want);
     }
 
     #[test]

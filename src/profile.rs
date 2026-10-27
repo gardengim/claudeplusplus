@@ -57,15 +57,14 @@ pub fn spec(name: &str) -> Result<Spec, String> {
 
 /// The profile's flags and environment. `dir` is where custom profiles live (`None`: only built-ins).
 pub fn resolve(dir: Option<&Path>, name: &str) -> Result<Spec, String> {
-    let (merged, base) = load(dir, name, &mut vec![])?;
-    emit(&merged, &base)
+    emit(&load(dir, name, &mut vec![])?)
 }
 
-/// (merged keys, directory relative paths are relative to). The nearest profile that sets a path key
-/// decides its base, so each key records its own directory in `__dir:<key>`.
-fn load(dir: Option<&Path>, name: &str, seen: &mut Vec<String>) -> Result<(Map<String, Value>, PathBuf), String> {
+/// Merged keys. The nearest profile that sets a path key decides what it is relative to, so each
+/// key records its own directory in `__dir:<key>`.
+fn load(dir: Option<&Path>, name: &str, seen: &mut Vec<String>) -> Result<Map<String, Value>, String> {
     if let Some(b) = builtin(name) {
-        return Ok((b, PathBuf::new()));
+        return Ok(b);
     }
     if !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') || name.is_empty() {
         return Err(format!("{name:?} is not a profile name (letters, digits, - and _)"));
@@ -84,9 +83,9 @@ fn load(dir: Option<&Path>, name: &str, seen: &mut Vec<String>) -> Result<(Map<S
         return Err(format!("{}: unknown key {k:?} (known: {})", file.display(), KEYS.join(", ")));
     }
     seen.push(name.to_string());
-    let (mut merged, _) = match own.get("extends").and_then(Value::as_str) {
+    let mut merged = match own.get("extends").and_then(Value::as_str) {
         Some(parent) => load(dir, parent, seen)?,
-        None => (Map::new(), PathBuf::new()),
+        None => Map::new(),
     };
     seen.pop();
     let here = d.to_string_lossy().into_owned();
@@ -109,7 +108,7 @@ fn load(dir: Option<&Path>, name: &str, seen: &mut Vec<String>) -> Result<(Map<S
             }
         }
     }
-    Ok((merged, PathBuf::new()))
+    Ok(merged)
 }
 
 fn unknown(name: &str) -> String {
@@ -135,7 +134,7 @@ fn path(merged: &Map<String, Value>, key: &str, p: &str) -> String {
     }
 }
 
-fn emit(m: &Map<String, Value>, _base: &Path) -> Result<Spec, String> {
+fn emit(m: &Map<String, Value>) -> Result<Spec, String> {
     let mut a: Vec<String> = vec![];
     let mut flag = |name: &str, vals: Vec<String>| {
         if !vals.is_empty() {

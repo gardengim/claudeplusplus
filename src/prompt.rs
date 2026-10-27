@@ -388,11 +388,7 @@ impl Ui {
             KeyCode::Char('y' | 'Y') => Some(Choice::Allow),
             KeyCode::Char('a' | 'A') if has_always => Some(Choice::Always),
             KeyCode::Char('n' | 'N') | KeyCode::Esc => Some(Choice::Deny),
-            KeyCode::Char(c @ '1'..='9') => rows.get(c as usize - '1' as usize).map(|r| match r.0 {
-                Choice::Allow => Choice::Allow,
-                Choice::Always => Choice::Always,
-                Choice::Deny => Choice::Deny,
-            }),
+            KeyCode::Char(c @ '1'..='9') => rows.get(c as usize - '1' as usize).map(|r| r.0),
             KeyCode::Up => {
                 self.perm = (self.perm + rows.len() - 1) % rows.len();
                 None
@@ -409,11 +405,7 @@ impl Ui {
                 self.perm = rows.len() - 1;
                 None
             }
-            KeyCode::Enter => Some(match rows[self.perm].0 {
-                Choice::Allow => Choice::Allow,
-                Choice::Always => Choice::Always,
-                Choice::Deny => Choice::Deny,
-            }),
+            KeyCode::Enter => Some(rows[self.perm].0),
             _ => None,
         }
     }

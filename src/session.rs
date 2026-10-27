@@ -89,6 +89,7 @@ impl Pending {
     }
 }
 
+#[derive(Clone, Copy)]
 pub enum Choice {
     Allow,
     Always,
@@ -351,11 +352,9 @@ impl Session {
         if skipped > 0 {
             self.note(format!("… {skipped} earlier messages not shown"));
         }
-        self.replaying = true;
         for v in &lines {
             self.replay(v);
         }
-        self.replaying = false;
         self.note("— resumed —".into());
         // The cache clock runs from the transcript's last write, not from the replay.
         self.last_api = std::fs::metadata(path).and_then(|m| m.modified()).ok()
@@ -365,6 +364,7 @@ impl Session {
     /// Feed one transcript line: real prompts become user entries; assistant text, tool calls and
     /// tool results go through the same path as live messages.
     fn replay(&mut self, v: &Value) {
+        self.replaying = true;
         if v["type"] == "user" {
             match history::user_text(v) {
                 Some(t) => self.push(Entry::User(t)),
@@ -376,6 +376,7 @@ impl Session {
         } else {
             self.handle(v);
         }
+        self.replaying = false;
     }
 
     /// Send an API image block to the terminal and add it to the transcript. Where images are off
@@ -593,6 +594,19 @@ impl Session {
         self.items.push(Item { entry, cache: None });
     }
 
+    /// A turn that ended (or a backend that died) mid-stream leaves no text block still "typing".
+    fn end_streams(&mut self) {
+        self.live.clear();
+        for item in &mut self.items {
+            if let Entry::Assistant { streaming, .. } = &mut item.entry
+                && *streaming
+            {
+                *streaming = false;
+                item.cache = None;
+            }
+        }
+    }
+
     pub fn note(&mut self, s: String) {
         self.push(Entry::Note(s));
     }
@@ -636,9 +650,11 @@ impl Session {
             b.control("apply_flag_settings", json!({"settings": {"fastMode": true}}))?;
             b.control("initialize", json!({}))?; // fast mode state is only reported by initialize
         }
-        for (sub, fields) in self.deferred.drain(..) {
-            b.control(&sub, fields)?;
+        // Kept until every one is sent, so a backend that dies here leaves them for the next.
+        for (sub, fields) in &self.deferred {
+            b.control(sub, fields.clone())?;
         }
+        self.deferred.clear();
         b.control("get_settings", json!({}))?;
         self.backend = Some(b);
         Ok(())
@@ -808,6 +824,7 @@ impl Session {
         self.items.clear();
         self.pending.clear();
         self.busy = false;
+        self.interrupted = false;
         self.ctx_tokens = 0;
         self.last_api = None;
         self.cold_noted = false;
@@ -877,6 +894,9 @@ impl Session {
             Msg::Exited { status, stderr_tail } => {
                 self.backend = None;
                 self.pending.clear();
+                self.end_streams();
+                // An interrupt the backend died before answering has nothing left to silence.
+                self.interrupted = false;
                 if self.busy || !stderr_tail.is_empty() {
                     self.busy = false;
                     let tail = if stderr_tail.is_empty() { String::new() } else { format!("\n{stderr_tail}") };
@@ -888,7 +908,14 @@ impl Session {
 
     pub fn handle(&mut self, v: &Value) {
         let top_level = v["parent_tool_use_id"].is_null();
-        match v["type"].as_str().unwrap_or("") {
+        let kind = v["type"].as_str().unwrap_or("");
+        // Output after a `result` means a queued message started another turn.
+        if !self.busy && !self.replaying && matches!(kind, "stream_event" | "assistant") {
+            self.busy = true;
+            self.busy_since = Instant::now();
+            self.turn_text = false;
+        }
+        match kind {
             "system" => match v["subtype"].as_str().unwrap_or("") {
                 "init" => {
                     let first = self.session_id.is_none();
@@ -1017,6 +1044,7 @@ impl Session {
             "result" => {
                 self.busy = false;
                 self.pending.clear();
+                self.end_streams();
                 self.activity.clear();
                 self.cost += v["total_cost_usd"].as_f64().unwrap_or(0.0);
                 self.api_ms += v["duration_api_ms"].as_u64().unwrap_or(0);
@@ -1068,6 +1096,8 @@ impl Session {
                     let _ = b.respond_error(&rid, "not supported by claude++");
                 }
             }
+            // The CLI withdrew a prompt (aborted, or settled by a hook): stop asking.
+            "control_cancel_request" => self.pending.retain(|p| v["request_id"].as_str() != Some(p.request_id.as_str())),
             "control_response" => {
                 let r = &v["response"];
                 let err = r["error"].as_str().unwrap_or("?");
@@ -1247,6 +1277,37 @@ mod tests {
         for l in lines {
             s.handle(&serde_json::from_str(l).unwrap());
         }
+    }
+
+    #[test]
+    fn withdrawn_prompts_cut_streams_and_a_cleared_interrupt_leave_nothing_stale() {
+        let mut s = Session::new(1, String::new());
+        s.busy = true;
+        feed(
+            &mut s,
+            &[
+                r#"{"type":"control_request","request_id":"r1","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{},"permission_suggestions":[]}}"#,
+                r#"{"type":"control_request","request_id":"r2","request":{"subtype":"can_use_tool","tool_name":"Read","input":{},"permission_suggestions":[]}}"#,
+                r#"{"type":"control_cancel_request","request_id":"r1"}"#,
+            ],
+        );
+        assert_eq!(s.pending.iter().map(|p| p.request_id.as_str()).collect::<Vec<_>>(), ["r2"], "the withdrawn prompt is gone, the next one is up");
+        feed(
+            &mut s,
+            &[
+                r#"{"type":"stream_event","parent_tool_use_id":null,"event":{"type":"message_start","message":{"id":"m1"}}}"#,
+                r#"{"type":"stream_event","parent_tool_use_id":null,"event":{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}}"#,
+                r#"{"type":"result","subtype":"error_during_execution","is_error":true}"#,
+            ],
+        );
+        assert!(matches!(&s.items[0].entry, Entry::Assistant { streaming: false, .. }), "no text left typing after the turn ends");
+        assert!(!s.busy);
+        feed(&mut s, &[r#"{"type":"stream_event","parent_tool_use_id":null,"event":{"type":"message_start","message":{"id":"m2"}}}"#]);
+        assert!(s.busy, "a queued message's turn shows as busy again");
+        s.interrupt();
+        s.clear();
+        feed(&mut s, &[r#"{"type":"result","subtype":"error_during_execution","is_error":true,"result":"credit balance too low"}"#]);
+        assert!(s.items.iter().any(|i| matches!(&i.entry, Entry::Error(t) if t.contains("credit"))), "a new conversation's error is not taken for the old interrupt");
     }
 
     #[test]

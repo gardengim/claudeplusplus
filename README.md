@@ -43,7 +43,7 @@ claude++ --help
 
 Dependencies: `ratatui` (with its bundled crossterm), `serde_json`, `unicode-width`.
 Base64 (for images) and argument parsing are a few lines each, so they are hand-written.
-Release binary: ~0.9 MB.
+Release binary: ~1.7 MB.
 
 ## What works (verified end-to-end against Claude Code 2.1.309)
 

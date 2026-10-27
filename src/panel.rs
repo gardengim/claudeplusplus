@@ -230,7 +230,7 @@ mod tests {
         let b = t.backend().buffer().clone();
         let row = |y: u16| (0..120).map(|x| b[(x, y)].symbol().to_string()).collect::<String>();
         assert!(row(0).starts_with(" Everything") && row(9).contains("⎋ close"));
-        assert!((0..10).all(|y| !row(y).contains('┌') && !row(y).contains('│') || row(y).contains("DETAIL") || row(y).starts_with("│") == false));
+        assert!((0..10).all(|y| !row(y).contains('┌') && !row(y).contains('│') || row(y).contains("DETAIL") || !row(y).starts_with("│")));
         assert!(row(1).contains("row 0") && (0..10).any(|y| row(y).contains("DETAIL")), "body and the wide detail pane use the screen");
     }
 

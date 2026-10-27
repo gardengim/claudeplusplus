@@ -287,7 +287,7 @@ pub fn save(cwd: &str, s: &Saved) -> std::io::Result<()> {
         "strict_mcp": s.strict_mcp,
         "instructions": s.instructions,
     });
-    std::fs::write(f, serde_json::to_string_pretty(&v)? + "\n")
+    crate::config::write_atomic(&f, &(serde_json::to_string_pretty(&v)? + "\n"))
 }
 
 pub fn load(cwd: &str) -> Option<Saved> {

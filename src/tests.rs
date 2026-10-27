@@ -306,7 +306,7 @@ fn a_pasted_image_becomes_a_token_on_its_own_line_at_the_cursor() {
 }
 
 #[test]
-fn deleting_a_token_removes_it_whole_and_frees_the_attachment() {
+fn deleting_a_token_removes_it_whole_and_undo_brings_its_picture_back() {
     let (mut app, _d) = fake_app("deltok");
     typed(&mut app, "x");
     paste(&mut app);
@@ -316,16 +316,46 @@ fn deleting_a_token_removes_it_whole_and_frees_the_attachment() {
     press(&mut app, KeyCode::Backspace);
     press(&mut app, KeyCode::Backspace);
     assert_eq!(visible_input(&app), "x|[Image #1]|");
-    assert_eq!(app.sessions[0].attachments.iter().map(|a| a.n).collect::<Vec<_>>(), [1], "image 2 is dropped with its token");
+    for _ in 0..2 {
+        app.on_key(KeyEvent::new(KeyCode::Char('z'), KeyModifiers::CONTROL)); // each backspace was its own step
+    }
+    assert_eq!(visible_input(&app), "x|[Image #1]|[Image #2]|", "ctrl+z brings the token back…");
+    assert_eq!(app.sessions[0].attachments.iter().map(|a| a.n).collect::<Vec<_>>(), [1, 2], "…and its picture with it");
+    press(&mut app, KeyCode::Backspace);
+    press(&mut app, KeyCode::Backspace);
+    paste(&mut app);
+    assert!(app.input.contains("[Image #3]"), "a number ctrl+z could restore is never reused");
+    press(&mut app, KeyCode::Backspace);
+    press(&mut app, KeyCode::Backspace);
+    assert_eq!(app.sessions[0].attachments.iter().map(|a| a.n).collect::<Vec<_>>(), [1, 2, 3], "kept while ctrl+z can restore them");
+    app.undo.clear();
+    app.drop_orphan_images("");
+    assert_eq!(app.sessions[0].attachments.iter().map(|a| a.n).collect::<Vec<_>>(), [1], "with nothing to undo, a deleted token frees its picture");
     // Delete in front of a token removes it whole too
     app.cursor = 2;
     press(&mut app, KeyCode::Delete);
     assert_eq!(visible_input(&app), "x||");
+    assert_eq!(app.sessions[0].attachments.len(), 1, "still undoable");
+    app.undo.clear();
+    app.drop_orphan_images("");
     assert!(app.sessions[0].attachments.is_empty());
     // a half-typed token is just text
     app.set_input("[Image #1".into());
     press(&mut app, KeyCode::Backspace);
     assert_eq!(app.input, "[Image #");
+}
+
+#[test]
+fn a_clipboard_image_read_off_thread_lands_in_its_own_tab_or_nowhere() {
+    let (mut app, _d) = fake_app("clip");
+    let first = app.sessions[0].id;
+    app.on_event(AppEvent::Clipboard(first, None, "no image"));
+    assert!(app.sessions[0].attachments.is_empty());
+    app.on_event(AppEvent::Clipboard(first, Some(vec![1, 2, 3]), "no image"));
+    assert_eq!(visible_input(&app), "[Image #1]|");
+    app.new_tab();
+    app.on_event(AppEvent::Clipboard(first, Some(vec![1, 2, 3]), "no image"));
+    assert!(app.sessions[app.active].attachments.is_empty() && app.input.is_empty(), "not into the tab that happens to be in front");
 }
 
 #[test]
@@ -348,7 +378,7 @@ fn the_message_is_sent_with_text_and_pictures_in_the_order_written() {
     app.attach_bytes("gone.png".into(), vec![9], "image/png"); // pasted, then its token deleted below
     let stale = image::token(2);
     app.input = app.input.replace(&stale, "");
-    app.drop_orphan_images();
+    app.drop_orphan_images("");
     press(&mut app, KeyCode::Enter);
     drop(rx);
 
