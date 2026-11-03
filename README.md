@@ -549,6 +549,21 @@ timings in the full table, not tokens or memory. Use footprint, not RSS: RSS ove
 - Tested on macOS only. macOS tools used where present: `footprint` (memory), `sips` (image conversion), `osascript`
   (clipboard images) and `pbcopy`; elsewhere memory falls back to `ps` RSS and images need `wl-paste`/`xclip`.
 
+## Confidence checks
+
+Run `cargo build --release` first. All use the real `claude` or none at all; none touches your settings.
+
+| Command | Checks | Cost |
+|---|---|---|
+| `cargo test` | 270 unit and end-to-end tests against a fake `claude`; includes a light fuzz run | free, 5 s |
+| `FUZZ_ROUNDS=40 FUZZ_SEED=7 cargo test --release hostile_backend` | the UI against hostile backend messages (mutated real ones: wrong types, huge values, control characters), random keys, read-only panels, terminals from 1×1 to 300×4. Run it in a debug build too: that is where integer overflow shows. Found: an overflow on absurd token counts, now capped at the source (`backend::count`) | free |
+| `FUZZ_FILES=600 cargo test hostile_transcript` | resume and every history reader against corrupt transcripts (cut-off lines, invalid UTF-8, a 3 MB line) | free |
+| `python3 bench/contract.py` | the installed `claude` still behaves as claude++ assumes, including the token saving | cents |
+| `python3 bench/budget.py` | resting claude++ stays tiny: binary, memory, first paint, idle CPU | free |
+| `python3 bench/hostile.py` | SIGTERM/SIGHUP/SIGKILL leave no orphan `claude` and a restored terminal; a backend killed mid-turn; Esc interrupts; a permission prompt can be declined. `HOSTILE_CONFIG=user` uses your own config | cents, 3 min |
+| `python3 bench/soak.py` | 3,000 turns cost 23 MB (about 4 KB per turn, linear), echo stays near 1 ms, idle CPU about 0; a single 30 MB tool result costs 191 MB and stays responsive | free |
+| `python3 bench/away.py` | the front tab gives its memory back when you leave, and the conversation survives | cents |
+
 ## Tests
 
 - `cargo test`: protocol state machine (streaming → final reconciliation, tools/results,
