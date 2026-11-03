@@ -2054,7 +2054,9 @@ impl App {
             self.sched_at = None;
             return self.flash("schedule cancelled");
         }
-        if self.vim.on && self.vim_key(k) {
+        // The spinner says "esc to interrupt": with nothing typed there is no insert mode to leave, so Esc does that.
+        let interrupt_now = k.code == KeyCode::Esc && self.s().busy && self.input.is_empty();
+        if self.vim.on && !interrupt_now && self.vim_key(k) {
             return;
         }
         match k.code {

@@ -2087,6 +2087,21 @@ fn search_filters_the_conversation_as_you_type_and_tab_searches_what_you_sent() 
 }
 
 #[test]
+fn esc_interrupts_a_running_turn_from_vim_insert_mode_when_nothing_is_typed() {
+    let (mut app, _d) = fake_app("vim-interrupt");
+    run_cmd(&mut app, "/vim");
+    app.s().busy = true;
+    typed(&mut app, "draft");
+    press(&mut app, KeyCode::Esc);
+    assert_eq!((app.vim.mode, app.s().busy), (vim::Mode::Normal, true), "text in the box: Esc is vim's, the draft is kept");
+    assert_ne!(app.s().activity, "interrupting");
+    app.set_input(String::new());
+    app.vim.mode = vim::Mode::Insert;
+    press(&mut app, KeyCode::Esc);
+    assert_eq!(app.s().activity, "interrupting", "empty box: Esc is the interrupt the spinner promises");
+}
+
+#[test]
 fn vim_keys_edit_the_box_in_modes_and_sending_returns_to_insert() {
     let (mut app, _d) = fake_app("vim");
     run_cmd(&mut app, "/vim");
