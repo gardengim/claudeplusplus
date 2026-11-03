@@ -38,8 +38,9 @@ Where it comes from, and what it costs:
   can change it. The first use of a deferred tool costs one extra round trip. Most of a request is cached, so the
   cost saving is smaller than the token saving.
 - **Away from the keyboard:** the tab in front is stopped too after five times `--idle-suspend` (10 min) without input,
-  when nothing is running (no turn, background task or command). A resting claude++ is then ~4 MB; typing starts the
-  backend again while you compose.
+  when nothing is running (no turn, background task or command). Measured with `bench/away.py`: 238 MB right after a
+  turn, **4.8 MB** once away (one process left), and the conversation was still there on the next message. Typing
+  starts the backend again while you compose.
 - **Staying true:** `python3 bench/contract.py` runs the real `claude` through everything claude++ relies on (control
   protocol, `init`, streaming, `--resume`, the unknown-id failure) and checks the 31k-token headless request above.
   Passing on Claude Code 2.1.317; claude++ prints a one-time note when it meets a newer minor version than the last
