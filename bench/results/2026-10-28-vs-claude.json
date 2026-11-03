@@ -1,0 +1,356 @@
+[
+ {
+  "arm": "claude++/lean",
+  "load": 2.57,
+  "first_paint_s": 0.014,
+  "rss_idle_mb": 3.71875,
+  "procs": 1,
+  "mb_idle": 4.1,
+  "idle_cpu_s_per_15s": 0.01,
+  "key_echo_ms": 4.4,
+  "turn_s": 1.65,
+  "rss_after_turn_mb": 205.078125,
+  "mb_after_turn": 113.5,
+  "bytes_total": 6117,
+  "usage": {
+   "requests": 1,
+   "input": 2,
+   "cache_write": 0,
+   "cache_read": 8650,
+   "output": 5,
+   "models": [
+    "claude-haiku-5-5"
+   ]
+  },
+  "claude_record": null
+ },
+ {
+  "arm": "claude++/lean",
+  "load": 3.34,
+  "first_paint_s": 0.01,
+  "rss_idle_mb": 5.59375,
+  "procs": 1,
+  "mb_idle": 4.0,
+  "idle_cpu_s_per_15s": 0.01,
+  "key_echo_ms": 0.8,
+  "turn_s": 1.56,
+  "rss_after_turn_mb": 205.03125,
+  "mb_after_turn": 113.3,
+  "bytes_total": 6061,
+  "usage": {
+   "requests": 1,
+   "input": 2,
+   "cache_write": 0,
+   "cache_read": 8650,
+   "output": 5,
+   "models": [
+    "claude-haiku-5-5"
+   ]
+  },
+  "claude_record": null
+ },
+ {
+  "arm": "claude++/lean",
+  "load": 2.19,
+  "first_paint_s": 0.012,
+  "rss_idle_mb": 5.6875,
+  "procs": 1,
+  "mb_idle": 4.1,
+  "idle_cpu_s_per_15s": 0.01,
+  "key_echo_ms": 0.8,
+  "turn_s": 0.77,
+  "rss_after_turn_mb": 195.625,
+  "mb_after_turn": 117.4,
+  "bytes_total": 5627,
+  "usage": {
+   "requests": 1,
+   "input": 2,
+   "cache_write": 0,
+   "cache_read": 8650,
+   "output": 5,
+   "models": [
+    "claude-haiku-5-5"
+   ]
+  },
+  "claude_record": null
+ },
+ {
+  "arm": "claude/lean",
+  "load": 1.92,
+  "first_paint_s": 0.239,
+  "rss_idle_mb": 239.46875,
+  "procs": 1,
+  "mb_idle": 161.0,
+  "idle_cpu_s_per_15s": 0.16,
+  "key_echo_ms": 0.3,
+  "turn_s": 1.27,
+  "rss_after_turn_mb": 261.75,
+  "mb_after_turn": 174.7,
+  "bytes_total": 3991,
+  "usage": {
+   "requests": 1,
+   "input": 2,
+   "cache_write": 572,
+   "cache_read": 9215,
+   "output": 5,
+   "models": [
+    "claude-haiku-5-5"
+   ]
+  },
+  "claude_record": {
+   "cost_usd": 0.00034,
+   "input": 1191,
+   "cache_write": 572,
+   "cache_read": 9215,
+   "output": 19,
+   "models": [
+    "claude-haiku-5-5"
+   ]
+  }
+ },
+ {
+  "arm": "claude/full",
+  "load": 2.0,
+  "first_paint_s": 0.299,
+  "rss_idle_mb": 497.0625,
+  "procs": 5,
+  "mb_idle": 267.0,
+  "idle_cpu_s_per_15s": 0.19,
+  "key_echo_ms": 0.2,
+  "turn_s": 5.11,
+  "rss_after_turn_mb": 435.15625,
+  "mb_after_turn": 294.7,
+  "bytes_total": 8916,
+  "usage": {
+   "requests": 1,
+   "input": 2,
+   "cache_write": 16709,
+   "cache_read": 29141,
+   "output": 77,
+   "models": [
+    "claude-haiku-5-5"
+   ]
+  },
+  "claude_record": {
+   "cost_usd": 0.0038,
+   "input": 1191,
+   "cache_write": 16709,
+   "cache_read": 29141,
+   "output": 95,
+   "models": [
+    "claude-haiku-5-5"
+   ]
+  }
+ },
+ {
+  "arm": "claude/full",
+  "load": 2.24,
+  "first_paint_s": 0.272,
+  "rss_idle_mb": 374.375,
+  "procs": 5,
+  "mb_idle": 271.0,
+  "idle_cpu_s_per_15s": 0.24,
+  "key_echo_ms": 3.4,
+  "turn_s": 2.18,
+  "rss_after_turn_mb": 403.890625,
+  "mb_after_turn": 294.7,
+  "bytes_total": 7284,
+  "usage": {
+   "requests": 1,
+   "input": 2,
+   "cache_write": 16709,
+   "cache_read": 29141,
+   "output": 75,
+   "models": [
+    "claude-haiku-5-5"
+   ]
+  },
+  "claude_record": {
+   "cost_usd": 0.0038,
+   "input": 1191,
+   "cache_write": 16709,
+   "cache_read": 29141,
+   "output": 89,
+   "models": [
+    "claude-haiku-5-5"
+   ]
+  }
+ },
+ {
+  "arm": "claude++/full",
+  "load": 2.75,
+  "first_paint_s": 0.014,
+  "rss_idle_mb": 5.625,
+  "procs": 1,
+  "mb_idle": 4.1,
+  "idle_cpu_s_per_15s": 0.01,
+  "key_echo_ms": 6.0,
+  "turn_s": 1.93,
+  "rss_after_turn_mb": 407.765625,
+  "mb_after_turn": 251.7,
+  "bytes_total": 6488,
+  "usage": {
+   "requests": 1,
+   "input": 2,
+   "cache_write": 16121,
+   "cache_read": 16367,
+   "output": 72,
+   "models": [
+    "claude-haiku-5-5"
+   ]
+  },
+  "claude_record": null
+ },
+ {
+  "arm": "claude++/full",
+  "load": 2.43,
+  "first_paint_s": 0.011,
+  "rss_idle_mb": 5.15625,
+  "procs": 1,
+  "mb_idle": 4.1,
+  "idle_cpu_s_per_15s": 0.01,
+  "key_echo_ms": 0.8,
+  "turn_s": 3.45,
+  "rss_after_turn_mb": 400.609375,
+  "mb_after_turn": 251.7,
+  "bytes_total": 7361,
+  "usage": {
+   "requests": 1,
+   "input": 2,
+   "cache_write": 0,
+   "cache_read": 32488,
+   "output": 81,
+   "models": [
+    "claude-haiku-5-5"
+   ]
+  },
+  "claude_record": null
+ },
+ {
+  "arm": "claude/full",
+  "load": 1.98,
+  "first_paint_s": 0.28,
+  "rss_idle_mb": 484.265625,
+  "procs": 5,
+  "mb_idle": 268.0,
+  "idle_cpu_s_per_15s": 0.19,
+  "key_echo_ms": 0.2,
+  "turn_s": 2.33,
+  "rss_after_turn_mb": 439.5625,
+  "mb_after_turn": 291.8,
+  "bytes_total": 7142,
+  "usage": {
+   "requests": 1,
+   "input": 2,
+   "cache_write": 16706,
+   "cache_read": 29141,
+   "output": 82,
+   "models": [
+    "claude-haiku-5-5"
+   ]
+  },
+  "claude_record": {
+   "cost_usd": 0.0038,
+   "input": 1191,
+   "cache_write": 16706,
+   "cache_read": 29141,
+   "output": 103,
+   "models": [
+    "claude-haiku-5-5"
+   ]
+  }
+ },
+ {
+  "arm": "claude/lean",
+  "load": 2.65,
+  "first_paint_s": 0.241,
+  "rss_idle_mb": 274.875,
+  "procs": 1,
+  "mb_idle": 162.0,
+  "idle_cpu_s_per_15s": 0.16,
+  "key_echo_ms": 0.3,
+  "turn_s": 1.57,
+  "rss_after_turn_mb": 258.734375,
+  "mb_after_turn": 177.7,
+  "bytes_total": 3894,
+  "usage": {
+   "requests": 1,
+   "input": 2,
+   "cache_write": 573,
+   "cache_read": 9215,
+   "output": 5,
+   "models": [
+    "claude-haiku-5-5"
+   ]
+  },
+  "claude_record": {
+   "cost_usd": 0.00034,
+   "input": 1191,
+   "cache_write": 573,
+   "cache_read": 9215,
+   "output": 26,
+   "models": [
+    "claude-haiku-5-5"
+   ]
+  }
+ },
+ {
+  "arm": "claude/lean",
+  "load": 2.67,
+  "first_paint_s": 0.241,
+  "rss_idle_mb": 262.484375,
+  "procs": 1,
+  "mb_idle": 163.0,
+  "idle_cpu_s_per_15s": 0.16,
+  "key_echo_ms": 0.3,
+  "turn_s": 1.61,
+  "rss_after_turn_mb": 265.03125,
+  "mb_after_turn": 173.7,
+  "bytes_total": 4351,
+  "usage": {
+   "requests": 1,
+   "input": 2,
+   "cache_write": 574,
+   "cache_read": 9215,
+   "output": 5,
+   "models": [
+    "claude-haiku-5-5"
+   ]
+  },
+  "claude_record": {
+   "cost_usd": 0.00034,
+   "input": 1191,
+   "cache_write": 574,
+   "cache_read": 9215,
+   "output": 24,
+   "models": [
+    "claude-haiku-5-5"
+   ]
+  }
+ },
+ {
+  "arm": "claude++/full",
+  "load": 2.53,
+  "first_paint_s": 0.013,
+  "rss_idle_mb": 5.671875,
+  "procs": 1,
+  "mb_idle": 4.1,
+  "idle_cpu_s_per_15s": 0.01,
+  "key_echo_ms": 1.8,
+  "turn_s": 2.1,
+  "rss_after_turn_mb": 397.75,
+  "mb_after_turn": 250.9,
+  "bytes_total": 6677,
+  "usage": {
+   "requests": 1,
+   "input": 2,
+   "cache_write": 0,
+   "cache_read": 32488,
+   "output": 79,
+   "models": [
+    "claude-haiku-5-5"
+   ]
+  },
+  "claude_record": null
+ }
+]

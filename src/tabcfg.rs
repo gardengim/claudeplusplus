@@ -11,7 +11,18 @@ use crate::ui::wrap;
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 
-pub const MODES: [&str; 4] = ["default", "acceptEdits", "plan", "auto"];
+const MODES: [&str; 4] = ["default", "acceptEdits", "plan", "auto"];
+/// Launched with `--dangerously-skip-permissions` (or allowed to): bypass joins the cycle, as in Claude Code.
+pub static BYPASS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// The permission modes shift+tab steps through.
+pub fn modes() -> Vec<&'static str> {
+    let mut m = MODES.to_vec();
+    if BYPASS.load(std::sync::atomic::Ordering::Relaxed) {
+        m.insert(3, "bypassPermissions");
+    }
+    m
+}
 /// Offered before the session has reported its own tool list (that arrives with its first turn).
 const BASE_TOOLS: [&str; 10] = ["Bash", "Read", "Edit", "Write", "Glob", "Grep", "WebFetch", "WebSearch", "NotebookEdit", "Agent"];
 
@@ -66,7 +77,7 @@ pub fn view(ui: &Ui, s: &Session, width: usize) -> View {
             match row {
                 Row::Mode => {
                     let mut v = vec![name("Permission mode")];
-                    v.extend(MODES.iter().map(|m| chip(m, *m == s.mode, theme::bold())));
+                    v.extend(modes().iter().map(|m| chip(m, *m == s.mode, theme::bold())));
                     row_with(on, false, v)
                 }
                 Row::Tool(t, _) => {

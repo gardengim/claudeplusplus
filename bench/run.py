@@ -13,6 +13,7 @@ Controls
   - Load is checked before each run; the run waits if the machine is busy and records the load it saw.
 """
 import argparse, json, os, random, re, shutil, statistics as st, subprocess, sys, tempfile, threading, time
+for _k in [k for k in os.environ if k.startswith("CLAUDE")]: del os.environ[_k]  # run as from a plain terminal, not inside a Claude Code session
 
 MODEL = "haiku"
 LEAN_TOOLS = "Bash,Read,Edit,Write,AskUserQuestion,WebFetch,WebSearch"  # keep in sync with src/main.rs

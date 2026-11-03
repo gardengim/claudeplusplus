@@ -5,11 +5,17 @@
 //!
 //! What a change does, all through Claude Code's own settings and flags (no model call):
 //! - skills: `skillListingMaxDescChars` caps every description; `skillOverrides` lists a skill by name only
-//!   (`name-only`) or hides it from the model (`off`); `/name` keeps working for the first.
-//! - instructions: a section is cut to its heading and first line (the model is told where the rest is),
-//!   or hidden; see `instructions.rs`.
+//!   (`name-only`). Never `off`: a listed name lets the model load the skill with the Skill tool when it
+//!   turns out to matter, for about 12 tokens, where a hidden skill could never be found.
+//! - instructions: a section is cut to its heading and first line, or replaced by a one-line pointer to its
+//!   lines; either way the model is told where the text is and can read it; see `instructions.rs`.
 //! - tools (aggressive only): `--tools` is narrowed to the core set plus what the project used, and MCP
 //!   servers are left out when none were ever called.
+//!
+//! Which skills and sections count as unrelated is decided by evidence and word overlap, with no model call,
+//! unless you press `c` in the panel: then a small model ([`REVIEW_MODEL`], one call with no tools, MCP,
+//! settings or saved session) is shown the project and every skill and large section, and its verdicts
+//! replace the word-overlap guesses. Skills the project has used are kept whatever it says.
 //!
 //! A conversation already under way keeps the prompt it started with; the panel says when a change needs a
 //! re-render of it (which re-caches the context once).
@@ -43,7 +49,7 @@ impl Level {
         match self {
             Level::Light => "shorter skill descriptions only; nothing is hidden",
             Level::Balanced => "also: skills this project never used are listed by name only, unrelated instruction sections are shortened",
-            Level::Aggressive => "also: unused skills are hidden, strongly unrelated sections dropped, tools narrowed to what the project used",
+            Level::Aggressive => "also: strongly unrelated sections replaced by a pointer, tools narrowed to what the project used",
         }
     }
     fn cap(self) -> usize {
@@ -53,6 +59,10 @@ impl Level {
 
 /// Skills and tools below/above these are never touched or always kept.
 const CORE_TOOLS: [&str; 10] = ["Bash", "Read", "Edit", "Write", "Glob", "Grep", "Agent", "AskUserQuestion", "WebFetch", "WebSearch"];
+/// Kept by every tool list `/optimize` narrows to: without `Skill` every skill disappears (name-only ones too),
+/// and without `ToolSearch` Claude Code stops deferring MCP tools and sends their full schemas (measured on
+/// 2.1.312: 3.9k tokens loaded vs 0.6k loaded + 3.3k deferred). Which skills show is the skill items' business.
+const KEEP_REACHABLE: [&str; 2] = ["Skill", "ToolSearch"];
 /// What a skill costs in the listing when shown by name only (measured: a name and a few words).
 const NAME_ONLY_TOKENS: u64 = 12;
 /// Fewer past sessions than this and per-skill "never used" proves nothing.
@@ -188,8 +198,7 @@ pub fn propose(i: &Input) -> Vec<Item> {
         }
         match i.level {
             Level::Light => None,
-            Level::Balanced => Some(("name-only", tokens.saturating_sub(NAME_ONLY_TOKENS))),
-            Level::Aggressive => Some(("off", tokens)),
+            Level::Balanced | Level::Aggressive => Some(("name-only", tokens.saturating_sub(NAME_ONLY_TOKENS))),
         }
     };
     let mut cap_saves = 0;
@@ -203,7 +212,7 @@ pub fn propose(i: &Input) -> Vec<Item> {
     out.push(Item { group: "skills", label: format!("cap skill descriptions at {cap} characters"), why: format!("{} skills listed", i.skills.len()), saves: cap_saves, on: true, change: Change::Cap(cap) });
     changed.sort_by_key(|c| std::cmp::Reverse(c.2));
     for (name, mode, saves) in changed {
-        let why = format!("never used in {} past sessions here; {}", i.ev.sessions, if mode == "off" { "hidden from the model (/name still works only for name-only)" } else { "still listed by name, /name works" });
+        let why = format!("never used in {} past sessions here; {}", i.ev.sessions, if mode == "off" { "hidden from the model" } else { "listed by name: the model can still load it, and /name works" });
         out.push(Item { group: "skills", label: format!("{name}  → {mode}"), why, saves, on: true, change: Change::Skill(name, mode) });
     }
     if i.level != Level::Light {
@@ -220,7 +229,7 @@ pub fn propose(i: &Input) -> Vec<Item> {
                     continue;
                 }
                 taken.push((sec.from, sec.to));
-                let saves = (sec.bytes / BYTES_PER_TOKEN) as u64 - if hide { 0 } else { 60 };
+                let saves = (sec.bytes / BYTES_PER_TOKEN) as u64 - if hide { 30 } else { 60 }; // what the pointer or brief line costs
                 let id = if hide { sec.id.clone() } else { format!("{BRIEF}{}", sec.id) };
                 let name = Path::new(&src.path).file_name().map_or(String::new(), |n| n.to_string_lossy().into_owned());
                 out.push(Item {
@@ -235,8 +244,8 @@ pub fn propose(i: &Input) -> Vec<Item> {
         }
     }
     if i.level == Level::Aggressive && trusted {
-        let mut tools: BTreeSet<String> = CORE_TOOLS.iter().map(|s| s.to_string()).collect();
-        tools.extend(i.ev.tools.keys().filter(|t| t.chars().next().is_some_and(char::is_uppercase) && !t.starts_with("mcp__") && t.as_str() != "Skill").cloned());
+        let mut tools: BTreeSet<String> = CORE_TOOLS.iter().chain(&KEEP_REACHABLE).map(|s| s.to_string()).collect();
+        tools.extend(i.ev.tools.keys().filter(|t| t.chars().next().is_some_and(char::is_uppercase) && !t.starts_with("mcp__")).cloned());
         out.push(Item { group: "tools", label: format!("limit built-in tools to {}", tools.iter().cloned().collect::<Vec<_>>().join(", ")), why: "the core set plus every tool this project used".into(), saves: 0, on: true, change: Change::Tools(tools.into_iter().collect()) });
         if !i.ev.tools.keys().any(|t| t.starts_with("mcp__")) {
             out.push(Item { group: "tools", label: "leave MCP servers out".into(), why: "no MCP tool was ever called here".into(), saves: 0, on: true, change: Change::StrictMcp });
@@ -344,7 +353,16 @@ pub struct Ui {
     pub skills: Option<Vec<(String, u64)>>,
     pub files: Vec<instructions::Source>,
     pub start_tokens: u64,
+    /// A review by Claude in flight.
+    pub review: Option<Pending>,
+    /// What Claude was asked about, and its answers (once in, they shape every level's proposal).
+    pub cands: Vec<Cand>,
+    pub verdicts: Option<Vec<Verdict>>,
+    /// (message, is an error) about the review.
+    pub review_note: Option<(String, bool)>,
 }
+
+pub type Pending = Arc<Mutex<Option<Result<(Vec<Verdict>, f64), String>>>>;
 
 impl Ui {
     pub fn open(cwd: &str, level: Level) -> Ui {
@@ -355,7 +373,7 @@ impl Ui {
             *out.lock().unwrap() = Some(ev);
         });
         let files = instructions::Ui::new(cwd, Rules::new()).files;
-        Ui { level, sel: 0, items: vec![], loading: true, ev: None, scan, skills: None, files, start_tokens: 0 }
+        Ui { level, sel: 0, items: vec![], loading: true, ev: None, scan, skills: None, files, start_tokens: 0, review: None, cands: vec![], verdicts: None, review_note: None }
     }
 
     /// Take the scan result and the skill listing when both are in; true when the proposal was just built.
@@ -381,7 +399,51 @@ impl Ui {
     pub fn rebuild(&mut self) {
         let (Some(ev), Some(skills)) = (&self.ev, &self.skills) else { return };
         self.items = propose(&Input { level: self.level, ev, skills, files: &self.files });
+        if let Some(v) = &self.verdicts {
+            self.items = with_verdicts(std::mem::take(&mut self.items), self.level, ev, &self.cands, v);
+        }
         self.sel = 0;
+    }
+
+    /// Ask Claude about every skill and large section, in the background (`bin`/`env`: the claude to run).
+    pub fn ask_claude(&mut self, bin: &str, env: &[(String, String)], cwd: &str) {
+        let (Some(ev), Some(skills)) = (&self.ev, &self.skills) else { return };
+        if self.review.is_some() {
+            return;
+        }
+        if self.level == Level::Light {
+            self.review_note = Some(("light changes no skill or section; pick balanced or aggressive, then c".into(), true));
+            return;
+        }
+        self.cands = candidates(skills, &self.files);
+        let prompt = review_prompt(cwd, ev, &self.cands);
+        let pending: Pending = Arc::default();
+        let (out, bin, env) = (pending.clone(), bin.to_string(), env.to_vec());
+        std::thread::spawn(move || {
+            let r = ask(&bin, &env, &prompt);
+            *out.lock().unwrap() = Some(r);
+        });
+        self.review = Some(pending);
+        self.review_note = None;
+    }
+
+    /// Take Claude's answer when it is in; true when it changed the proposal.
+    pub fn poll_review(&mut self) -> bool {
+        let Some(r) = self.review.as_ref().and_then(|p| p.lock().unwrap().take()) else { return false };
+        self.review = None;
+        match r {
+            Ok((v, cost)) => {
+                let changed = v.iter().filter(|x| x.1 != "keep").count();
+                self.review_note = Some((format!("Claude ({REVIEW_MODEL}) reviewed {} items, ${cost:.4}: {changed} to trim, the rest kept. Its reasons are under each row", self.cands.len()), false));
+                self.verdicts = Some(v);
+                self.rebuild();
+                true
+            }
+            Err(e) => {
+                self.review_note = Some((format!("Claude's review failed: {e}"), true));
+                false
+            }
+        }
     }
 
     pub fn step_level(&mut self, delta: isize) {
@@ -401,6 +463,146 @@ impl Ui {
 
 fn scan_budgeted(cwd: &str) -> Evidence {
     scan(cwd, 40, std::time::Duration::from_secs(8))
+}
+
+// ---- asking Claude ----
+
+/// The model asked to review: cheap, and the question needs judgement about relevance, not depth.
+pub const REVIEW_MODEL: &str = "haiku";
+/// Sections offered to the model, at most (the prompt stays a few thousand tokens).
+const MAX_SECTIONS: usize = 80;
+
+/// Something the model is asked about.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Cand {
+    Skill { name: String, tokens: u64 },
+    Section { path: String, id: String, title: String, bytes: usize, from: usize, to: usize, preview: String },
+}
+
+/// The model's answer for one candidate: (its index, `keep`/`shorten`/`hide`, why).
+pub type Verdict = (usize, String, String);
+
+/// Every listed skill worth trimming, and every instruction section big enough to matter.
+pub fn candidates(skills: &[(String, u64)], files: &[instructions::Source]) -> Vec<Cand> {
+    let mut out: Vec<Cand> = skills.iter().filter(|(_, t)| *t >= 15).map(|(n, t)| Cand::Skill { name: n.clone(), tokens: *t }).collect();
+    let secs = files.iter().flat_map(|src| src.secs.iter().filter(|s| s.bytes >= 1500).map(move |s| (src, s)));
+    for (src, sec) in secs.take(MAX_SECTIONS) {
+        let body: String = src.text.lines().skip(sec.from + 1).take(sec.to.saturating_sub(sec.from + 1)).collect::<Vec<_>>().join(" ");
+        let preview = body.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(300).collect();
+        out.push(Cand::Section { path: src.path.clone(), id: sec.id.clone(), title: sec.title.clone(), bytes: sec.bytes, from: sec.from, to: sec.to, preview });
+    }
+    out
+}
+
+fn review_prompt(cwd: &str, ev: &Evidence, cands: &[Cand]) -> String {
+    let mut p = format!("Project folder: {}\n", Path::new(cwd).file_name().map_or(cwd.into(), |n| n.to_string_lossy()));
+    let mut top: Vec<String> = std::fs::read_dir(cwd).into_iter().flatten().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).filter(|n| !n.starts_with('.')).collect();
+    top.sort();
+    top.truncate(60);
+    p += &format!("Top-level entries: {}\n", top.join(", "));
+    if let Some(r) = ["README.md", "README"].iter().find_map(|f| std::fs::read_to_string(Path::new(cwd).join(f)).ok()) {
+        p += &format!("README (start):\n{}\n", r.chars().take(1500).collect::<String>());
+    }
+    let counts = |m: &BTreeMap<String, usize>| m.iter().map(|(k, n)| format!("{k}×{n}")).collect::<Vec<_>>().join(", ");
+    p += &format!("Tools used in the last {} sessions here: {}\nSkills and commands used: {}\n\n", ev.sessions, counts(&ev.tools), counts(&ev.skills));
+    p += "Each candidate below is loaded into every new Claude Code session in this project. For each id decide:\n\
+          - keep: likely useful for work in this project\n\
+          - shorten: skills are listed by name only (still loadable); sections are cut to their heading and first line (the full text stays readable on demand)\n\
+          - hide: sections only, replaced by a one-line pointer to the text\n\
+          When unsure, keep. Give one verdict per id.\n\n";
+    for (i, c) in cands.iter().enumerate() {
+        p += &match c {
+            Cand::Skill { name, tokens } => format!("c{i}: skill `{name}` (~{tokens} tokens)\n"),
+            Cand::Section { path, title, bytes, preview, .. } => {
+                let file = Path::new(path).file_name().map_or(String::new(), |n| n.to_string_lossy().into_owned());
+                format!("c{i}: section `{title}` of {file} (~{} tokens): {preview}\n", bytes / BYTES_PER_TOKEN)
+            }
+        };
+    }
+    p
+}
+
+/// One call to `bin` with no tools, MCP, settings or saved session; the prompt goes on stdin.
+fn ask(bin: &str, env: &[(String, String)], prompt: &str) -> Result<(Vec<Verdict>, f64), String> {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+    const SYSTEM: &str = "You review what a coding project loads into every session, to cut what is unrelated. Answer only with the requested JSON. Reasons are one short sentence.";
+    const SCHEMA: &str = r#"{"type":"object","properties":{"verdicts":{"type":"array","items":{"type":"object","properties":{"id":{"type":"string"},"action":{"type":"string","enum":["keep","shorten","hide"]},"reason":{"type":"string"}},"required":["id","action","reason"]}}},"required":["verdicts"]}"#;
+    let mut child = Command::new(bin)
+        .args(["-p", "--model", REVIEW_MODEL, "--output-format", "json", "--tools", "", "--strict-mcp-config", "--setting-sources", "", "--disable-slash-commands", "--no-session-persistence", "--system-prompt", SYSTEM, "--json-schema", SCHEMA])
+        .envs(env.iter().cloned())
+        .current_dir(std::env::temp_dir()) // no project CLAUDE.md: the prompt carries what it needs
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("could not run {bin}: {e}"))?;
+    child.stdin.take().map(|mut i| i.write_all(prompt.as_bytes())).transpose().map_err(|e| e.to_string())?;
+    let out = child.wait_with_output().map_err(|e| e.to_string())?;
+    parse_answer(&out.stdout).map_err(|e| {
+        let err = String::from_utf8_lossy(&out.stderr);
+        if err.trim().is_empty() { e } else { format!("{e}: {}", err.trim().lines().last().unwrap_or_default()) }
+    })
+}
+
+fn parse_answer(stdout: &[u8]) -> Result<(Vec<Verdict>, f64), String> {
+    let v: Value = serde_json::from_slice(stdout).map_err(|_| "no answer".to_string())?;
+    if v["is_error"] == true {
+        return Err(v["result"].as_str().unwrap_or("error").to_string());
+    }
+    let list = v["structured_output"]["verdicts"].as_array().ok_or("the answer had no verdicts")?;
+    let verdicts = list
+        .iter()
+        .filter_map(|x| {
+            let i = x["id"].as_str()?.trim_start_matches('c').parse().ok()?;
+            Some((i, x["action"].as_str()?.to_string(), x["reason"].as_str().unwrap_or_default().to_string()))
+        })
+        .collect();
+    Ok((verdicts, v["total_cost_usd"].as_f64().unwrap_or(0.0)))
+}
+
+/// `items` with its skill and section rows replaced by the model's verdicts, within what `level` allows:
+/// light changes neither, and only aggressive hides a section (balanced shortens it instead).
+pub fn with_verdicts(mut items: Vec<Item>, level: Level, ev: &Evidence, cands: &[Cand], verdicts: &[Verdict]) -> Vec<Item> {
+    if level == Level::Light {
+        return items;
+    }
+    items.retain(|i| !matches!(i.change, Change::Skill(..) | Change::Section(..)));
+    let used = |name: &str| ev.skills.contains_key(name) || ev.skills.keys().any(|k| k.ends_with(&format!(":{name}")));
+    let mut sorted: Vec<&Verdict> = verdicts.iter().filter(|v| v.1 != "keep").collect();
+    sorted.sort_by_key(|v| v.0); // parents before their subsections
+    let (mut skills, mut secs, mut taken) = (vec![], vec![], vec![]);
+    for (i, action, reason) in sorted {
+        let why = format!("Claude ({REVIEW_MODEL}): {reason}");
+        match cands.get(*i) {
+            Some(Cand::Skill { name, tokens }) if !used(name) => {
+                skills.push(Item { group: "skills", label: format!("{name}  → name-only"), why, saves: tokens.saturating_sub(NAME_ONLY_TOKENS), on: true, change: Change::Skill(name.clone(), "name-only") });
+            }
+            Some(Cand::Section { path, id, title, bytes, from, to, .. }) => {
+                if taken.iter().any(|(p, a, b)| p == path && from >= a && to <= b) {
+                    continue; // inside a section already trimmed
+                }
+                taken.push((path.clone(), *from, *to));
+                let hide = action == "hide" && level == Level::Aggressive;
+                let name = Path::new(path).file_name().map_or(String::new(), |n| n.to_string_lossy().into_owned());
+                secs.push(Item {
+                    group: "instructions",
+                    label: format!("{} {title}  ({name})", if hide { "hide" } else { "shorten" }),
+                    why,
+                    saves: (bytes / BYTES_PER_TOKEN) as u64 - if hide { 30 } else { 60 },
+                    on: true,
+                    change: Change::Section(path.clone(), if hide { id.clone() } else { format!("{BRIEF}{id}") }),
+                });
+            }
+            _ => {}
+        }
+    }
+    skills.sort_by_key(|s| std::cmp::Reverse(s.saves));
+    let rest = items.split_off(items.iter().position(|i| i.group != "skills").unwrap_or(items.len()));
+    items.extend(skills);
+    items.extend(secs);
+    items.extend(rest);
+    items
 }
 
 pub fn view(ui: &Ui, width: usize) -> View {
@@ -444,7 +646,16 @@ pub fn view(ui: &Ui, width: usize) -> View {
     if let Some(it) = ui.items.get(sel) {
         tail.extend(wrap(&it.why, width.saturating_sub(4).max(20)).into_iter().map(|l| Line::styled(l, theme::dim())));
     }
-    View::new("Optimize", body, focus, theme::hints(&[("↑↓", "move"), ("space", "tick"), ("←→", "level"), ("enter", "apply"), ("esc", "cancel")])).with_head(head).with_tail(tail).rows(0, 14)
+    let review = match (&ui.review, &ui.review_note) {
+        (Some(_), _) => Some((format!("asking Claude ({REVIEW_MODEL}) about {} skills and sections…", ui.cands.len()), theme::accent())),
+        (None, Some((n, err))) => Some((n.clone(), if *err { theme::danger() } else { theme::ok() })),
+        (None, None) if ui.verdicts.is_none() => Some((format!("c asks Claude ({REVIEW_MODEL}, about a cent) to judge every skill and section instead of word overlap"), theme::dim())),
+        _ => None,
+    };
+    if let Some((n, style)) = review {
+        tail.extend(wrap(&n, width.saturating_sub(4).max(20)).into_iter().map(|l| Line::styled(l, style)));
+    }
+    View::new("Optimize", body, focus, theme::hints(&[("↑↓", "move"), ("space", "tick"), ("←→", "level"), ("c", "ask Claude"), ("enter", "apply"), ("esc", "cancel")])).with_head(head).with_tail(tail).rows(0, 14)
 }
 
 #[cfg(test)]
@@ -465,7 +676,49 @@ mod tests {
         let comfy = "# Comfy workflows\nGenerate images, videos and audio through ComfyUI checkpoints, samplers, templates, fragments and blueprints.\n".to_string() + &"Workflow templates feed checkpoint loaders and sampler nodes for diffusion rendering.\n".repeat(60);
         let rust = "# Rust notes\nCargo workspace layout, clippy warnings, terminal rendering with ratatui.\n".to_string() + &"Cargo clippy ratatui terminal rendering workspace layout.\n".repeat(60);
         let text = format!("{comfy}{rust}");
-        instructions::Source { path: "/x/AGENTS.md".into(), secs: instructions::sections(&text), text }
+        instructions::Source { path: "/x/CLAUDE.md".into(), secs: instructions::sections(&text), text }
+    }
+
+    #[test]
+    fn claudes_verdicts_replace_the_guesses_within_the_level() {
+        let e = ev(5, &["used"], &["Bash"], &["cargo", "clippy", "ratatui"]);
+        let skills = vec![("used".to_string(), 80), ("pptx".to_string(), 90), ("tiny".to_string(), 5)];
+        let files = [doc()];
+        let cands = candidates(&skills, &files);
+        assert_eq!(cands.iter().filter(|c| matches!(c, Cand::Skill { .. })).count(), 2, "a skill too small to matter is not asked about");
+        let at = |name: &str| cands.iter().position(|c| match c { Cand::Skill { name: n, .. } => n == name, Cand::Section { title, .. } => title == name }).unwrap();
+        let prompt = review_prompt("/nonexistent", &e, &cands);
+        assert!(prompt.contains(&format!("c{}: skill `pptx`", at("pptx"))) && prompt.contains("section `Rust notes`"));
+        let v: Vec<Verdict> = vec![
+            (at("used"), "shorten".into(), "x".into()),
+            (at("pptx"), "shorten".into(), "slides, not Rust".into()),
+            (at("Comfy workflows"), "hide".into(), "image generation".into()),
+            (at("Rust notes"), "keep".into(), "this is Rust".into()),
+            (999, "hide".into(), "a made-up id".into()),
+        ];
+        let base = propose(&Input { level: Level::Balanced, ev: &e, skills: &skills, files: &files });
+        let out = with_verdicts(base, Level::Balanced, &e, &cands, &v);
+        let labels: Vec<&str> = out.iter().map(|i| i.label.as_str()).collect();
+        assert!(labels[0].starts_with("cap skill"), "the cap stays first: {labels:?}");
+        assert!(labels.contains(&"pptx  → name-only"));
+        assert!(!labels.iter().any(|l| l.starts_with("used")), "a skill the project used is kept whatever Claude says");
+        assert!(labels.iter().any(|l| l.starts_with("shorten Comfy workflows")), "balanced shortens what Claude would hide: {labels:?}");
+        assert!(!labels.iter().any(|l| l.contains("Rust notes")), "keep means no row, even if word overlap had proposed one");
+        assert!(out.iter().find(|i| i.label.starts_with("pptx")).unwrap().why.contains("slides, not Rust"));
+        let aggressive = with_verdicts(propose(&Input { level: Level::Aggressive, ev: &e, skills: &skills, files: &files }), Level::Aggressive, &e, &cands, &v);
+        assert!(aggressive.iter().any(|i| i.label.starts_with("hide Comfy workflows")));
+        assert!(aggressive.last().unwrap().group == "tools", "tool rows stay at the end");
+        let light = propose(&Input { level: Level::Light, ev: &e, skills: &skills, files: &files });
+        assert_eq!(with_verdicts(light.clone(), Level::Light, &e, &cands, &v).len(), light.len(), "light changes no skill or section");
+    }
+
+    #[test]
+    fn the_answer_is_read_from_structured_output() {
+        let ok = br#"{"is_error":false,"total_cost_usd":0.0012,"structured_output":{"verdicts":[{"id":"c3","action":"hide","reason":"r"},{"id":"bad","action":"keep","reason":""}]}}"#;
+        assert_eq!(parse_answer(ok), Ok((vec![(3, "hide".to_string(), "r".to_string())], 0.0012)));
+        assert_eq!(parse_answer(br#"{"is_error":true,"result":"Not logged in"}"#), Err("Not logged in".to_string()));
+        assert!(parse_answer(b"garbage").is_err());
+        assert!(parse_answer(br#"{"is_error":false}"#).is_err());
     }
 
     #[test]
@@ -482,7 +735,9 @@ mod tests {
         assert!(bal.iter().any(|i| matches!(&i.change, Change::Section(_, id) if id.starts_with(BRIEF) && id.contains("Comfy"))), "unrelated section shortened");
         assert!(!bal.iter().any(|i| matches!(&i.change, Change::Section(_, id) if id.contains("Rust"))), "related section kept");
         let agg = at(Level::Aggressive);
-        assert!(agg.iter().any(|i| i.change == Change::Skill("comfy".into(), "off")));
+        assert!(agg.iter().any(|i| i.change == Change::Skill("comfy".into(), "name-only")), "never hidden outright: the model must still be able to find it");
+        let tools = agg.iter().find_map(|i| if let Change::Tools(t) = &i.change { Some(t.clone()) } else { None }).expect("aggressive narrows tools");
+        assert!(tools.iter().any(|t| t == "Skill") && tools.iter().any(|t| t == "ToolSearch"), "skills and deferred tools stay reachable: {tools:?}");
         assert!(agg.iter().any(|i| matches!(&i.change, Change::Tools(t) if t.contains(&"Grep".to_string()) && t.contains(&"Bash".to_string()))));
         assert!(agg.iter().any(|i| i.change == Change::StrictMcp));
         assert!(agg.iter().map(|i| i.saves).sum::<u64>() > bal.iter().map(|i| i.saves).sum::<u64>());

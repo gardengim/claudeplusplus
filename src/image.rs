@@ -149,7 +149,10 @@ fn to_png(bytes: &[u8], media: &str) -> Option<Vec<u8>> {
 
 /// Re-encode as a PNG no larger than `px` on its long edge, using macOS `sips`.
 fn convert(bytes: &[u8], px: u32) -> Option<Vec<u8>> {
-    let dir = std::env::temp_dir().join(format!("claudeplusplus-img-{}", std::process::id()));
+    // One folder per call: tabs convert at the same time on their own reader threads.
+    static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    let n = N.fetch_add(1, Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!("claudeplusplus-img-{}-{n}", std::process::id()));
     std::fs::create_dir_all(&dir).ok()?;
     let (src, dst) = (dir.join("in"), dir.join("out.png"));
     std::fs::write(&src, bytes).ok()?;
@@ -165,6 +168,27 @@ fn convert(bytes: &[u8], px: u32) -> Option<Vec<u8>> {
     let out = ok.then(|| std::fs::read(&dst).ok()).flatten();
     let _ = std::fs::remove_dir_all(&dir);
     out.filter(|p| png_size(p).is_some())
+}
+
+/// Re-encodes the pictures in a tool result that need `sips` (~0.3 s each) on the backend's reader
+/// thread, so drawing them on the UI thread later takes the fast PNG path.
+pub fn pre_convert(v: &mut serde_json::Value) {
+    if v["type"] != "user" || !enabled() {
+        return;
+    }
+    for block in v["message"]["content"].as_array_mut().into_iter().flatten() {
+        for img in block["content"].as_array_mut().into_iter().flatten().filter(|b| b["type"] == "image") {
+            let src = &mut img["source"];
+            let Some(bytes) = src["data"].as_str().and_then(unbase64) else { continue };
+            if src["media_type"] == "image/png" && bytes.len() <= PASS_THROUGH_BYTES {
+                continue;
+            }
+            if let Some(png) = convert(&bytes, MAX_PX) {
+                src["media_type"] = "image/png".into();
+                src["data"] = base64(&png).into();
+            }
+        }
+    }
 }
 
 /// A smaller PNG of the same picture, for images over the API's size limit.

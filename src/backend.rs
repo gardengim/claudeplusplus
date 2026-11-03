@@ -103,8 +103,9 @@ impl Backend {
                 if line.trim().is_empty() {
                     continue;
                 }
-                let v = serde_json::from_str(line)
+                let mut v = serde_json::from_str(line)
                     .unwrap_or_else(|_| json!({"type": "_raw", "text": line}));
+                crate::image::pre_convert(&mut v);
                 if tx.send(wrap(pid, Msg::Line(v))).is_err() {
                     return;
                 }

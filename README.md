@@ -11,11 +11,40 @@ cargo build --release
 claude++ --help
 ```
 
+## Measured against `claude`
+
+Claude Code 2.1.312, model haiku, macOS on Apple Silicon, 2026-10-28. Memory is macOS `footprint` summed over each
+process tree (RSS overstates it about 2×); tokens are read from the session transcripts both frontends write.
+Medians of 3 interleaved runs, each in a clean environment. Reproduce with `python3 bench/vs_claude.py 3` and
+`python3 bench/tabs.py`; raw results are in `bench/results/`.
+
+| | `claude` | claude++ |
+|---|---|---|
+| Open, nothing sent yet | 268 MB | **4 MB** |
+| After one turn | 295 MB | **252 MB** |
+| Three conversations left open, idle | 824 MB (3 windows, 15 processes) | **238 MB** (3 tabs, 6 processes) |
+| Context tokens per request, same settings | 45.9k | **32.5k** |
+| First paint | 0.28 s | **0.013 s** |
+| `lean` (same flags for `claude`): tokens per request, memory after a turn | 9.8k, 175 MB | **8.7k, 114 MB** |
+
+Where it comes from, and what it costs:
+- **4 MB:** a tab starts its `claude` only when you begin typing a message, so its startup overlaps with typing.
+- **238 vs 824 MB:** a background tab idle past `--idle-suspend` (120 s; 20 s in the bench) stops its `claude`, and
+  the next message resumes the conversation. In the bench the resumed tab still knew its earlier answer, and its
+  first request read 30.2k tokens from the prompt cache and wrote 717.
+- **32.5k vs 45.9k tokens:** claude++ runs Claude Code headless (`claude -p`), and on this version headless mode sends
+  about 13.5k tokens of built-in tool definitions only when the model asks for one (ToolSearch), where interactive
+  `claude` sends them with every request. This is Claude Code's behaviour, not a trick of claude++, and a version
+  can change it. The first use of a deferred tool costs one extra round trip. Most of a request is cached, so the
+  cost saving is smaller than the token saving.
+- **Not better:** keystroke echo (both under 2 ms: 0.2–0.4 ms for `claude`, 0.8–1.8 ms for claude++) and turn time,
+  which the API decides. A tab you are using costs what Claude Code costs, because its backend *is* Claude Code.
+
 ## Architecture
 
 ```
-┌──────────── claude++ (one process, ~3 MB RSS) ────────────┐
-│ main.rs     event loop, keys, slash commands, tabs, bench │
+┌──────── claude++ (one process, ~4 MB footprint) ──────────┐
+│ main.rs     event loop, keys, slash commands, tabs        │
 │ ui.rs       ratatui renderer (per-entry wrap cache)       │
 │ session.rs  protocol → transcript state machine (per tab) │
 │ backend.rs  child process + stream-json I/O               │
@@ -37,37 +66,81 @@ claude++ --help
 - **Threads, no async runtime.** One stdin-reader thread for the terminal, plus one stdout
   reader per backend, all feed a single channel. The main loop drains a whole burst of
   streaming deltas before redrawing once.
-- **Rendering is O(visible lines).** Each transcript entry caches its wrapped lines per width.
-  Only the streaming entry is re-wrapped as text arrives, and only the visible window is
-  handed to ratatui.
+- **Rendering is O(visible lines).** Each transcript entry caches its wrapped lines per width, and only entries
+  near the view keep them (the rest keep just their row count). Following the newest output, only the entries
+  that fill the screen are wrapped at all, so a resize costs the same in a long session as in a short one.
 
 Dependencies: `ratatui` (with its bundled crossterm), `serde_json`, `unicode-width`.
 Base64 (for images) and argument parsing are a few lines each, so they are hand-written.
-Release binary: ~1.7 MB.
+Release binary: ~1.9 MB.
+
+## Habits from Claude Code that carry over
+
+- ↑ history is Claude Code's own `~/.claude/history.jsonl` for this folder: prompts typed in either show up in both.
+- The agent's task list (TaskCreate / TaskUpdate) stays in view above the input while any task is open.
+- Keys: alt+p model picker, ctrl+_ undo (as well as ctrl+z), ctrl+l repaint, shift+tab modes (bypass too when the
+  backend was started with `-- --dangerously-skip-permissions`).
+- `/cost` and `/status` open `/usage`; `/memory` edits `./CLAUDE.md` (`/memory user`: `~/.claude/CLAUDE.md`) in `$EDITOR`;
+  `/export [file]` saves the conversation as text; `/mode` alone opens this tab's mode and rules.
+- ctrl+r searches the messages you sent (this folder's, shared with Claude Code), as in Claude Code; the session list is ←.
+- ctrl+b moves a running command to the background, as in Claude Code; `/tasks` lists background commands next to
+  subagents, and `x` stops one. A tab with a command still running is never stopped by idle suspension or `--mem-budget`.
+- The model's thinking shows as one folded `✻ Thinking…` line; ctrl+o or a click reads it.
+- Key hints are written the way your keyboard labels them, fixed when claude++ is built: `⌃t`, `⌥o`, `⇧⇥` on macOS
+  (⌥ is Option, which terminals send as Alt), `Ctrl+T`, `Alt+O`, `Shift+Tab` on Windows and Linux.
+- Differences: ctrl+t opens a tab; Claude Code commands that open an interactive panel
+  (`/hooks`, `/login`, `/plugin`...) answer that they need the Claude Code terminal.
 
 ## What works (verified end-to-end against Claude Code 2.1.309)
 
 - Streaming responses (token deltas) with a live activity line: requesting, thinking,
   calling a tool, elapsed time.
-- Tool calls rendered Claude-Code style: `● Bash(cmd)`, `⎿` result preview, inline diffs for
-  `Edit` and `Write`, and ctrl+o to expand everything. `Read` shows only its size, as Claude Code does.
+- Tool calls rendered Claude-Code style: `● Bash(cmd)`, `⎿` result preview, ctrl+o to expand everything, and a click on a call (or alt+o for the latest) to fold just that one. A command run shows its first lines, or its last when it failed; unfolded it shows the whole command and what it is for.
+  `Edit` and `Write` show Claude Code's own hunks: "Added 2 lines, removed 1 line", numbered lines, context, and
+  tinted bands for what changed (a pending edit shows a line diff of the call). `Read` shows only its size, as
+  Claude Code does; an agent's report renders as markdown; answers to a question read `· question → answer`;
+  `TodoWrite` is a checklist; other tools show their input as words, not JSON (MCP tools as `server · tool`).
+- **Looks like Claude Code where it helps**: your messages as `❯` on a band, a `✻ Thinking… (12s · ↓ 340 tokens ·
+  esc to interrupt)` line above the input while Claude works and `✻ Worked for 8s` after, syntax-coloured code
+  blocks, a Bash permission prompt that shows the command and its description, and long choices that wrap.
+  Colours work on a light or a dark terminal and follow it when it switches while claude++ runs; `/config` → Colors
+  fixes them to dark or light instead.
+- **`/tasks`**: this tab's subagents as a list (state `◐ working` / `✓ done` / `✗ failed`, type, what each was asked, step count);
+  Enter opens one with its steps and report (a running agent updates live), esc backs out. Read from the transcript, so it costs no tokens.
 - **Subagents**: each one's steps are listed under its own `Agent` call (parallel agents do not interleave), and
   its report becomes that call's result, whether it ran in the foreground or in the background (headless Claude
   Code runs agents in the background: the turn ends, the agent keeps working, and its report starts a new turn).
+  A finished agent folds its steps into a count under its report; ctrl+o lists them.
 - **Panels**: every interactive surface (prompts, suggestions, model picker, config, session browser) is drawn by
   one shared component at the bottom of the screen above the input, so they look and behave alike; see
-  [DESIGN.md](DESIGN.md). **`/config`** edits claude++'s own config in such a panel: status line, profile for
-  new tabs, inline images, prompt-cache lifetime, idle-suspend time and memory budget. ←→ changes a value, it
-  applies at once and is saved to `~/.config/claude++/config.json`; a command-line flag still wins for that run.
+  [DESIGN.md](DESIGN.md). **`/config`** (or `/setting`) is one panel for every setting. Its first tab is
+  claude++'s own (status line, profile for new tabs, inline images, prompt-cache lifetime, idle-suspend time,
+  memory budget...): ←→ changes a value, it applies at once and is saved to `~/.config/claude++/config.json`; a
+  command-line flag still wins for that run. The other tabs hold every key a Claude Code settings file can set
+  (about 190, by topic: Model, Permissions, Sandbox, Context, ...): ←→ steps on/off and pick-one keys through
+  their values and back to unset, Enter types text, numbers or JSON, Del removes the key, and ctrl+s picks the file
+  (user `~/.claude/settings.json`, project `.claude/settings.json` or local `.claude/settings.local.json`). Each row
+  shows the value in that file, or what another file or the default gives. Typing searches every tab at once.
+  The key list is generated from Claude Code's settings reference by `tools/gen_cc_settings.py`.
 - Prompts the agent waits on, as one choice-list panel (see [DESIGN.md](DESIGN.md)): permission requests (↑↓ + Enter,
   or y / a / n at once; the "always" row says what it remembers, e.g. "auto-accept edits for this session" or
   "don't ask again for Bash(npm test:*)"; plan approval shows the plan as markdown and also offers auto-accept, as
-  Claude Code does) and `AskUserQuestion` with tabs for several questions, a
+  Claude Code does; on the "No" row typing says what to do instead, and Claude gets it with the refusal) and
+  `AskUserQuestion` with tabs for several questions, a
   review step, checkboxes for multi-select, an inline "Other" answer (just start typing, or paste), and option
-  previews. Esc declines. Pasted text can never act as a hotkey.
+  previews. Esc declines. Pasted text can never act as a hotkey (on a permission prompt it becomes the reason for "No").
 - Multi-turn conversations, Esc / ctrl+c interrupt (the process survives, and the next turn works).
+- **Rewind** (Esc Esc on an empty input, as in Claude Code): pick an earlier message and restore the conversation,
+  the files Claude edited since, or both; the message comes back in the input to edit and send. The conversation
+  resumes at the entry before that message (`--resume-session-at`); files come from Claude Code's own checkpoints
+  (`--rewind-files`, which claude++ turns on for its backends with `CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING`).
+  Edits made by shell commands are not checkpointed, as in Claude Code. Reopening a conversation shows the branch
+  it continued on, not the turns a rewind abandoned.
 - **Tabs**: independent sessions, each with its own backend. ctrl+t, ctrl+n / ctrl+p,
-  alt+1..9, ctrl+d, `/new`, `/close`.
+  alt+1..9, ctrl+d, `/new`, `/close`. A tab is titled with its conversation's name (`/rename`, else the title Claude
+  Code generated) and wears its `/color` (red, blue, green, yellow, purple, orange, pink, cyan): the tab number or
+  block, and, while the tab is in front, everything the UI draws in its accent (your messages, borders, the cursor,
+  selections). Bare `/color` opens a picker that previews each colour on the whole UI, tab included, as you move; Enter applies it. Browsing the session list (side panel or full screen) likewise wears the highlighted conversation's colour. Both are Claude Code's own per-conversation settings, so they come back on resume.
 - **Image attachments**: ctrl+v pastes an image from the clipboard (macOS via AppleScript, elsewhere `wl-paste` or
   `xclip`); `/img path`, or dragging a png/jpeg/gif/webp into the terminal, attaches a file. Each picture is
   **inline text**: an `[Image #N]` token on its own line at the cursor, with a small preview drawn right under it
@@ -77,7 +150,7 @@ Release binary: ~1.7 MB.
   History recall keeps the words only. Images over the API's 5 MB limit are re-encoded smaller first (macOS `sips`). A terminal that sends an *empty* paste for an image-only
   clipboard is handled the same way as ctrl+v (not verified in Ghostty; ctrl+v is the reliable key).
 - **`!` shell commands**: `!git status` runs in the tab's folder right away, without a model turn, and shows like a Bash
-  call. Its output (up to 30k characters, as in Claude Code) is sent ahead of your next message in Claude Code's own
+  call. Its output (up to 30k characters in total, as in Claude Code, and 30k across all `!` commands waiting for your next message) is sent ahead of your next message in Claude Code's own
   `<bash-input>`/`<bash-stdout>` form, so you can ask about it. No timeout: a command that never ends never reports.
 - **`@` file picker**: type `@` (at the start of a word) for a popup of the project's files and folders: tracked
   and untracked-but-not-ignored files from git, else a bounded directory walk. Fuzzy match on the whole path
@@ -143,8 +216,8 @@ Release binary: ~1.7 MB.
   included, with argument hints). Tab completes, ↑/↓ choose, Enter completes a partial name and runs a complete one.
   The list comes from the `initialize` reply and is cached in `~/.cache/claude++/commands.json`, so completing
   does not start a backend; only the very first run, with no cache, starts one to learn the list.
-- **Session list** (`/sessions`, `/resume`, ctrl+r, or ← with nothing left of the cursor, as in Claude Code): this
-  directory's earlier conversations plus Claude Code's background sessions from every directory, read from
+- **Session list** (`/sessions`, `/resume`, or ← with nothing left of the cursor, as in Claude Code): earlier
+  conversations from every folder plus Claude Code's background sessions from every directory, read from
   `~/.claude/jobs/*/state.json` (no process spawned). Each row has its state (`needs you` and `working` first),
   age and title (your `/rename`, else Claude Code's generated title, else the first prompt); a preview of the end of
   the highlighted one with its summary or the question it is blocked on; and live filtering (all terms must match
@@ -157,6 +230,9 @@ Release binary: ~1.7 MB.
   (`--fork-session`; works for any session, including ones open elsewhere). ctrl+t on a running background
   session stops it (`claude stop`) and opens it here; ctrl+x only stops it. Both need the same chord twice. Tool
   approvals granted "for the session" do not carry over.
+- **Delete** (in the list): Delete (or ctrl+k) twice removes the highlighted conversation's transcript from disk, for
+  good. Conversations open in a tab or running in the background are refused.
+- **Terminal title**: follows the active tab (`claude++ · name`) and is restored on exit (xterm title stack).
 - **Session config** (`/session`): a bottom panel for this tab only. Permission mode (same as shift+tab) and, per tool
   (Bash, Read, Edit, Write, Glob, Grep, WebFetch, WebSearch, NotebookEdit, Agent, plus any tool the session reports),
   `default` / `allow` / `deny`: ←→ steps through them, `+ add a rule…` takes any Claude Code rule such as
@@ -166,14 +242,17 @@ Release binary: ~1.7 MB.
   re-applied if the tab's process is restarted by idle suspension. Not yet: saving them into a profile.
 - **Side panel**: `/config` → Side panel → on (off by default; the full-screen list is always available and cannot be
   turned off). Then ← at the start of the input docks the list as a 30-column strip on the left (screens ≥ 100
-  wide), focused: ↑↓ move, Enter opens, → closes it, Esc hands the keyboard back (typing does too) and leaves it
-  docked, a second ← goes full screen, and → or Esc there step back to the dock. ctrl+r or `/sessions` hides and shows it. It re-reads its sources every 5 s while visible
+  wide), focused: ↑↓ move, Enter opens the highlighted conversation in a new tab (or this one if it is blank), → is "done browsing": it takes the highlighted conversation into the tab in front (replacing what that tab holds, or a new tab if it is mid-turn; switching if it is already open) and closes the side panel or leaves the full screen list, Esc hands the keyboard back (typing does too) and leaves it
+  docked, a second ← goes full screen, and → or Esc there step back to the dock. `/sessions` hides and shows it. It re-reads its sources every 5 s while visible
   and draws only the rows around the cursor.
 - **Scrolling**: mouse wheel (3 lines a tick), pgup/pgdn (a viewport minus two lines), shift+↑↓ (one line),
   ctrl+home / ctrl+end (top / latest). While scrolled up the lines in view stay put as output arrives, and a
   "↓ N lines below" tag shows how far back you are; sending a message returns to the latest. The wheel needs
-  mouse reporting, so selecting text takes Shift (Option in some terminals); `/config` → Mouse wheel → off gives
+  mouse reporting (a left click picks a tab, or moves to a list row in any panel, the docked list included; clicking the highlighted row does what Enter does; prompts waiting on you ignore clicks), so selecting text takes Shift (Option in some terminals); `/config` → Mouse wheel → off gives
   the mouse back to the terminal.
+- **Selecting text**: with the mouse on (the default), drag over the conversation to select; the selection is highlighted and ctrl+y copies it
+  (OSC 52, plus `pbcopy` on macOS). `/config` → Copy on select → on (off by default) copies it as soon as you let go. Any key, click or scroll drops
+  the selection. Wrapped lines copy as they are drawn.
 - **Custom profiles**: a JSON file per profile in `~/.config/claude++/profiles/<name>.json`, used like the built-in
   ones (`--profile name`, `/new name`, `/profile name`, or `"profile": "name"` in `config.json`; `/profile` lists them):
 
@@ -191,6 +270,16 @@ Release binary: ~1.7 MB.
   `extends` loops are errors, not silently ignored. A new prompt only applies to a fresh conversation (Claude Code
   pins the prompt at the start); `/profile name --hard` re-renders it for the current one. Custom names are not
   in the `/config` cycle (it lists the built-ins); pick them with the commands above.
+- **Context** (`/context`): the context window drawn, from the same free `get_context_usage` reply `/usage` uses (no
+  tokens spent). A gauge shows how full the window is, with the room held back for auto-compact at its end; under it one
+  bar shows how the used part divides between the categories, both exact to an eighth of a character so small
+  categories still show. Below, one row per category (largest first; tools loaded on demand, the auto-compact reserve
+  and free space last). The row under the cursor decides the detail: skills by source and by size, memory files, MCP
+  tools by server, agents, or what the conversation is made of (you, Claude, tool calls and results by tool,
+  attachments such as hook output), plus the last request's cache hit rate. On a wide screen (90+ columns) the window
+  is also a grid of squares to scale, the cursor row's squares drawn larger, and the detail sits beside the list;
+  narrower, a shorter detail goes under it. ↑↓ move, `r` refreshes, Enter acts where claude++ has something for the
+  row (skills: `/optimize`, memory files: `/instructions`), Esc closes.
 - **Usage** (`/usage`): where this tab's context goes and how much of your plan is used, straight from Claude Code
   (`get_context_usage` and `get_usage`, so no model call): per-category tokens biggest first (system prompt, tools,
   skills, memory files, messages, with on-demand and reserved parts dimmed), tool-result and hook-output sizes, and
@@ -204,15 +293,25 @@ Release binary: ~1.7 MB.
   (`skillListingMaxDescChars` 160); **balanced** also lists skills the project never used by name only
   (`skillOverrides: name-only`, `/name` still works) and shortens instruction sections unrelated to the project to their
   heading and first line plus a pointer to the file (the model reads the rest when it needs it; `[~]` in
-  `/instructions`, `b` toggles it there); **aggressive** hides unused skills, shortens more, and narrows `--tools` to the
-  core set plus what the project used (MCP servers left out when none was ever called). With under 3 past sessions it
-  only caps descriptions: "never used" proves nothing yet. Checked on this machine from a directory under `~`: a fresh
-  haiku session's first turn went 86.3k → 37.8k tokens of context (first-turn cost $0.015 → $0.005), with a question
-  about a shortened section answered by the model going to the file. A conversation already under way keeps the prompt
+  `/instructions`, `b` toggles it there); **aggressive** shortens more, replaces sections strongly unrelated to the
+  project with a one-line pointer to their lines, and narrows `--tools` to the core set plus what the project used
+  (MCP servers left out when none was ever called). Nothing is hidden where the model cannot find it: a skill is at
+  least listed by name (the Skill tool loads it when it turns out to matter), and every shortened or hidden section
+  or file leaves a line saying where it is, so the model can read it. Checked with haiku, asking for a fact that only
+  a hidden `CLAUDE.md` in the parent folder holds: with the pointer line, 3 of 3 runs answered right in 3 turns; with
+  no trace (how a hidden file was handled before), 3 of 5 did, after 5–6 turns of searching. With under 3 past sessions it
+  only caps descriptions: "never used" proves nothing yet. Measured with Claude Code's own count (2.1.312, 78 skills
+  installed here): the skill listing goes 9.9k → 3.7k tokens with descriptions capped at 120 characters, and → 2.4k
+  with unused skills also listed by name only. A conversation already under way keeps the prompt
   it started with (measured: applying the same setting live changed nothing), so `/optimize` applies at once to a tab
   that has not started or whose cache has expired, and otherwise says so and offers `/optimize now`, which re-renders
   the conversation once (re-caches its context). Past use is a heuristic: borderline cases get the gentle treatment
   (name-only, shortened) and every proposal shows its evidence.
+  **`c` in the panel asks Claude** instead: one call to haiku (no tools, MCP, settings or saved session; the prompt
+  is the project's folder listing, README start, tool and skill use, and every skill plus each instruction section
+  over 1.5 kB with a 300-character preview) returns keep / shorten / hide with a reason per item, and those replace the
+  word-overlap guesses at balanced and aggressive (balanced shortens what Claude would hide; light is unchanged).
+  A skill the project has used is kept whatever Claude says. Measured here: 5 skills judged in 6 s for $0.0018.
 - **Permissions** (`/permissions`): the saved `allow` / `ask` / `deny` rules from your user, project and local
   settings files, one tab per behavior with the file each rule comes from (and "overridden by deny" where a stronger
   behavior holds the same rule; deny beats ask beats allow). `+ add a new rule…` asks for the rule, then which file;
@@ -221,33 +320,62 @@ Release binary: ~1.7 MB.
   overwritten; a symlinked settings file is edited in place), and running sessions pick the change up by themselves:
   Claude Code watches its settings files (checked: a rule written while a session was open showed up in
   `get_settings` within 2 s). Not covered: the Workspace (additional directories) tab and managed policy rules.
-- **Instructions** (`/instructions`): the `CLAUDE.md` / `AGENTS.md` files Claude Code loads for this directory (yours in
+- **Instructions** (`/instructions`): the `CLAUDE.md` files Claude Code loads for this directory (yours in
   `~/.claude`, then each folder up from here), as a checkbox tree with an estimated token size per file and section.
-  Space unticks a file or one markdown section (a heading and what is under it); the files are never edited. Rules
+  Space unticks a file or one markdown section (a heading and what is under it), which leaves one line in its place
+  naming the file and lines, so the model can still read it when it matters; the files are never edited. Rules
   are saved in claude++'s config (`hidden`) and apply to tabs started afterwards: a hidden file goes into Claude Code's
   `claudeMdExcludes`, and a file with only some sections hidden is excluded and a filtered copy is appended to the system
   prompt (from `~/.cache/claude++/instructions/`; merged into the profile's own append prompt, since Claude Code takes
-  one). No model call. Checked against the real thing: hiding a 150 KB `~/AGENTS.md` took a fresh haiku session from
-  86.6k to 30.6k tokens of context; hiding one section removed exactly that section from the copy. A conversation that
+  one). No model call. `AGENTS.md` is not listed: Claude Code 2.1.312 does not load it, beside a `CLAUDE.md` or
+  without one (checked against its own list of loaded files). Measured with Claude Code's own count: hiding a 150 KB
+  project `CLAUDE.md` takes a fresh session from 72.8k to 18.3k tokens, the pointer line left in its place costing 53;
+  hiding one section removes exactly that section from the copy. A conversation that
   has started keeps the prompt it began with (Claude Code pins it), so a started tab says so instead of pretending.
   Sections are named by heading path, so a heading added later shows up ticked. The `lean` profile already skips
-  these files (9.9k vs 86k prompt tokens on this machine).
+  your user-level `~/.claude/CLAUDE.md` (not the project's).
 - **Find** (`/find text`): jump to the newest entry containing the text (case-insensitive); `/find` again steps to
   older matches, `/find +` to newer, wrapping.
+- **Queue** (`/queue`, alt+q, or click the strip; `/config` → While Claude works: queue / send, to get the old send-at-once behaviour back): a message sent while Claude works waits instead of cutting in; a
+  strip above the box lists the first few and each goes out when the turn ends. In the panel: ↑/↓ move, alt+↑/↓ (or
+  J/K) reorder, `t` to the top, enter = send now (stops the running turn, then this goes first), `s` = steer (send
+  without stopping; Claude takes it in at its next step), `e` edit (back into the box), `d` delete, `C` clear,
+  `p` pause. Esc/ctrl+c to stop Claude holds the queue (the strip shows ⏸) so it does not start the next message
+  behind your back; `p` or sending something new carries on. Slash commands are not queued. Pictures travel with
+  their message.
+- **External editor** (ctrl+g): opens the message in `$VISUAL`, else `$EDITOR`, else `vi` (any shell command, e.g.
+  `code -w`), through a private temp file. Save and quit and the text replaces the box (ctrl+z undoes it); a failing
+  editor leaves the message as it was. Works in vim normal mode too.
+- **Search** (ctrl+f, `/search [text]`, `/` in vim normal mode): filters this conversation as you type (messages,
+  replies, tool calls, newest first) and scrolls to the highlighted match; enter stays there (and `/find` continues
+  from it), esc goes back. Tab switches to the messages you sent before; enter puts one in the box.
+- **Input mode** (`/config` → Input mode: default, vim or helix; remembered; `/vim` and `/helix` toggle). **Vim**: esc leaves insert mode. Normal: `h l j k` (rows as drawn) `0 ^ $ w b e W B E gg G`
+  `f F t T ; ,`, counts, `x X D C s S r J ~ p P u ctrl+r`, `i a I A o O`, operators `d c y` with motions, `dd cc yy`
+  and `iw aw i" a" i( a( i[ i{ i<` objects, `v`/`V` visual mode. enter still sends (and returns to insert), esc in
+  normal mode still interrupts. Not there: `.` repeat, macros, named registers, `:` commands.
+  **Helix** has the same modes but selects first: `h l j k`, `w b e W B E` (select the word), `f t F T`, `x` (select the line; again to
+  extend), `%` (all), `gh gl gs gg ge`, `v` (select mode: motions extend), `;` (collapse), `mi` / `ma` + `w " ' ( [ { <` (object), then `d c y p P r ~` act
+  on the selection, `i a I A o O`, `u` / `U` undo and redo, `/` search. Not there: several selections, `s`, surround, `.`, macros, `:` commands.
+- **Scheduled messages**: `/schedule` lists times (in 5 minutes ... 4 hours, next 9:00 / 18:00) with the cursor on one; ↑↓ and Enter pick, or just type
+  your own (`45m`, `2h30m`, `14:30`, 24-hour local). Then type the message in the ordinary message box: the box says it is scheduled, Enter adds it, Esc
+  cancels. `/schedule 2h` skips the list and `/schedule 10m check the build` does it all at once. A scheduled message waits in the same list as queued
+  ones (alt+q: reorder, edit, delete; Enter sends it now; `S` gives a waiting message a time, or takes it off with the first row). It goes out
+  when the time comes and the tab is free; ordinary messages do not wait behind it and stopping Claude does not pause it. It lives in this
+  claude++ process: quit and it is gone.
 - **Undo** (ctrl+z): in the message box; a burst of typing is one step, other edits one each; forgotten on send and
   per tab. Closing a tab that is mid-turn asks for a second press.
 - **Per-project profile**: `<project>/.claude++/config.json` with `{"profile": "lean"}` (any built-in or custom
   profile) sets the profile for tabs started there and for sessions opened from that project; `--profile` wins.
 - **Small things that add up**: each tab keeps its own half-typed message when you switch away; `/copy` (or ctrl+y)
   copies the last answer and `/copy code` its last code block (OSC 52, plus `pbcopy` on macOS); alt+←/→ (or alt+b/f)
-  move by word, alt+backspace and ctrl+w delete a word, alt+d deletes the next word, ctrl+k deletes to the end; a
+  move by word, alt+backspace and ctrl+w delete a word, alt+d deletes the next word, ctrl+u / ctrl+k cut to the start / end of the line (at its edge, the line break); ↑/↓ move between the rows of a longer message and only then walk history (the half-typed message comes back when you step past the newest); ctrl+z undoes and ctrl+shift+z (alt+z where the terminal cannot tell shift) redoes; a
   background tab that finishes a turn or asks for an answer rings the terminal bell or sends a desktop
   notification (`/config` → Background tabs: off / bell / desktop, OSC 9 terminals). SIGTERM, SIGHUP and crashes
   restore the terminal (mouse reporting, paste mode, keyboard mode) on the way out.
 - A full-profile tab whose claude process passes 400 MB gets a one-time note saying what `lean` would save.
 - Each tab has its own working directory (set when it opens a session from another directory); `@` files,
   the status line and `/resume` follow the tab in front.
-- Resume with history: `-c`, `-r <id>`. Earlier messages are shown again, with tool calls and results.
+- Resume with history: `-c`, `-r <id>`, `/resume <id-prefix or name>` (any folder). Earlier messages are shown again, with tool calls and results.
   `/clear` starts a fresh conversation. `/model`, `/mode`, shift+tab cycles the permission mode.
 - Any other `/command` (e.g. `/compact`, skills) is forwarded to Claude Code. A command whose
   only output is the turn result is shown as a note.
@@ -260,27 +388,26 @@ Release binary: ~1.7 MB.
 
 | What | How | Measured effect |
 |---|---|---|
-| Lazy backend | `claude` starts on a tab's first message | idle claude++ = **3 MB** RSS vs interactive `claude` idle at its prompt = **176 MB** |
-| Warm on first keystroke | the backend starts when you begin typing (not at launch, not for `/commands`), so its ~0.6 s startup overlaps with composing the message; `initialize` makes no API call | memory stays 3 MB until you type; no startup wait after Enter (verified: no API activity before the first message) |
-| Idle suspension | background tabs idle > `--idle-suspend` (120 s; a restart takes ~0.5 s) have their backend stopped; the next message respawns it with `--resume <id>` | frees ~220–330 MB per idle tab; context kept; **99% prompt-cache hit** on the first turn after resume |
+| Lazy backend | `claude` starts on a tab's first message | open with nothing sent: **4 MB** footprint vs **268 MB** for `claude` at its prompt (see the table at the top) |
+| Warm on first keystroke | the backend starts when you begin typing (not at launch, not for `/commands`), so its ~0.6 s startup overlaps with composing the message; `initialize` makes no API call | memory stays 4 MB until you type; no startup wait after Enter (verified: no API activity before the first message). A message sent before the MCP servers finish connecting waits for them (at most 5 s, "connecting MCP servers"), so the first request is not sent without their tools: an instant first message measured 32.5k context tokens, the same as a later one (31.0k, MCP tools missing, before this) |
+| Idle suspension | background tabs idle > `--idle-suspend` (120 s; a restart takes ~0.5 s) have their backend stopped; the next message respawns it with `--resume <id>` | three idle conversations: **238 MB** vs 824 MB in three `claude` windows; context kept; the first request after resume read 30.2k tokens from cache and wrote 717 (98%) |
 | Memory budget | `--mem-budget <MB>`: when all backends together exceed it (measured as macOS `footprint` incl. child processes), stop the least-recently-used tab that is safe to stop; never the focused, busy, prompting tab, or one that started background work (heuristic: `run_in_background`, Monitor, Cron/ScheduleWakeup) | e2e with 2 real tabs and a 200 MB budget: LRU tab stopped (`1z`), focused tab kept, one `claude` left; warns (max once a minute) if only protected tabs remain |
-| `--profile lean` | core tools + no MCP + `--setting-sources project,local` (skips user-level CLAUDE.md/AGENTS.md, skills, hooks) | prompt tokens/request in this repo: **85.8k → 8.9k**; cost of the bench turn $0.29 → $0.04 |
-| `--sources` / `--tools` / `--no-mcp` | the same levers, individually | e.g. `--sources project,local` alone: 65k → 7k with the 4-tool set |
+| `--profile lean` | core tools + no MCP + `--setting-sources project,local` (skips user-level CLAUDE.md, skills, hooks) | a fresh request: **30.4k → 9.3k** tokens; three small coding tasks cost **$0.0061–0.0075 → $0.0017–0.0019** each, all passed; the backend's process tree **243 → 132 MB** (`bench/run.py`, 2026-10-28, below). Large user-level instruction files (`~/.claude/CLAUDE.md`) count on top and are skipped too. Plus `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` (telemetry, autoupdate, `/ultrareview`, `/advisor`, `/import`, design): footprint **134 → 123 MB**, prompt **9,407 → 8,741** tokens (3 interleaved runs each, identical within a config) |
+| `--sources` / `--tools` / `--no-mcp` | the same levers, individually | a fresh request, 30.4k tokens by default: `--sources project,local` alone 19.5k, the lean `--tools` set alone 11.6k |
 | `--env K=V` | passes env to every `claude` (Bun reads `BUN_JSC_*`; invalid names are rejected) | `BUN_JSC_gcMaxHeapSize=30000000` trimmed peak RSS ~11% (308M → 274M) on a light workload; not tested under heavy load. No hard cap: macOS doesn't enforce RLIMIT_AS/RSS |
-| Cheap redraws | coalesced events + cached wrapping | 3,000-entry transcript, release build: 0.13 ms per redraw, 0.10 ms per streamed token (`cargo test --release -- --nocapture`) |
+| Cheap redraws | coalesced events (at most ~30 frames a second while streaming) + cached wrapping, kept only near the view | 3,000-entry transcript: 0.2–0.5 ms per redraw (release build on a busy machine, `cargo test --release redraw_cost -- --nocapture`). 6,000 entries (3,000 command outputs, 3,000 markdown replies): 94 MB held, 86 MB of it the conversation itself (304 MB before rendered lines were dropped away from the view); a resize redraws in 5 ms while following the newest output (2.4 s before), 0.5 s when scrolled up (`cargo test --release zz_long_session_memory -- --ignored --nocapture`) |
 
-Run `claude++ --bench [prompt]` to reproduce the profile comparison on your machine.
-It runs one prompt per profile and prints tools, init time, prompt tokens, output tokens,
-cost, and peak RSS.
+Reproduce the profile comparison on your machine with `python3 bench/run.py` (see Benchmark below).
 
 Caveats, stated plainly:
 - Most of the default prompt is **cached**. Cache reads bill at ~10% of the input price, so
   the *cost* saving is smaller than the raw token saving. The raw saving still matters for
   context-window headroom and for cache writes on every cold start or 1-hour cache expiry.
 - `lean` drops Task/subagents, Skills, MCP servers and other tools. That is a capability
-  trade, so **`full` (no changes) is the default**.
+  trade, so **`full` (no changes) is the default**. For subagents on a lean budget see
+  [Many agents, one process](#many-agents-one-process).
 - An **active** session costs about what Claude Code costs. The backend *is* Claude Code
-  (≈220–330 MB). claude++ adds ~3 MB. The memory wins come from not running backends you
+  (about 115–255 MB after a turn here, depending on profile). claude++ adds ~4 MB. The memory wins come from not running backends you
   are not using.
 - Hooks and plugins the user has configured still run. For example, a memory plugin here
   spawns a separate ~300 MB node process per backend. That is the user's configuration,
@@ -316,14 +443,80 @@ What this means:
   for more than the window, compact before you go, not when you come back. claude++ never does this
   for you: an automatic extra model call would break the "no hidden LLM calls" rule.
 
+## More levers, as profile `env` (measured; each trades a capability)
+
+None of these are on by default. Put them in a profile file's `"env"` (see PROFILES). Prompt tokens are the first
+request of a trivial turn on haiku, deterministic unless noted; "lean" means the lean profile above.
+
+| Variable / flag | Effect | What you lose |
+|---|---|---|
+| `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` | −695 tokens (lean) | auto-memory prompt and writes |
+| `CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS=1` | −462 tokens | git/commit guidance in the Bash tool text |
+| `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1` | −205 to −413 tokens | background Bash |
+| `"tools": "Bash,Read,Edit"` | −1,220 tokens (lean) | Write, WebFetch, WebSearch, AskUserQuestion |
+| `--append-system-prompt "Be concise: answer in at most 3 short sentences, no preamble."` | about −30% output tokens on explanation prompts, none on tool-heavy work (1 task per type, haiku) | detail; a softer "Be concise." gave only −8% |
+| `BUN_JSC_gcMaxHeapSize=64000000` (16–64 MB) | −19 to −29 MB; no effect at 128 MB+; does not stack with the traffic variable | long contexts untested |
+| `CLAUDE_CODE_DISABLE_ATTACHMENTS=1` | **−11k tokens on `full`** | the model stops seeing the skill list, deferred tools (WebFetch, SendMessage, …), MCP tools and their instructions |
+
+Measured and not worth it: `--disable-slash-commands` and `--agents '{}'` on lean (no change), `--no-session-persistence`,
+`BUN_JSC_forceRAMSize` / `useConcurrentGC` / `maxPerThreadStackUsage` (no change), `BUN_JSC_useJIT=0` (**crashes claude**),
+`MAX_THINKING_TOKENS` / `--effort` on haiku (no output change; thinking models untested). `--bare` and
+`CLAUDE_CODE_SIMPLE=1` ignore OAuth and need `ANTHROPIC_API_KEY`. `full`-profile numbers swing by thousands of tokens
+whenever MCP servers or plugins load. The only RAM lever above ~20 MB is leaving user-level MCP/plugins/hooks out
+(`sources`/`lean`: about 237 → 135 MB).
+
+The Claude daemon and `bg-spare` workers seen in `ps` come from interactive `claude` (`←`, `/bg`, `claude agents`), not
+from `claude -p`; a headless run does not start or need them (checked by diffing `ps` around one run).
+
+## Many agents, one process
+
+To run several agents (lanes) at once, let the model use Claude Code's own `Agent` tool. A subagent lives
+inside the tab's `claude` process; a lane that is another `claude -p` process costs a whole backend.
+Measured with `python3 bench/lanes.py <arm> [N]` (haiku, macOS `footprint` summed over the process tree):
+
+| 4 agents running at once | footprint |
+|---|---|
+| 1 process, no subagents | 252 MB |
+| **1 process, 4 parallel subagents** | **268 MB** (peak 276), about +4 MB per agent |
+| 4 separate `claude` processes | **936 MB**, about 234 MB per agent |
+| `lean` + `Agent`, 6 subagents that read the repo with Bash | 134 → 166 MB peak, about +5 MB per agent |
+
+So a lane gets no cheaper as a process: it is already about 50× cheaper in-process. Going below ~5 MB would mean
+running the model loop and tools inside claude++, which conflicts with "Claude Code does everything agentic" and
+"no hidden LLM calls", for a saving of a few MB per agent. claude++ therefore adds no spawn tool of its own; the
+memory work is in keeping `Agent` available and not starting extra backends.
+
+`lean` has no `Agent`. Adding it costs about **2.3k prompt tokens per request** (9.3k → 11.6k, mostly cached).
+A one-line profile does it, `~/.config/claude++/profiles/lanes.json`:
+
+```json
+{ "extends": "lean", "tools": "Bash,Read,Edit,Write,AskUserQuestion,WebFetch,WebSearch,Agent" }
+```
+
+then `claude++ --profile lanes` or `/new lanes`. Subagent steps already render under their `Agent` call, and a
+tab with a subagent still running (foreground, or backgrounded, which is Claude Code's default) is never stopped by `--mem-budget` or idle suspension.
+
+Caveat: trivial and file-reading subagents were measured, not long-running ones whose context grows. A model
+with Bash can still start `claude -p` itself, which this does not prevent.
+
 ## Benchmark (`bench/run.py`)
 
-Controlled, per-process-tree measurements (haiku, one factor changed per config, shuffled runs, warm-ups
-discarded). Results are in `bench/results/`. Summary of the first run: fresh-request prompt tokens
-30.6k (stock) → 9.3k (`lean`) → 6.3k (`lean` + a short custom system prompt); real footprint of the `claude`
-process 164 → 134 MB. All configs passed all 3 small tasks, but the tasks are too easy to show that a custom
-system prompt does not hurt quality, so `lean` is the shipped profile and the custom prompt stays opt-in.
-Use footprint, not RSS: RSS overstated memory about 2×.
+Controlled, per-process-tree measurements of the headless backend's configurations (haiku, one factor changed per
+config, shuffled runs, warm-ups discarded, a clean environment). Latest run: Claude Code 2.1.312, 2026-10-28,
+`python3 bench/run.py --task-reps 3 --workdir <empty dir>`; full table in `bench/results/2026-10-28-haiku.txt`.
+
+| config | tokens, fresh request | process tree | cost per task (bugfix / implement / rename) | passed |
+|---|---|---|---|---|
+| default | 30.4k | 243 MB | $0.0062 / $0.0061 / $0.0075 | 9/9 |
+| `--sources project,local` | 19.5k | 141 MB | $0.0032 / $0.0034 / $0.0036 | 9/9 |
+| lean `--tools` set | 11.6k | 148 MB | $0.0025 / $0.0024 / $0.0025 | 9/9 |
+| `lean` (both) | 9.3k | 132 MB | $0.0017 / $0.0018 / $0.0019 | 9/9 |
+| `lean` + a short custom system prompt | 6.3k | 133 MB | $0.0010 / $0.0010 / $0.0013 | 9/9 |
+
+The tasks are small (fix a bug, implement a function, rename across files, each checked by its tests), too easy to
+show that a custom system prompt does not hurt quality on real work, so `lean` is the shipped profile and the
+custom prompt stays opt-in. The machine was shared and busy (load 5–20, recorded per run), which affects the
+timings in the full table, not tokens or memory. Use footprint, not RSS: RSS overstated memory about 2×.
 
 ## Limitations / not yet done
 
@@ -331,17 +524,16 @@ Use footprint, not RSS: RSS overstated memory about 2×.
   skipping what it does not recognise). Only the last 400 messages are replayed, to keep memory flat.
 - Inline images need a kitty-graphics terminal with unicode placeholders (kitty, Ghostty). Not shown for
   replayed history. Terminals that report no cell size get a 1:2 cell-shape guess, so aspect can be slightly off.
-- The list reads transcripts only for the current directory (background sessions from other directories come from
-  the supervisor's state files, an internal format that is read leniently), searches titles, summaries and first
-  prompts rather than full text, and cannot delete or rename.
-- Markdown: no syntax highlighting inside code blocks, no nested block quotes inside lists, no HTML, no setext
+- The list reads background sessions from the supervisor's state files (an internal format, read leniently),
+  searches titles, summaries and first prompts rather than full text, and cannot rename.
+- Markdown: no nested block quotes inside lists, no HTML, no setext
   (underlined) headings, and a soft line break stays a line break rather than joining the paragraph.
 - The `@` picker indexes up to 100k paths when it opens (cached for 30 s); a very large monorepo may feel it.
   Paths with spaces are not completed. The model picker shows every model Claude Code lists, including ones
   you may not have access to.
-- No mouse scrolling (mouse capture would break native text selection). Use PgUp/PgDn or shift+↑/↓.
 - Shift+Enter needs a terminal with the kitty keyboard protocol; alt+enter and ctrl+j always work.
-- Tested on macOS only. Nothing is macOS-specific except that `ps` is used for RSS sampling.
+- Tested on macOS only. macOS tools used where present: `footprint` (memory), `sips` (image conversion), `osascript`
+  (clipboard images) and `pbcopy`; elsewhere memory falls back to `ps` RSS and images need `wl-paste`/`xclip`.
 
 ## Tests
 

@@ -70,8 +70,7 @@ fn clip(v: &Value, n: usize) -> Box<str> {
 }
 
 fn dir() -> Option<PathBuf> {
-    let base = std::env::var_os("CLAUDE_CONFIG_DIR").map(PathBuf::from).or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".claude")))?;
-    Some(base.join("jobs"))
+    Some(crate::config::claude_dir()?.join("jobs"))
 }
 
 /// One `state.json`; `None` when it lacks what a row needs.

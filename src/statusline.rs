@@ -86,10 +86,10 @@ pub struct Paths {
 
 impl Paths {
     pub fn from_env() -> Paths {
-        let home = std::env::var_os("HOME").map(PathBuf::from);
+        let home = std::env::home_dir();
         let config = std::env::var_os("CLAUDE_CONFIG_DIR").map(PathBuf::from);
         Paths {
-            config_dir: config.clone().or_else(|| home.as_ref().map(|h| h.join(".claude"))),
+            config_dir: crate::config::claude_dir(),
             claude_json: config.map(|c| c.join(".claude.json")).or_else(|| home.as_ref().map(|h| h.join(".claude.json"))),
             home,
             managed: if cfg!(target_os = "macos") {

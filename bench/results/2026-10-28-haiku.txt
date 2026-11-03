@@ -1,0 +1,32 @@
+
+model=haiku  probe reps=3  task reps=3  (medians; tokens deterministic)
+
+config     startup ms  floor tok  vs base  fp claude  fp tree  peak rss
+base             1921      30439      +0%     156.0M   243.0M    488.6M
+sources           548      19512     -36%     141.0M   141.0M    236.9M
+tools             804      11570     -62%     148.0M   148.0M    318.3M
+sysprompt         936      27409     -10%     164.0M   249.0M    481.6M
+lean              430       9323     -69%     132.0M   132.0M    227.3M
+lean+sys          412       6344     -79%     133.0M   133.0M    227.1M
+
+config     task        pass  turns  prompt tok  output   cost $   secs
+base       bugfix      3/3      5      133425    1351   0.0062   12.3
+base       implement   3/3      5      132254    1315   0.0061   10.7
+base       rename      3/3      7      240476    1726   0.0075   21.3
+sources    bugfix      3/3      5       86639     836   0.0032    6.9
+sources    implement   3/3      5       86621    1214   0.0034   11.4
+sources    rename      3/3      7       87785    1335   0.0036   11.2
+tools      bugfix      3/3      5       49371    1175   0.0025   11.8
+tools      implement   3/3      5       49270    1095   0.0024   10.2
+tools      rename      3/3      6       49446    1122   0.0025   12.8
+sysprompt  bugfix      3/3      5      119664     961   0.0051   10.2
+sysprompt  implement   3/3      4       89904    1198   0.0051   12.4
+sysprompt  rename      3/3      7      152042    1204   0.0056   11.3
+lean       bugfix      3/3      6       39996     808   0.0017    7.4
+lean       implement   3/3      5       40038    1072   0.0018    7.5
+lean       rename      3/3      6       40384    1124   0.0019    8.3
+lean+sys   bugfix      3/3      6       28070     760   0.0010    8.5
+lean+sys   implement   3/3      4       20942     830   0.0010    7.4
+lean+sys   rename      3/3      4       28398    1128   0.0013    8.7
+
+loads seen: min 5.07 max 19.8

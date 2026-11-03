@@ -45,7 +45,9 @@ pub fn builtin(name: &str) -> Option<Map<String, Value>> {
     let v = match name {
         "full" => serde_json::json!({}),
         "sources" => serde_json::json!({"setting_sources": "project,local"}),
-        "lean" => serde_json::json!({"tools": LEAN_TOOLS, "strict_mcp": true, "setting_sources": "project,local"}),
+        // NONESSENTIAL_TRAFFIC (any non-empty value counts, even "0") is -11 MB and -666 prompt tokens here;
+        // it also drops telemetry, autoupdate and a few slash commands (/ultrareview, /advisor, /import, design).
+        "lean" => serde_json::json!({"tools": LEAN_TOOLS, "strict_mcp": true, "setting_sources": "project,local", "env": {"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"}}),
         _ => return None,
     };
     v.as_object().cloned()
@@ -126,8 +128,7 @@ fn strings(v: &Value) -> Vec<String> {
 }
 
 fn path(merged: &Map<String, Value>, key: &str, p: &str) -> String {
-    let home = std::env::var("HOME").unwrap_or_default();
-    let p = p.strip_prefix("~/").map(|r| format!("{home}/{r}")).unwrap_or_else(|| p.to_string());
+    let p = p.strip_prefix("~/").map(|r| std::env::home_dir().unwrap_or_default().join(r).to_string_lossy().into_owned()).unwrap_or_else(|| p.to_string());
     match merged.get(&format!("__dir:{key}")).and_then(Value::as_str) {
         Some(d) if !Path::new(&p).is_absolute() => Path::new(d).join(p).to_string_lossy().into_owned(),
         _ => p,
@@ -190,6 +191,8 @@ mod tests {
         ]);
         assert_eq!(args(&d, "full"), Vec::<String>::new());
         assert_eq!(args(&d, "lean"), ["--tools", LEAN_TOOLS, "--setting-sources", "project,local", "--strict-mcp-config"]);
+        assert_eq!(resolve(Some(&d), "lean").unwrap().env, [("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC".to_string(), "1".to_string())]);
+        assert!(resolve(Some(&d), "full").unwrap().env.is_empty() && resolve(Some(&d), "sources").unwrap().env.is_empty());
         let style = args(&d, "style");
         assert_eq!(style[..2], ["--append-system-prompt-file", &format!("{}/style.md", d.display())], "{style:?}");
         assert!(style.windows(2).any(|w| w == ["--tools", "Bash,Read"]) && style.windows(2).any(|w| w == ["--model", "haiku"]));
@@ -198,7 +201,7 @@ mod tests {
         assert!(deeper.args.windows(2).any(|w| w == ["--append-system-prompt", "inline"]) && !deeper.args.iter().any(|a| a.ends_with("style.md")), "one append form replaces the other");
         assert!(!deeper.args.contains(&"--strict-mcp-config".to_string()), "child switches it off");
         assert_eq!(deeper.args.iter().filter(|a| a.starts_with("--x") || a.starts_with("--y")).count(), 2, "args accumulate");
-        assert_eq!(deeper.env.len(), 2, "env merges");
+        assert_eq!(deeper.env.len(), 3, "env merges: its own two plus lean's, inherited");
     }
 
     #[test]

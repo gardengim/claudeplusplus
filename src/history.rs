@@ -25,10 +25,7 @@ pub struct Summary {
 }
 
 fn projects_dir() -> Option<PathBuf> {
-    let base = std::env::var_os("CLAUDE_CONFIG_DIR")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".claude")))?;
-    Some(base.join("projects"))
+    Some(crate::config::claude_dir()?.join("projects"))
 }
 
 /// Claude Code names a project's folder after its path, every non-alphanumeric char becoming `-`.
@@ -65,6 +62,14 @@ pub fn find(id: &str) -> Option<PathBuf> {
         .flatten()
         .map(|d| d.path().join(format!("{id}.jsonl")))
         .find(|p| p.is_file())
+}
+
+/// Delete a conversation: its transcript and the folder of subagent transcripts beside it.
+pub fn delete(id: &str) -> std::io::Result<()> {
+    let path = find(id).ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "transcript not found"))?;
+    std::fs::remove_file(&path)?;
+    let _ = std::fs::remove_dir_all(path.with_extension(""));
+    Ok(())
 }
 
 /// Transcript files of a working directory's sessions, newest first.
@@ -144,26 +149,42 @@ fn squash(t: &str, n: usize) -> String {
 
 /// (display title, first prompt, directory). Titles are appended as the session goes, so the tail is scanned too.
 fn titles(path: &Path) -> Titles {
-    let (custom, ai, prompt, cwd) = names(path);
-    let title = [custom, ai].into_iter().find(|t| !t.trim().is_empty()).map_or_else(|| squash(&prompt, 60), |t| squash(&t, 60));
-    (title, prompt, cwd)
+    let n = names(path);
+    let title = [n.custom, n.ai].into_iter().find(|t| !t.trim().is_empty()).map_or_else(|| squash(&n.prompt, 60), |t| squash(&t, 60));
+    (title, n.prompt, n.cwd)
 }
 
 /// The name a session shows elsewhere: the `/rename` or `--name` title, else the generated one.
 pub fn session_name(path: &Path) -> Option<String> {
-    let (custom, ai, ..) = names(path);
-    [custom, ai].into_iter().find(|t| !t.trim().is_empty())
+    let n = names(path);
+    [n.custom, n.ai].into_iter().find(|t| !t.trim().is_empty())
 }
 
-/// (custom title, generated title, first prompt, directory), each empty if absent.
-fn names(path: &Path) -> (String, String, String, String) {
+/// The conversation's `/color`, if it has one (`default` counts as none).
+pub fn session_color(path: &Path) -> Option<String> {
+    Some(names(path).color).filter(|c| !c.is_empty() && c != "default")
+}
+
+/// What a transcript says about itself, each empty if absent.
+#[derive(Default)]
+struct Names {
+    custom: String,
+    ai: String,
+    prompt: String,
+    cwd: String,
+    color: String,
+}
+
+fn names(path: &Path) -> Names {
     let Ok(mut f) = std::fs::File::open(path) else { return Default::default() };
-    let (mut custom, mut ai, mut prompt, mut cwd) = (String::new(), String::new(), String::new(), String::new());
+    let mut n = Names::default();
     let mut title_line = |line: &str| {
         let (key, out) = if line.contains("\"type\":\"custom-title\"") {
-            ("customTitle", &mut custom)
+            ("customTitle", &mut n.custom)
         } else if line.contains("\"type\":\"ai-title\"") {
-            ("aiTitle", &mut ai)
+            ("aiTitle", &mut n.ai)
+        } else if line.contains("\"type\":\"agent-color\"") {
+            ("agentColor", &mut n.color)
         } else {
             return;
         };
@@ -185,18 +206,18 @@ fn names(path: &Path) -> (String, String, String, String) {
     if let Ok(f) = std::fs::File::open(path) {
         let users = BufReader::new(f).lines().take(300).map_while(Result::ok).filter(|l| l.contains("\"type\":\"user\"")).filter_map(|l| serde_json::from_str::<Value>(&l).ok());
         for v in users {
-            if cwd.is_empty() {
-                cwd = v["cwd"].as_str().unwrap_or_default().to_string();
+            if n.cwd.is_empty() {
+                n.cwd = v["cwd"].as_str().unwrap_or_default().to_string();
             }
-            if prompt.is_empty() {
-                prompt = user_text(&v).map(|t| squash(&t, 200)).unwrap_or_default();
+            if n.prompt.is_empty() {
+                n.prompt = user_text(&v).map(|t| squash(&t, 200)).unwrap_or_default();
             }
-            if !cwd.is_empty() && !prompt.is_empty() {
+            if !n.cwd.is_empty() && !n.prompt.is_empty() {
                 break;
             }
         }
     }
-    (custom, ai, prompt, cwd)
+    n
 }
 
 /// The last few exchanges of a transcript as (is_user, text), read from its tail only.
@@ -264,8 +285,115 @@ pub fn user_text(v: &Value) -> Option<String> {
     (!t.is_empty() && !noise.iter().any(|n| t.starts_with(n))).then(|| t.to_string())
 }
 
+/// The entries of the conversation as it now stands, which leaves out turns a rewind abandoned:
+/// walked back from the newest message by `parentUuid` (across compaction by `logicalParentUuid`),
+/// plus side branches that start without a typed prompt (parallel tool calls fork the chain too).
+/// None for a transcript without links (then every line counts).
+fn chain(path: &Path) -> Option<std::collections::HashSet<String>> {
+    // Substring reads, not a parse: transcripts reach hundreds of MB. The key appears once per line,
+    // the top-level `uuid` after the message (so the last match is it).
+    fn value<'a>(line: &'a str, at: Option<usize>, key: &str) -> Option<&'a str> {
+        let rest = &line[at? + key.len()..];
+        rest.find('"').map(|end| &rest[..end])
+    }
+    let f = std::fs::File::open(path).ok()?;
+    // uuid -> (parent, is a typed prompt)
+    let mut info: HashMap<String, (Option<String>, bool)> = HashMap::new();
+    let mut order = Vec::new();
+    let mut leaf = None;
+    for line in BufReader::new(f).lines().map_while(Result::ok) {
+        const UUID: &str = "\"uuid\":\"";
+        let Some(u) = value(&line, line.rfind(UUID), UUID) else { continue };
+        let up = ["\"parentUuid\":\"", "\"logicalParentUuid\":\""].iter().find_map(|k| value(&line, line.find(k), k));
+        let user = line.starts_with("{\"type\":\"user\"") || line.contains(",\"type\":\"user\"");
+        let message = (user || line.contains(",\"type\":\"assistant\"")) && !line.contains("\"isSidechain\":true");
+        // Bookkeeping lines may hang off anything; the conversation ends at its newest message.
+        if message {
+            leaf = Some(u.to_string());
+        }
+        info.insert(u.to_string(), (up.map(String::from), user && !line.contains("\"tool_use_id\"")));
+        order.push(u.to_string());
+    }
+    let mut keep: HashMap<String, bool> = HashMap::new();
+    let mut at = leaf;
+    while let Some(u) = at {
+        if keep.insert(u.clone(), true).is_some() {
+            break; // a loop: stop rather than spin
+        }
+        at = info.get(&u).and_then(|i| i.0.clone());
+    }
+    if keep.is_empty() {
+        return None;
+    }
+    for u in order {
+        let mut path = Vec::new();
+        let mut cur = Some(u);
+        let verdict = loop {
+            let Some(c) = cur else { break false };
+            if let Some(&v) = keep.get(&c) {
+                break v;
+            }
+            let Some((up, prompt)) = info.get(&c) else { break false };
+            if path.len() > info.len() {
+                break false;
+            }
+            let (up, prompt) = (up.clone(), *prompt);
+            path.push(c);
+            if prompt {
+                break false;
+            }
+            cur = up;
+        };
+        keep.extend(path.into_iter().map(|c| (c, verdict)));
+    }
+    Some(keep.into_iter().filter_map(|(u, v)| v.then_some(u)).collect())
+}
+
+/// Reports of a conversation's subagents, by the id of the Agent call that started each: the message of
+/// the agent's last `SubagentHandback`, read from `<transcript>/subagents/agent-*.jsonl` (the `.meta.json`
+/// beside each names its call).
+pub fn agent_reports(transcript: &Path) -> HashMap<String, String> {
+    let mut out = HashMap::new();
+    let Ok(dir) = std::fs::read_dir(transcript.with_extension("").join("subagents")) else { return out };
+    for meta in dir.flatten().map(|d| d.path()).filter(|p| p.to_string_lossy().ends_with(".meta.json")) {
+        let Some(call) = std::fs::read_to_string(&meta).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()).and_then(|m| m["toolUseId"].as_str().map(String::from)) else {
+            continue;
+        };
+        let log = PathBuf::from(meta.to_string_lossy().replace(".meta.json", ".jsonl"));
+        let Ok(f) = std::fs::File::open(&log) else { continue };
+        let report = BufReader::new(f)
+            .lines()
+            .map_while(Result::ok)
+            .filter(|l| l.contains("\"SubagentHandback\"") && l.contains("\"tool_use\""))
+            .filter_map(|l| serde_json::from_str::<Value>(&l).ok())
+            .flat_map(|v| v["message"]["content"].as_array().cloned().unwrap_or_default())
+            .filter(|b| b["type"] == "tool_use" && b["name"] == "SubagentHandback")
+            .filter_map(|b| b["input"]["message"].as_str().map(String::from))
+            .last();
+        if let Some(r) = report {
+            out.insert(call, r);
+        }
+    }
+    out
+}
+
+/// The typed prompts of the conversation as it now stands (its current branch), oldest first. Streams the
+/// file and parses only user lines, so a rewind on a huge transcript stays quick.
+pub fn prompts(path: &Path) -> Vec<Value> {
+    let on = chain(path);
+    let Ok(f) = std::fs::File::open(path) else { return vec![] };
+    BufReader::new(f)
+        .lines()
+        .map_while(Result::ok)
+        .filter(|l| l.contains("\"type\":\"user\"") && !l.contains("\"tool_use_id\""))
+        .filter_map(|l| serde_json::from_str::<Value>(&l).ok())
+        .filter(|v| user_text(v).is_some() && on.as_ref().is_none_or(|on| v["uuid"].as_str().is_none_or(|u| on.contains(u))))
+        .collect()
+}
+
 /// The last `MAX_LINES` top-level user/assistant lines, plus how many earlier ones were left out.
 pub fn tail(path: &Path) -> (Vec<Value>, usize) {
+    let on = chain(path);
     let Ok(f) = std::fs::File::open(path) else { return (vec![], 0) };
     let mut keep: VecDeque<Value> = VecDeque::new();
     let mut dropped = 0;
@@ -276,6 +404,11 @@ pub fn tail(path: &Path) -> (Vec<Value>, usize) {
         }
         let Ok(v) = serde_json::from_str::<Value>(&line) else { continue };
         if !matches!(v["type"].as_str(), Some("user" | "assistant")) || v["isSidechain"] == true {
+            continue;
+        }
+        if let (Some(on), Some(u)) = (&on, v["uuid"].as_str())
+            && !on.contains(u)
+        {
             continue;
         }
         if keep.len() == MAX_LINES {
@@ -309,6 +442,58 @@ pub fn ago(t: SystemTime) -> String {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn a_resume_shows_the_branch_a_rewind_left_with_parallel_tools_and_compaction_intact() {
+        let dir = std::env::temp_dir().join(format!("claudeplusplus-chain-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("s.jsonl");
+        let line = |kind: &str, uuid: &str, parent: &str, content: &str| {
+            let parent = if parent.is_empty() { "null".to_string() } else { format!("\"{parent}\"") };
+            format!(r#"{{"parentUuid":{parent},"isSidechain":false,"type":"{kind}","message":{{"role":"{kind}","content":{content}}},"uuid":"{uuid}"}}"#)
+        };
+        let tr = |id: &str| format!(r#"[{{"type":"tool_result","tool_use_id":"{id}","content":"ok"}}]"#);
+        let tu = |id: &str| format!(r#"[{{"type":"tool_use","id":"{id}","name":"Bash","input":{{}}}}]"#);
+        let text = |t: &str| format!(r#"[{{"type":"text","text":"{t}"}}]"#);
+        let lines = [
+            r#"{"type":"attachment","attachment":{"type":"hook_success"},"parentUuid":null,"uuid":"h0"}"#.to_string(),
+            line("user", "p1", "h0", r#""first""#),
+            // Two parallel tool calls: the second result hangs off the first call, beside the second.
+            line("assistant", "a1", "p1", &tu("t1")),
+            line("assistant", "a2", "a1", &tu("t2")),
+            line("user", "r2", "a2", &tr("t2")),
+            line("user", "r1", "a1", &tr("t1")),
+            line("assistant", "a3", "r1", &text("both ran")),
+            // Compaction restarts the chain; the old one stays reachable.
+            r#"{"parentUuid":null,"logicalParentUuid":"a3","type":"system","subtype":"compact_boundary","uuid":"c0"}"#.to_string(),
+            line("user", "p2", "c0", r#""abandoned""#),
+            line("assistant", "a4", "p2", &text("gone")),
+            // Rewound to before "abandoned" and asked again.
+            line("user", "p3", "c0", r#""second""#),
+            line("assistant", "a5", "p3", &text("kept")),
+        ];
+        std::fs::write(&p, lines.join("\n")).unwrap();
+        let (kept, _) = tail(&p);
+        let ids: Vec<&str> = kept.iter().filter_map(|v| v["uuid"].as_str()).collect();
+        assert_eq!(ids, ["p1", "a1", "a2", "r2", "r1", "a3", "p3", "a5"]);
+        let typed: Vec<String> = prompts(&p).iter().filter_map(|v| v["uuid"].as_str().map(String::from)).collect();
+        assert_eq!(typed, ["p1", "p3"], "a rewind matches only prompts on the branch shown");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_subagents_report_is_found_by_the_call_that_started_it() {
+        let dir = std::env::temp_dir().join(format!("claudeplusplus-agents-{}", std::process::id()));
+        let sub = dir.join("s").join("subagents");
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::write(sub.join("agent-x.meta.json"), r#"{"toolUseId":"toolu_1","finished":true}"#).unwrap();
+        let handback = |m: &str| format!(r#"{{"type":"assistant","message":{{"content":[{{"type":"tool_use","id":"h","name":"SubagentHandback","input":{{"message":"{m}"}}}}]}}}}"#);
+        std::fs::write(sub.join("agent-x.jsonl"), [handback("draft"), handback("final report")].join("\n")).unwrap();
+        std::fs::write(sub.join("agent-y.meta.json"), r#"{"toolUseId":"toolu_2"}"#).unwrap(); // no log: skipped
+        let r = agent_reports(&dir.join("s.jsonl"));
+        assert_eq!((r.get("toolu_1").map(String::as_str), r.len()), (Some("final report"), 1));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn folder_names_match_claude_codes_encoding() {
@@ -368,6 +553,21 @@ mod tests {
     }
 
     #[test]
+    fn the_last_color_wins_and_default_is_none() {
+        let dir = std::env::temp_dir().join(format!("claudeplusplus-color-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let line = |c: &str| format!("{{\"type\":\"agent-color\",\"agentColor\":\"{c}\"}}\n");
+        let color = |name: &str, body: String| {
+            let p = dir.join(name);
+            std::fs::write(&p, body).unwrap();
+            session_color(&p)
+        };
+        assert_eq!(color("a", String::new()), None);
+        assert_eq!(color("b", line("red") + &line("blue")).as_deref(), Some("blue"));
+        assert_eq!(color("c", line("red") + &line("default")), None);
+    }
+
+    #[test]
     fn preview_returns_last_turns_with_roles() {
         let dir = std::env::temp_dir().join(format!("claudeplusplus-prev-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -393,5 +593,83 @@ mod tests {
         let (lines, dropped) = tail(&p);
         assert_eq!((lines.len(), dropped), (MAX_LINES, 5));
         assert_eq!(lines.last().unwrap()["message"]["content"], format!("m{}", MAX_LINES + 4));
+    }
+}
+
+
+/// Prompts sent from `cwd`, oldest first, from Claude Code's own `history.jsonl` (shared with
+/// interactive `claude`, so ↑ recalls what was typed in either). Only the file's tail is read.
+pub fn sent_prompts(cwd: &str) -> Vec<String> {
+    let Some(path) = crate::config::claude_dir().map(|d| d.join("history.jsonl")) else { return vec![] };
+    prompts_in(&path, cwd)
+}
+
+fn prompts_in(path: &Path, cwd: &str) -> Vec<String> {
+    const TAIL: u64 = 1 << 20;
+    let Ok(mut f) = std::fs::File::open(path) else { return vec![] };
+    let len = f.metadata().map(|m| m.len()).unwrap_or(0);
+    let _ = f.seek(SeekFrom::Start(len.saturating_sub(TAIL)));
+    let mut out: Vec<String> = vec![];
+    // Bytes, then lossy: the cut can land inside a character, and one bad line must not end the read.
+    for line in BufReader::new(f).split(b'\n').map_while(Result::ok) {
+        let line = String::from_utf8_lossy(&line);
+        let Ok(v) = serde_json::from_str::<Value>(&line) else { continue }; // also skips the cut first line
+        if v["project"].as_str() != Some(cwd) {
+            continue;
+        }
+        let Some(mut text) = v["display"].as_str().map(String::from) else { continue };
+        // A long paste is stored as a placeholder plus its content (or only a hash, then it cannot come back).
+        for (id, p) in v["pastedContents"].as_object().into_iter().flatten() {
+            let (Some(kind), content) = (p["type"].as_str(), p["content"].as_str()) else { continue };
+            let label = format!("[Pasted text #{id}");
+            // `#1` must not match `#10`: the number ends at a space or the bracket.
+            let start = text.match_indices(&label).map(|m| m.0).find(|&i| matches!(text[i + label.len()..].chars().next(), Some(' ' | ']')));
+            let Some(start) = start.filter(|_| kind == "text") else { continue };
+            let Some(content) = content else { text.clear(); break };
+            let end = text[start..].find(']').map_or(text.len(), |e| start + e + 1);
+            text.replace_range(start..end, content);
+        }
+        if !text.trim().is_empty() && out.last() != Some(&text) {
+            out.push(text);
+        }
+    }
+    out
+}
+
+/// Records a sent prompt the way interactive `claude` does, so it shows up in its ↑ history too.
+pub fn record_prompt(cwd: &str, text: &str, session: Option<&str>) {
+    use std::io::Write;
+    if cfg!(test) {
+        return; // tests submit messages; they must not land in the real history
+    }
+    let Some(path) = crate::config::claude_dir().map(|d| d.join("history.jsonl")) else { return };
+    let ms = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64);
+    let mut v = serde_json::json!({"display": text, "pastedContents": {}, "timestamp": ms, "project": cwd});
+    if let Some(s) = session {
+        v["sessionId"] = s.into();
+    }
+    // One write per line with O_APPEND: safe next to a running `claude` appending to the same file.
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+        let _ = f.write_all(format!("{v}\n").as_bytes());
+    }
+}
+
+#[cfg(test)]
+mod prompt_tests {
+    #[test]
+    fn prompts_are_this_projects_with_pastes_restored() {
+        let d = std::env::temp_dir().join(format!("cpp-hist-{}", std::process::id()));
+        let lines = [
+            r#"{"display":"one","pastedContents":{},"project":"/p"}"#,
+            r#"{"display":"elsewhere","pastedContents":{},"project":"/q"}"#,
+            r#"{"display":"see [Pasted text #2 +3 lines] ok","pastedContents":{"2":{"id":2,"type":"text","content":"a\nb\nc"}},"project":"/p"}"#,
+            r#"{"display":"[Pasted text #3 +9 lines]","pastedContents":{"3":{"id":3,"type":"text","contentHash":"x"}},"project":"/p"}"#,
+            r#"{"display":"one","pastedContents":{},"project":"/p"}"#,
+            r#"{"display":"[Pasted text #10 +2 lines] [Pasted text #1 +2 lines]","pastedContents":{"1":{"id":1,"type":"text","content":"one"},"10":{"id":10,"type":"text","content":"ten"}},"project":"/p"}"#,
+        ];
+        // A cut first line that is not even UTF-8 must not end the read.
+        std::fs::write(&d, [&b"\x80\x80\n"[..], lines.join("\n").as_bytes()].concat()).unwrap();
+        assert_eq!(super::prompts_in(&d, "/p"), ["one", "see a\nb\nc ok", "one", "ten one"]);
+        let _ = std::fs::remove_file(d);
     }
 }

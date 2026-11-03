@@ -71,6 +71,8 @@ pub struct Ui {
     editing: bool,
     done: Vec<Option<String>>,
     note: String,
+    /// Permission prompt: what to do instead, typed on the "No" row and sent with the refusal.
+    pub feedback: String,
 }
 
 fn options(q: &Value) -> &[Value] {
@@ -149,8 +151,7 @@ impl Ui {
         let rows = no + 1; // the options and "Other"
         match k.code {
             KeyCode::Esc => return Outcome::Decline,
-            KeyCode::Up => self.cursor[i] = (self.cursor[i] + rows - 1) % rows,
-            KeyCode::Down => self.cursor[i] = (self.cursor[i] + 1) % rows,
+            KeyCode::Up | KeyCode::Down => self.cursor[i] = crate::panel::cycle(self.cursor[i], rows, k.code == KeyCode::Up),
             KeyCode::Home => self.cursor[i] = 0,
             KeyCode::End => self.cursor[i] = no,
             KeyCode::Left | KeyCode::BackTab if n > 1 => self.tab = self.tab.saturating_sub(1),
@@ -413,23 +414,39 @@ impl Ui {
         rows
     }
 
+    /// Pasted text is a reason for refusing, never an answer: it lands on the "No" row.
+    pub fn paste_feedback(&mut self, text: &str, has_always: bool) {
+        self.perm = Self::permission_rows(has_always).len() - 1;
+        self.feedback.push_str(&text.replace(['\r', '\n'], " "));
+    }
+
     pub fn permission_key(&mut self, has_always: bool, k: KeyEvent) -> Option<Choice> {
         if k.modifiers.contains(KeyModifiers::CONTROL) {
             return None;
         }
         let rows = Self::permission_rows(has_always);
         self.perm = self.perm.min(rows.len() - 1);
+        // On the "No" row the keyboard writes the reason, as in Claude Code; hotkeys work everywhere else.
+        if self.perm == rows.len() - 1 {
+            match k.code {
+                KeyCode::Char(c) if !k.modifiers.contains(KeyModifiers::ALT) => {
+                    self.feedback.push(c);
+                    return None;
+                }
+                KeyCode::Backspace => {
+                    self.feedback.pop();
+                    return None;
+                }
+                _ => {}
+            }
+        }
         match k.code {
             KeyCode::Char('y' | 'Y') => Some(Choice::Allow),
             KeyCode::Char('a' | 'A') if has_always => Some(Choice::Always),
             KeyCode::Char('n' | 'N') | KeyCode::Esc => Some(Choice::Deny),
             KeyCode::Char(c @ '1'..='9') => rows.get(c as usize - '1' as usize).map(|r| r.0),
-            KeyCode::Up => {
-                self.perm = (self.perm + rows.len() - 1) % rows.len();
-                None
-            }
-            KeyCode::Down => {
-                self.perm = (self.perm + 1) % rows.len();
+            KeyCode::Up | KeyCode::Down => {
+                self.perm = crate::panel::cycle(self.perm, rows.len(), k.code == KeyCode::Up);
                 None
             }
             KeyCode::Home => {
@@ -458,17 +475,43 @@ impl Ui {
             if n > 30 {
                 body.push(Line::styled(format!("… +{} more lines", n - 30), theme::dim()));
             }
+            body.push(Line::raw(""));
         }
         let rows = Self::permission_rows(always.is_some());
         let cur = self.perm.min(rows.len() - 1);
         let mut focus = 0;
         for (i, (choice, text, key)) in rows.iter().enumerate() {
-            let text = if matches!(choice, Choice::Always) { always.unwrap_or(text) } else { text };
             let on = i == cur;
             if on {
                 focus = body.len();
             }
-            body.push(row(on, vec![Span::raw(format!("{}. {text}", i + 1)), Span::styled(format!("  ({key})"), theme::dim())]));
+            // (words, hint after them): the "No" row takes typed words saying what to do instead.
+            let (text, hint, caret) = match choice {
+                Choice::Always => (always.unwrap_or(text).to_string(), String::new(), false),
+                Choice::Deny if !self.feedback.is_empty() => (format!("No: {}", self.feedback), String::new(), on),
+                Choice::Deny if on => ("No,".to_string(), " type what to do instead, or enter to just refuse".to_string(), true),
+                _ => (text.to_string(), String::new(), false),
+            };
+            // A long choice (an "always" naming a folder, a long reason) wraps under itself.
+            let num = format!("{}. ", i + 1);
+            let tail = if caret { 1 } else { key.width() + 4 };
+            let room = width.saturating_sub(2 + num.width() + tail).max(8);
+            let parts = wrap(&format!("{text}{hint}"), room);
+            let last = parts.len() - 1;
+            // The hint keeps its dim style across the wrap: count off the words' characters line by line.
+            let mut words_left = text.chars().count();
+            for (j, part) in parts.into_iter().enumerate() {
+                let lead = if j == 0 { num.clone() } else { " ".repeat(num.width()) };
+                let n = words_left.min(part.chars().count());
+                words_left -= n;
+                let mine: String = part.chars().take(n).collect();
+                let rest: String = part.chars().skip(n).collect();
+                let mut spans = vec![Span::raw(format!("{lead}{mine}")), Span::styled(rest, theme::dim())];
+                if j == last {
+                    spans.push(if caret { Span::styled("▏", theme::accent()) } else { Span::styled(format!("  ({key})"), theme::dim()) });
+                }
+                body.push(if j == 0 { row(on, spans) } else { row_with(false, on, spans) });
+            }
         }
         let keys = if always.is_some() { "y/a/n" } else { "y/n" };
         let footer = theme::hints(&[("↑↓", "move"), ("enter", "choose"), (keys, "answer at once"), ("esc", "deny")]);
@@ -716,8 +759,48 @@ mod tests {
         let v = Ui::default().permission_view("Allow Bash(ls)?", Some("plan line"), Some("Yes, and don't ask again"), 50);
         let t = text(&v);
         assert_eq!((t[0].as_str(), t[1].as_str()), ("Allow Bash(ls)?", "plan line"));
-        assert!(t[2].starts_with("❯ 1. Yes") && t[3].contains("2. Yes, and don't ask again") && t[4].contains("3. No"));
+        assert!(t[2].is_empty(), "a blank line sets the choices apart from what is shown");
+        assert!(t[3].starts_with("❯ 1. Yes") && t[4].contains("2. Yes, and don't ask again") && t[5].contains("3. No"));
         assert_eq!(v.title, "Permission");
+    }
+
+    #[test]
+    fn the_no_row_takes_a_reason_and_hotkeys_still_work_elsewhere() {
+        let mut ui = Ui::default();
+        assert!(matches!(ui.permission_key(false, key(KeyCode::Char('n'))), Some(Choice::Deny)), "n refuses from the Yes row");
+        ui.permission_key(false, key(KeyCode::Down));
+        for c in "use yarn".chars() {
+            assert!(ui.permission_key(false, key(KeyCode::Char(c))).is_none(), "letters on the No row are text, not hotkeys");
+        }
+        ui.permission_key(false, key(KeyCode::Backspace));
+        assert_eq!(ui.feedback, "use yar");
+        assert!(matches!(ui.permission_key(false, key(KeyCode::Enter)), Some(Choice::Deny)));
+        assert!(text(&ui.permission_view("Allow Bash(ls)?", None, None, 60)).iter().any(|l| l.contains("No: use yar")));
+    }
+
+    #[test]
+    fn a_long_choice_wraps_inside_the_panel_and_keeps_its_key() {
+        let ui = Ui::default();
+        let always = "Yes, and allow access to /private/tmp/a/very/long/folder/name/for/this/project from this project";
+        let v = ui.permission_view("Run this command?", None, Some(always), 40);
+        let rows = text(&v);
+        assert!(v.body.iter().all(|l| line_width(l) <= 40), "{rows:?}");
+        let at = rows.iter().position(|r| r.contains("2. Yes")).unwrap();
+        let end = rows.iter().position(|r| r.ends_with("(a)")).unwrap();
+        assert!(end > at && rows[at + 1].starts_with("     "), "continued under itself: {rows:?}");
+    }
+
+    #[test]
+    fn a_long_reason_on_the_no_row_wraps_and_keeps_the_caret_in_view() {
+        let mut ui = Ui::default();
+        ui.permission_key(false, key(KeyCode::Down));
+        let v = ui.permission_view("Allow Bash(ls)?", None, None, 30);
+        assert!(v.body.iter().all(|l| line_width(l) <= 30), "the hint wraps: {:?}", text(&v));
+        ui.paste_feedback("please use the other folder and run the tests first", false);
+        let v = ui.permission_view("Allow Bash(ls)?", None, None, 30);
+        let rows = text(&v);
+        assert!(v.body.iter().all(|l| line_width(l) <= 30), "{rows:?}");
+        assert!(rows.iter().any(|r| r.contains("No: please")) && rows.last().unwrap().ends_with("first▏"), "{rows:?}");
     }
 
     #[test]

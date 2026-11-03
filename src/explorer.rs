@@ -42,6 +42,8 @@ pub enum Outcome {
     Close,
     /// Session id, its title and the directory it lives in (`None` = ours).
     Open(String, String, Option<String>),
+    /// Open in the tab in front, replacing what it holds (→), instead of in a new tab.
+    OpenHere(String, String, Option<String>),
     /// Open a copy (`--fork-session`) so the original is left alone.
     Fork(String, String, Option<String>),
     /// `claude stop <short>`; then open the session here if given.
@@ -81,6 +83,10 @@ pub struct Explorer {
     folded: Vec<String>,
     /// A destructive chord pressed once: (session id, which); the same chord again confirms.
     armed: Option<(String, char)>,
+    /// What the docked column last drew, for mouse clicks: (first entry on screen, entries, cursor).
+    pub dock_hit: (usize, usize, usize),
+    /// The `/color` of the highlighted conversation, read from its transcript once per row: (id, colour).
+    tint: Option<(String, Option<String>)>,
 }
 
 fn merge(here: &str, items: Vec<Summary>, jobs: Vec<Job>) -> Vec<Row> {
@@ -118,7 +124,7 @@ impl Explorer {
     }
 
     fn from(here: &str, items: Vec<Summary>, jobs: Vec<Job>, open: Vec<(String, State)>) -> Self {
-        let mut e = Explorer { rows: merge(here, items, jobs), open: vec![], query: String::new(), sel: 0, preview: None, peek: None, folded: vec![], armed: None };
+        let mut e = Explorer { rows: merge(here, items, jobs), open: vec![], query: String::new(), sel: 0, preview: None, peek: None, folded: vec![], armed: None, dock_hit: (0, 0, 0), tint: None };
         e.set_open(open);
         e.sel = e.first_row();
         e
@@ -255,6 +261,15 @@ impl Explorer {
         self.cur().map(|i| (self.rows[i].id.clone(), self.rows[i].tab))
     }
 
+    /// The highlighted conversation's `/color`, for the UI to wear while it is browsed.
+    pub fn color(&mut self) -> Option<String> {
+        let (id, _) = self.selected()?;
+        if self.tint.as_ref().is_none_or(|t| t.0 != id) {
+            self.tint = Some((id.clone(), history::find(&id).and_then(|p| history::session_color(&p))));
+        }
+        self.tint.as_ref().and_then(|t| t.1.clone())
+    }
+
     /// The end of the highlighted (closed) conversation, to show in the main area.
     pub fn peek_lines(&mut self, width: usize) -> Vec<Line<'static>> {
         let Some((id, _)) = self.selected() else { return vec![] };
@@ -262,10 +277,10 @@ impl Explorer {
             let turns = history::find(&id).map(|p| history::preview(&p, 40)).unwrap_or_default();
             self.peek = Some((id.clone(), turns));
         }
-        let mut out = vec![Line::styled(format!("preview · {} · ⏎ opens it in a new tab", &id[..id.len().min(8)]), theme::dim())];
+        let mut out = vec![Line::styled(format!("preview · {} · {} opens it in a new tab", &id[..id.len().min(8)], theme::key_glyph("enter")), theme::dim())];
         for (user, text) in &self.peek.as_ref().unwrap().1 {
             out.push(Line::raw(""));
-            let (lead, style) = if *user { ("> ", theme::accent()) } else { ("● ", Style::new()) };
+            let (lead, style) = if *user { ("❯ ", theme::accent()) } else { ("● ", Style::new()) };
             for (i, l) in ui::wrap(text, width.saturating_sub(2)).into_iter().take(12).enumerate() {
                 out.push(Line::styled(format!("{}{l}", if i == 0 { lead } else { "  " }), style));
             }
@@ -285,11 +300,12 @@ impl Explorer {
     pub fn dock_lines(&mut self, width: usize, height: usize, focused: bool) -> Vec<Line<'static>> {
         let entries = self.entries();
         self.sel = self.sel.min(entries.len().saturating_sub(1));
+        let total = entries.len();
         let mut out = vec![Line::from(vec![Span::styled(" Sessions", theme::dim()), Span::styled(format!(" · {}", GROUPS[GROUP.load(Ordering::Relaxed) as usize]), theme::dim())])];
         let keys = if focused {
-            vec![theme::hints(&[("↑↓", "move"), ("⏎", "open"), ("tab", "group")]), theme::hints(&[("←", "wide"), ("→", "hide"), ("esc", "back")])]
+            vec![theme::hints(&[("↑↓", "move"), ("enter", "open"), ("tab", "group")]), theme::hints(&[("ctrl+t", "new"), ("←", "wide")]), theme::hints(&[("→", "open"), ("esc", "back")])]
         } else {
-            vec![theme::hints(&[("ctrl+r", "focus")])]
+            vec![theme::hints(&[("←", "focus")])]
         };
         let room = height.saturating_sub(1 + keys.len());
         let mut lines: Vec<Line<'static>> = Vec::new();
@@ -300,7 +316,7 @@ impl Explorer {
                 at = lines.len();
             }
             match e {
-                Entry::Head(_, t, style) => lines.push(if on { panel::row(true, vec![Span::raw(t)]) } else { Line::styled(format!(" {t}"), style) }),
+                Entry::Head(_, t, style) => lines.push(panel::row(on, vec![Span::styled(t, style)])),
                 Entry::Row(i) => {
                     let r = &self.rows[i];
                     let glyph = r.state.map_or(" ", State::glyph);
@@ -313,6 +329,7 @@ impl Explorer {
             }
         }
         let first = if lines.len() <= room { 0 } else { at.saturating_sub(room / 2).min(lines.len() - room) };
+        self.dock_hit = (first, total.min(first + room), self.sel);
         out.extend(lines.into_iter().skip(first).take(room));
         out.resize(height.saturating_sub(keys.len()).max(out.len()), Line::raw(""));
         out.extend(keys);
@@ -326,11 +343,14 @@ impl Explorer {
         if ctrl && matches!(k.code, KeyCode::Char('f' | 't' | 'x')) {
             return self.act(k.code, armed);
         }
+        if k.code == KeyCode::Delete || (ctrl && k.code == KeyCode::Char('k')) {
+            return self.delete(armed);
+        }
         match k.code {
             KeyCode::Esc => return Outcome::Close,
             KeyCode::Char('c' | 'r' | 'd') if ctrl => return Outcome::Close,
-            KeyCode::Right if self.query.is_empty() => return Outcome::Close,
-            KeyCode::Enter => {
+            KeyCode::Right if self.cur().is_none() => return Outcome::Close,
+            KeyCode::Enter | KeyCode::Right if k.code == KeyCode::Enter || self.cur().is_some() => {
                 if self.cur().is_none() {
                     self.toggle_fold();
                 } else if let Some(i) = self.cur() {
@@ -339,7 +359,8 @@ impl Explorer {
                         let id = r.short.as_deref().unwrap_or(&r.id);
                         return Outcome::Refused(format!("running in the background: ctrl+f opens a copy, ctrl+t takes it over here (stops it), or `claude attach {id}`"));
                     }
-                    return Outcome::Open(r.id.clone(), r.title.to_string(), Some(r.cwd.to_string()).filter(|c| !c.is_empty()));
+                    let (id, title, cwd) = (r.id.clone(), r.title.to_string(), Some(r.cwd.to_string()).filter(|c| !c.is_empty()));
+                    return if k.code == KeyCode::Right { Outcome::OpenHere(id, title, cwd) } else { Outcome::Open(id, title, cwd) };
                 }
             }
             KeyCode::Tab => self.cycle_group(),
@@ -386,6 +407,31 @@ impl Explorer {
         Outcome::Stop(short, (c == 't').then(target))
     }
 
+    /// Delete / ctrl+k: remove the highlighted conversation from disk. Needs the same key twice.
+    fn delete(&mut self, armed: Option<(String, char)>) -> Outcome {
+        let Some(i) = self.cur() else { return Outcome::Stay };
+        let r = &self.rows[i];
+        if r.tab || r.state.is_some_and(State::live) {
+            return Outcome::Refused("open or running: close or stop it before deleting".into());
+        }
+        let id = r.id.clone();
+        if armed != Some((id.clone(), 'k')) {
+            self.armed = Some((id, 'k'));
+            return Outcome::Refused("press delete again to confirm: removes this conversation from disk for good".into());
+        }
+        if let Err(e) = history::delete(&id) {
+            return Outcome::Refused(format!("not deleted: {e}"));
+        }
+        self.rows.remove(i);
+        for p in [&mut self.preview, &mut self.peek] {
+            if p.as_ref().is_some_and(|p| p.0 == id) {
+                *p = None;
+            }
+        }
+        self.sel = self.sel.min(self.entries().len().saturating_sub(1));
+        Outcome::Refused("conversation deleted".into())
+    }
+
     fn state_cell(r: &Row) -> Span<'static> {
         let style = match r.state {
             Some(State::Blocked) => theme::attention(),
@@ -393,7 +439,7 @@ impl Explorer {
             Some(State::Failed) => theme::danger(),
             _ => theme::dim(),
         };
-        Span::styled(format!("{} ", r.state.map_or(" ", State::glyph)), style)
+        Span::styled(r.state.map_or(" ", State::glyph), style)
     }
 
     /// The panel for this explorer: a pinned filter box, the matching sessions, and (on wide screens) a
@@ -419,7 +465,7 @@ impl Explorer {
                         let r = &self.rows[i];
                         let dot = if r.tab { theme::CURRENT } else { " " };
                         let title = if !r.title.is_empty() { &*r.title } else if !r.detail.is_empty() { &*r.detail } else { "(empty)" };
-                        let mut spans = vec![Span::raw(format!("{dot} ")), Self::state_cell(r), Span::raw(format!("{:>4}  {title}", history::ago(r.modified)))];
+                        let mut spans = vec![Self::state_cell(r), Span::raw(format!("{dot}{:>4}  {title}", history::ago(r.modified)))];
                         if let Some(dir) = std::path::Path::new(&*r.cwd).file_name() {
                             spans.push(Span::styled(format!("  {}", dir.to_string_lossy()), theme::dim()));
                         }
@@ -428,7 +474,7 @@ impl Explorer {
                 })
                 .collect()
         };
-        let footer = theme::hints(&[("↑↓", "move"), ("enter", "open/fold"), ("type", "to filter"), ("tab", GROUPS[GROUP.load(Ordering::Relaxed) as usize]), ("ctrl+f", "fork"), ("ctrl+t", "take over"), ("esc/→", "close")]);
+        let footer = theme::hints(&[("↑↓", "move"), ("enter", "open/fold"), ("type", "to filter"), ("tab", GROUPS[GROUP.load(Ordering::Relaxed) as usize]), ("ctrl+f", "fork"), ("ctrl+t", "take over"), ("del", "delete"), ("→", "open"), ("esc", "close")]);
         let title = format!("Sessions {}/{}", m.len(), self.rows.len());
         let mut v = View::new(title, body, focus, footer).with_head(head).rows(10, usize::MAX);
         if let Some(i) = self.cur() {
@@ -451,7 +497,7 @@ impl Explorer {
         }
         for (user, text) in &self.preview.as_ref().unwrap().1 {
             lines.push(Line::raw(""));
-            let (mark, style) = if *user { ("> ", theme::accent()) } else { ("  ", Style::new()) };
+            let (mark, style) = if *user { ("❯ ", theme::accent()) } else { ("  ", Style::new()) };
             let wrapped = ui::wrap(text, width.saturating_sub(2));
             let more = wrapped.len() > PREVIEW_LINES_PER_TURN;
             for (i, l) in wrapped.into_iter().take(PREVIEW_LINES_PER_TURN).enumerate() {
@@ -486,6 +532,18 @@ mod tests {
             vec![],
             vec![("bbb222".into(), State::Done)],
         )
+    }
+
+    #[test]
+    fn delete_needs_the_key_twice_and_refuses_open_tabs() {
+        let mut e = explorer();
+        e.seek(Some("bbb222".into())); // open in a tab
+        assert!(matches!(e.key(key(KeyCode::Delete)), Outcome::Refused(m) if m.contains("close or stop")));
+        e.seek(Some("aaa111".into()));
+        assert!(matches!(e.key(key(KeyCode::Delete)), Outcome::Refused(m) if m.contains("again to confirm")));
+        assert_eq!(e.armed, Some(("aaa111".into(), 'k')));
+        e.key(key(KeyCode::Down)); // any other key disarms
+        assert!(e.armed.is_none());
     }
 
     #[test]
@@ -596,7 +654,7 @@ mod tests {
             t.draw(|f| {
                 let v = e.view(width as usize);
                 let h = panel::height(&v, 20);
-                panel::render(f, ratatui::layout::Rect::new(0, 20 - h, width, h), v)
+                let _ = panel::render(f, ratatui::layout::Rect::new(0, 20 - h, width, h), v);
             })
             .unwrap();
             let text: String = t.backend().buffer().content().iter().map(|c| c.symbol()).collect();

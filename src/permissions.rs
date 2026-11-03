@@ -60,7 +60,7 @@ impl Scope {
     }
     pub fn file(self, cwd: &str) -> Option<PathBuf> {
         match self {
-            Scope::User => std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".claude/settings.json")),
+            Scope::User => crate::config::claude_dir().map(|d| d.join("settings.json")),
             Scope::Project => Some(Path::new(cwd).join(".claude/settings.json")),
             Scope::Local => Some(Path::new(cwd).join(".claude/settings.local.json")),
         }
@@ -81,7 +81,7 @@ pub struct Rule {
     pub source: Source,
 }
 
-fn read_json(file: &Path) -> Result<Map<String, Value>, String> {
+pub(crate) fn read_json(file: &Path) -> Result<Map<String, Value>, String> {
     match std::fs::read_to_string(file) {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Map::new()),
         Err(e) => Err(format!("{}: {e}", file.display())),
@@ -119,7 +119,7 @@ pub fn load(cwd: &str, tab: &[(String, bool)]) -> Vec<Rule> {
     out
 }
 
-fn write_json(file: &Path, m: Map<String, Value>) -> Result<(), String> {
+pub(crate) fn write_json(file: &Path, m: Map<String, Value>) -> Result<(), String> {
     let text = serde_json::to_string_pretty(&Value::Object(m)).map_err(|e| e.to_string())? + "\n";
     crate::config::write_atomic(file, &text).map_err(|e| e.to_string())
 }

@@ -1,4 +1,4 @@
-//! Instruction files (`CLAUDE.md`, `AGENTS.md`, ...) that Claude Code loads for a directory, shown in a
+//! Instruction files (`CLAUDE.md`, `CLAUDE.local.md`, `.claude/CLAUDE.md`) that Claude Code loads for a directory, shown in a
 //! checkbox panel (`/instructions`). Unticking a file or one of its markdown sections keeps it out of the
 //! context of tabs started afterwards, without touching the file: the rule lives in claude++'s config
 //! (`hidden`: path → section ids, `*` for the whole file).
@@ -20,8 +20,11 @@ use std::path::{Path, PathBuf};
 /// Rough characters per token for these files (markdown with code); measured against Claude Code's own
 /// count for a 150 KB file, it is closer to 3 than the usual 4.
 const BYTES_PER_TOKEN: usize = 3;
-/// Files Claude Code reads from the working directory and each ancestor.
-const NAMES: [&str; 5] = ["CLAUDE.md", "CLAUDE.local.md", "AGENTS.md", ".claude/CLAUDE.md", ".claude/AGENTS.md"];
+/// Files Claude Code reads from the working directory and each ancestor. Checked against its own list
+/// (`get_context_usage` → `memoryFiles`) on 2.1.312: no `AGENTS.md`, in the project or above it, even with no
+/// `CLAUDE.md` beside it. Listing one here would be worse than useless: hiding part of it appends the rest to
+/// the prompt, adding text Claude Code never sent. If a version starts reading it, add it back.
+const NAMES: [&str; 3] = ["CLAUDE.md", "CLAUDE.local.md", ".claude/CLAUDE.md"];
 pub const WHOLE: &str = "*";
 const INTRO: &str = "(intro)";
 
@@ -105,19 +108,24 @@ pub fn filtered(text: &str, secs: &[Section], set: &BTreeSet<String>) -> String 
 
 /// Like [`filtered`], naming `path` in the note left where a section was cut so the model can read the rest.
 pub fn filtered_at(text: &str, secs: &[Section], set: &BTreeSet<String>, path: &str) -> String {
+    let at = if path.is_empty() { "the source file".to_string() } else { path.to_string() };
     if set.contains(WHOLE) {
-        return String::new();
+        // One line instead of the file, so the model knows it exists and can still read it.
+        return format!("*(hidden by claude++ to save context: read {at} if it is relevant)*\n");
     }
     let lines: Vec<&str> = text.lines().collect();
     let mut drop = vec![false; lines.len()];
     let mut note: Vec<Option<String>> = vec![None; lines.len()];
     for (i, s) in secs.iter().enumerate() {
         if hidden(secs, set, i) {
+            if !drop[s.from] {
+                // Only the outermost hidden section leaves a pointer: its children are inside the lines it names.
+                note[s.from] = Some(format!("*(section \"{}\" hidden by claude++ to save context: lines {}–{} of {at}; read them if relevant)*", s.title, s.from + 1, s.to));
+            }
             drop[s.from..s.to].iter_mut().for_each(|d| *d = true);
         } else if brief(secs, set, i) && !drop[s.from] {
             let first = lines[s.from + 1..s.to].iter().find(|l| !l.trim().is_empty() && !l.trim_start().starts_with('#')).map_or("", |l| l.trim());
             let first: String = first.chars().take(200).collect();
-            let at = if path.is_empty() { "the source file".to_string() } else { path.to_string() };
             if secs[..i].iter().any(|p| p.to >= s.to && p.from <= s.from && p.depth < s.depth && brief(secs, set, secs.iter().position(|x| x.id == p.id).unwrap_or(0))) {
                 drop[s.from..s.to].iter_mut().for_each(|d| *d = true); // inside a brief parent: gone
             } else {
@@ -151,8 +159,8 @@ pub fn merge(a: &Rules, b: &Rules) -> Rules {
 /// Instruction files that exist for `cwd`: the user's own, then each directory from `cwd` up.
 pub fn discover(cwd: &str) -> Vec<PathBuf> {
     let mut out = vec![];
-    if let Some(h) = std::env::var_os("HOME") {
-        out.push(PathBuf::from(h).join(".claude/CLAUDE.md"));
+    if let Some(d) = crate::config::claude_dir() {
+        out.push(d.join("CLAUDE.md"));
     }
     for dir in Path::new(cwd).ancestors() {
         out.extend(NAMES.iter().map(|n| dir.join(n)));
@@ -191,7 +199,9 @@ pub fn apply(rules: &Rules, cache: &Path, args: &mut Vec<String>, settings: &mut
             continue;
         }
         excluded.push(path.clone());
-        if !keep.trim().is_empty() {
+        if set.contains(WHOLE) {
+            copies += &keep; // the one-line pointer
+        } else if !keep.trim().is_empty() {
             copies += &format!("# {path} (some sections hidden by claude++)\n\n{keep}\n");
         }
     }
@@ -277,6 +287,9 @@ impl Ui {
 
     /// 0 none shown, 1 some, 2 all.
     fn state(&self, f: usize) -> u8 {
+        if self.set(f).contains(WHOLE) {
+            return 0; // only its pointer is sent
+        }
         let src = &self.files[f];
         let keep = filtered_at(&src.text, &src.secs, &self.set(f), &src.path);
         // Compared with the unfiltered rendering, not the raw text, which may lack a final newline.
@@ -340,17 +353,10 @@ fn est(bytes: usize) -> String {
     crate::usage::tokens((bytes / BYTES_PER_TOKEN) as u64)
 }
 
-fn short(path: &str) -> String {
-    match std::env::var("HOME") {
-        Ok(h) if path.starts_with(&h) => format!("~{}", &path[h.len()..]),
-        _ => path.to_string(),
-    }
-}
-
 pub fn view(ui: &Ui, width: usize) -> View {
     let rows = ui.rows();
     if rows.is_empty() {
-        return View::new("Instructions", vec![Line::styled("  no CLAUDE.md or AGENTS.md applies to this directory", theme::dim())], 0, theme::hints(&[("esc", "close")]));
+        return View::new("Instructions", vec![Line::styled("  no CLAUDE.md applies to this directory", theme::dim())], 0, theme::hints(&[("esc", "close")]));
     }
     let sel = ui.sel.min(rows.len() - 1);
     let body = rows
@@ -364,7 +370,7 @@ pub fn view(ui: &Ui, width: usize) -> View {
                     let m = match ui.state(f) { 2 => theme::ON, 1 => theme::PART, _ => theme::OFF };
                     let open = if ui.open.contains(&f) { theme::OPEN } else { theme::CLOSED };
                     let tail = if gone > 0 { format!("{} of {}", est(keep), est(keep + gone)) } else { est(keep) };
-                    (m, format!("{open} {} · {}", short(&ui.files[f].path), ui.files[f].secs.len()), tail)
+                    (m, format!("{open} {} · {}", crate::ui::tilde(&ui.files[f].path), ui.files[f].secs.len()), tail)
                 }
                 Row::Sec(f, s) => {
                     let sec = &ui.files[f].secs[s];
@@ -423,15 +429,19 @@ mod tests {
         let one: BTreeSet<String> = ["A > A1".to_string()].into();
         let out = filtered(DOC, &s, &one);
         assert!(out.contains("a text") && out.contains("a2 text") && !out.contains("a1 text"));
-        assert_eq!(filtered(DOC, &s, &[WHOLE.to_string()].into()), "");
+        let out = filtered_at(DOC, &s, &set, "/x/AGENTS.md");
+        assert!(out.contains("*(section \"A\" hidden by claude++ to save context: lines 2–10 of /x/AGENTS.md; read them if relevant)*"), "{out}");
+        assert_eq!(out.matches("hidden by claude++").count(), 1, "its children are inside the lines it names");
+        let whole = filtered_at(DOC, &s, &[WHOLE.to_string()].into(), "/x/AGENTS.md");
+        assert!(whole.contains("read /x/AGENTS.md") && !whole.contains("a text"), "a hidden file leaves one line saying where it is");
     }
 
     #[test]
     fn the_panel_draws_checkboxes_sizes_and_the_running_total() {
         let d = temp("view");
-        std::fs::write(d.join("AGENTS.md"), DOC).unwrap();
+        std::fs::write(d.join("CLAUDE.md"), big()).unwrap();
         let mut ui = Ui::new(d.to_str().unwrap(), Rules::new());
-        let f = ui.files.iter().position(|s| s.path.ends_with("AGENTS.md")).unwrap();
+        let f = ui.files.iter().position(|s| s.path.starts_with(d.to_str().unwrap())).unwrap();
         ui.open.insert(f);
         ui.toggle(Row::Sec(f, 4)).unwrap();
         let v = view(&ui, 80);
@@ -453,13 +463,19 @@ mod tests {
         let both: BTreeSet<String> = ["~A".to_string(), "A".to_string()].into();
         assert!(!filtered(DOC, &s, &both).contains("# A\na text"));
         let d = temp("brief");
-        std::fs::write(d.join("AGENTS.md"), DOC).unwrap();
+        std::fs::write(d.join("CLAUDE.md"), DOC).unwrap();
         let mut ui = Ui::new(d.to_str().unwrap(), Rules::new());
-        let f = ui.files.iter().position(|x| x.path.ends_with("AGENTS.md")).unwrap();
+        let f = ui.files.iter().position(|x| x.path.starts_with(d.to_str().unwrap())).unwrap();
         ui.toggle_brief(Row::Sec(f, 1));
         assert!(ui.rules.values().next().unwrap().contains("~A"));
         ui.toggle_brief(Row::Sec(f, 1));
         assert!(ui.rules.is_empty());
+    }
+
+    /// DOC with sections the size of real ones: a hidden section leaves a pointer line, which only saves
+    /// anything when the section is longer than it.
+    fn big() -> String {
+        DOC.replace(" text\n", &" text with enough words in it to outweigh the pointer line left behind\n".repeat(8))
     }
 
     fn temp(name: &str) -> PathBuf {
@@ -472,9 +488,9 @@ mod tests {
     #[test]
     fn toggles_are_checkbox_like_and_whole_file_expands_on_a_section_toggle() {
         let d = temp("toggle");
-        std::fs::write(d.join("AGENTS.md"), DOC).unwrap();
+        std::fs::write(d.join("CLAUDE.md"), big()).unwrap();
         let mut ui = Ui::new(d.to_str().unwrap(), Rules::new());
-        let f = ui.files.iter().position(|s| s.path.ends_with("AGENTS.md")).unwrap();
+        let f = ui.files.iter().position(|s| s.path.starts_with(d.to_str().unwrap())).unwrap();
         assert_eq!(ui.state(f), 2);
         ui.toggle(Row::Sec(f, 4)).unwrap(); // hide B
         assert_eq!(ui.state(f), 1);
@@ -495,9 +511,9 @@ mod tests {
     #[test]
     fn a_file_without_a_final_newline_counts_as_all_shown_and_a_child_can_be_shown_from_a_hidden_file() {
         let d = temp("nonl");
-        std::fs::write(d.join("AGENTS.md"), DOC.trim_end()).unwrap();
+        std::fs::write(d.join("CLAUDE.md"), DOC.trim_end()).unwrap();
         let mut ui = Ui::new(d.to_str().unwrap(), Rules::new());
-        let f = ui.files.iter().position(|s| s.path.ends_with("AGENTS.md")).unwrap();
+        let f = ui.files.iter().position(|s| s.path.starts_with(d.to_str().unwrap())).unwrap();
         assert_eq!((ui.state(f), ui.sizes(f).1), (2, 0), "no phantom hidden bytes, no underflow");
         let (mut args, mut settings) = (vec![], Map::new());
         apply(&[(ui.files[f].path.clone(), ["Z".to_string()].into())].into(), &d, &mut args, &mut settings);
@@ -512,7 +528,7 @@ mod tests {
     #[test]
     fn apply_excludes_and_appends_a_filtered_copy_merged_with_the_profile_prompt() {
         let d = temp("apply");
-        let file = d.join("AGENTS.md");
+        let file = d.join("CLAUDE.md");
         std::fs::write(&file, DOC).unwrap();
         let path = file.to_string_lossy().into_owned();
         let mut args: Vec<String> = vec!["--append-system-prompt".into(), "from profile".into(), "--x".into()];
@@ -526,9 +542,10 @@ mod tests {
         assert!(!args.contains(&"--append-system-prompt".to_string()), "profile prompt folded into the file");
         let body = std::fs::read_to_string(&args[at("--append-system-prompt-file") + 1]).unwrap();
         assert!(body.contains("from profile") && body.contains("a text") && !body.contains("b text"));
-        // a whole-file rule only excludes
+        // a whole-file rule excludes it and leaves only the line saying where it is
         let (mut args, mut settings) = (vec![], Map::new());
-        apply(&[(path, [WHOLE.to_string()].into())].into(), &d, &mut args, &mut settings);
-        assert!(args.is_empty() && settings.contains_key("claudeMdExcludes"));
+        apply(&[(path.clone(), [WHOLE.to_string()].into())].into(), &d, &mut args, &mut settings);
+        let body = std::fs::read_to_string(&args[args.iter().position(|a| a == "--append-system-prompt-file").unwrap() + 1]).unwrap();
+        assert!(settings.contains_key("claudeMdExcludes") && body.trim() == format!("*(hidden by claude++ to save context: read {path} if it is relevant)*"), "{body}");
     }
 }

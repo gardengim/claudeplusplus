@@ -6,27 +6,21 @@ use serde_json::{Map, Value};
 use std::io;
 use std::path::{Path, PathBuf};
 
-/// Folder name under the XDG config and cache homes. Earlier versions used `claudepp`.
+/// Folder name under the XDG config and cache homes.
 pub const DIR: &str = "claude++";
 
-/// One-time move of `claudepp` folders to `claude++`, so saved config, profiles and caches carry over.
-/// Does nothing when the new folder exists already (never merges or overwrites).
-pub fn migrate_dirs() {
-    let home = std::env::var_os("HOME").map(PathBuf::from);
-    for (var, rel) in [("XDG_CONFIG_HOME", ".config"), ("XDG_CACHE_HOME", ".cache")] {
-        let Some(base) = std::env::var_os(var).map(PathBuf::from).or_else(|| home.as_ref().map(|h| h.join(rel))) else { continue };
-        let (old, new) = (base.join("claudepp"), base.join(DIR));
-        if old.is_dir() && !new.exists() {
-            let _ = std::fs::rename(old, new);
-        }
-    }
+/// `$<var>` if set, else `~/<rel>`: the XDG base folders and Claude Code's own config folder.
+fn env_or_home(var: &str, rel: &str) -> Option<PathBuf> {
+    std::env::var_os(var).filter(|v| !v.is_empty()).map(PathBuf::from).or_else(|| std::env::home_dir().map(|h| h.join(rel)))
+}
+
+/// Claude Code's config folder (`$CLAUDE_CONFIG_DIR`, else `~/.claude`).
+pub fn claude_dir() -> Option<PathBuf> {
+    env_or_home("CLAUDE_CONFIG_DIR", ".claude")
 }
 
 pub fn path() -> Option<PathBuf> {
-    let base = std::env::var_os("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))?;
-    Some(base.join(DIR).join("config.json"))
+    Some(env_or_home("XDG_CONFIG_HOME", ".config")?.join(DIR).join("config.json"))
 }
 
 fn load(path: &Path) -> Map<String, Value> {
@@ -80,8 +74,7 @@ pub fn get_value(path: &Path, key: &str) -> Option<Value> {
 
 /// Cache folder (`$XDG_CACHE_HOME/claude++`, else `~/.cache/claude++`).
 pub fn cache_dir() -> Option<PathBuf> {
-    let base = std::env::var_os("XDG_CACHE_HOME").map(PathBuf::from).or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache")))?;
-    Some(base.join(DIR))
+    Some(env_or_home("XDG_CACHE_HOME", ".cache")?.join(DIR))
 }
 
 pub fn set_value(path: &Path, key: &str, value: Value) -> io::Result<()> {
@@ -92,27 +85,6 @@ pub fn set_value(path: &Path, key: &str, value: Value) -> io::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn old_folders_move_once_and_never_overwrite() {
-        let root = std::env::temp_dir().join(format!("claudeplusplus-mig-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&root);
-        let (conf, cache) = (root.join("conf"), root.join("cache"));
-        std::fs::create_dir_all(conf.join("claudepp")).unwrap();
-        std::fs::write(conf.join("claudepp/config.json"), "{\"profile\":\"lean\"}").unwrap();
-        std::fs::create_dir_all(cache.join("claudepp")).unwrap();
-        std::fs::create_dir_all(cache.join("claude++")).unwrap();
-        std::fs::write(cache.join("claudepp/old"), "x").unwrap();
-        // SAFETY: single test touching these variables, set before any thread of ours reads them
-        unsafe {
-            std::env::set_var("XDG_CONFIG_HOME", &conf);
-            std::env::set_var("XDG_CACHE_HOME", &cache);
-        }
-        super::migrate_dirs();
-        assert_eq!(get_str(&conf.join("claude++/config.json"), "profile").as_deref(), Some("lean"));
-        assert!(!conf.join("claudepp").exists());
-        assert!(cache.join("claudepp/old").exists(), "an existing new folder is left alone, nothing merged");
-    }
-
     use super::*;
 
     #[test]

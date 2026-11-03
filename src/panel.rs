@@ -11,8 +11,30 @@ use ratatui::layout::{Constraint, Layout, Margin, Rect};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
+/// Where a panel's list was drawn, so a mouse click can be turned into cursor moves.
+#[derive(Clone, Copy)]
+pub struct ListHit {
+    /// Screen area of the body rows.
+    pub body: Rect,
+    /// Index of the first body row on screen.
+    pub first: usize,
+    pub len: usize,
+    /// The row the cursor is on.
+    pub cursor: usize,
+    /// The input box keeps the keyboard (suggestions): activating a row completes it.
+    pub input_focus: bool,
+}
+
+impl ListHit {
+    /// The list row at a screen position, if there is one.
+    pub fn row_at(&self, col: u16, row: u16) -> Option<usize> {
+        let inside = col >= self.body.x && col < self.body.right() && row >= self.body.y && row < self.body.bottom();
+        Some(self.first + (row - self.body.y) as usize).filter(|r| inside && *r < self.len)
+    }
+}
+
 /// Detail panes appear only when the panel is at least this wide.
-const SIDE_MIN_WIDTH: u16 = 90;
+pub const SIDE_MIN_WIDTH: u16 = 90;
 /// Rows the rest of the screen needs: tab strip, input box (rule + a line), status line, and two rows of
 /// transcript so the conversation never vanishes behind a panel.
 const RESERVED: u16 = 1 + 2 + 1 + 2;
@@ -82,6 +104,11 @@ impl View {
     }
 }
 
+/// Move a list cursor one row up or down, wrapping at the ends. `n` must be above 0.
+pub fn cycle(i: usize, n: usize, up: bool) -> usize {
+    if up { (i + n - 1) % n } else { (i + 1) % n }
+}
+
 /// A list row in the one shape every panel uses: cursor marker, then the content; the row under the
 /// cursor is highlighted in full.
 pub fn row(selected: bool, spans: Vec<Span<'static>>) -> Line<'static> {
@@ -115,28 +142,28 @@ fn first_row(len: usize, window: usize, focus: usize) -> usize {
 }
 
 /// Draw `v` filling `area` (full width, directly above the input).
-pub fn render(f: &mut Frame, area: Rect, v: View) {
+pub fn render(f: &mut Frame, area: Rect, v: View) -> Option<ListHit> {
     if area.height < 3 {
-        return;
+        return None;
     }
     f.render_widget(Clear, area);
     let block = theme::frame(&v.title, v.blocking);
     // one column of air inside the frame, so text never touches the border
     let inner = block.inner(area).inner(Margin::new(1, 0));
     f.render_widget(block, area);
-    fill(f, area.width, inner, v);
+    Some(fill(f, area.width, inner, v))
 }
 
 /// Draw `v` as the whole screen: no frame, the title on the first row, the key hints on the last. Same body,
 /// pinned lines, detail pane and footer as [`render`]; for browsers that deserve the full terminal.
-pub fn render_full(f: &mut Frame, area: Rect, v: View) {
+pub fn render_full(f: &mut Frame, area: Rect, v: View) -> ListHit {
     f.render_widget(Clear, area);
     let [title, rest] = Layout::vertical([Constraint::Length(1), Constraint::Min(1)]).areas(area);
     f.render_widget(Paragraph::new(Line::styled(format!(" {}", v.title), theme::bold())), title);
-    fill(f, area.width, rest.inner(Margin::new(1, 0)), v);
+    fill(f, area.width, rest.inner(Margin::new(1, 0)), v)
 }
 
-fn fill(f: &mut Frame, width: u16, inner: Rect, v: View) {
+fn fill(f: &mut Frame, width: u16, inner: Rect, v: View) -> ListHit {
     let [content, footer] = Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).areas(inner);
     let mut hints = theme::fit_hints(v.footer, footer.width as usize + 1);
     if !hints.spans.is_empty() {
@@ -159,11 +186,13 @@ fn fill(f: &mut Frame, width: u16, inner: Rect, v: View) {
     .areas(main);
     f.render_widget(Paragraph::new(v.head), head);
     let skip = first_row(v.body.len(), body.height as usize, v.focus);
+    let hit = ListHit { body, first: skip, len: v.body.len(), cursor: v.focus, input_focus: v.input_focus };
     f.render_widget(Paragraph::new(v.body.into_iter().skip(skip).collect::<Vec<_>>()), body);
     f.render_widget(Paragraph::new(v.tail), tail);
     if let (Some(lines), Some(side)) = (v.side, side) {
         f.render_widget(Paragraph::new(lines).block(Block::new().borders(Borders::LEFT).border_style(theme::dim())), side);
     }
+    hit
 }
 
 #[cfg(test)]
@@ -179,7 +208,7 @@ mod tests {
         let mut t = Terminal::new(TestBackend::new(w, h)).unwrap();
         t.draw(|f| {
             let area = Rect::new(0, h - height(&v, h), w, height(&v, h));
-            render(f, area, v)
+            render(f, area, v);
         })
         .unwrap();
         let buf = t.backend().buffer().clone();
@@ -226,7 +255,7 @@ mod tests {
     fn full_screen_has_no_frame_title_first_hints_last() {
         let v = View::new("Everything", lines(3), 0, theme::hints(&[("esc", "close")])).with_side(vec![Line::raw("DETAIL")]);
         let mut t = Terminal::new(TestBackend::new(120, 10)).unwrap();
-        t.draw(|f| render_full(f, f.area(), v)).unwrap();
+        t.draw(|f| { let _ = render_full(f, f.area(), v); }).unwrap();
         let b = t.backend().buffer().clone();
         let row = |y: u16| (0..120).map(|x| b[(x, y)].symbol().to_string()).collect::<String>();
         assert!(row(0).starts_with(" Everything") && row(9).contains("⎋ close"));

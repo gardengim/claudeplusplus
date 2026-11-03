@@ -2,6 +2,7 @@ mod backend;
 mod config;
 mod explorer;
 mod jobs;
+mod lanes;
 mod profile;
 mod instructions;
 mod optimize;
@@ -14,15 +15,21 @@ mod image;
 mod markdown;
 mod panel;
 mod prompt;
+mod queue;
+mod schedule;
+mod search;
+mod vim;
 mod session;
+mod cc_keys;
+mod context;
 mod settings;
 mod statusline;
 mod theme;
 mod ui;
 
-use backend::{Backend, Launch, Msg, Resume};
+use backend::{Backend, Launch, Msg};
 use ratatui::crossterm::event::{
-    self, DisableBracketedPaste, EnableBracketedPaste, Event, MouseEventKind, KeyCode, KeyEvent, KeyEventKind, KeyModifiers,
+    self, DisableBracketedPaste, EnableBracketedPaste, Event, MouseButton, MouseEventKind, KeyCode, KeyEvent, KeyEventKind, KeyModifiers,
     KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
 };
 use ratatui::crossterm::{execute, terminal};
@@ -33,7 +40,7 @@ use std::io::{self, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 pub enum AppEvent {
     Term(Event),
@@ -49,11 +56,19 @@ pub enum AppEvent {
     Clipboard(u64, Option<Vec<u8>>, &'static str),
     /// A `!command` finished: tab id, transcript entry id, command, what it printed.
     Shell(u64, String, String, std::io::Result<std::process::Output>),
+    /// `--rewind-files` finished: tab id, what to say.
+    Rewound(u64, Result<String, String>),
+    /// The `@` index for a directory was built off the UI thread.
+    Files(String, Vec<String>),
+    /// Memory sampled off the UI thread: footprint KB per backend pid, and our own.
+    Mem(Vec<(u32, u64)>, u64),
+    /// The terminal's background turned light (true) or dark while running.
+    Theme(bool),
 }
 
-/// `--profile lean` = this tool set, no MCP, and no user-level settings (user CLAUDE.md/AGENTS.md,
+/// `--profile lean` = this tool set, no MCP, and no user-level settings (user CLAUDE.md,
 /// skills, hooks). Measured on Claude Code 2.1.309 in this repo: 65k → 7k prompt tokens.
-use tabcfg::{MODES, Row};
+use tabcfg::Row;
 
 const HELP: &str = "\
 claude++ — a lighter native frontend for headless Claude Code
@@ -63,7 +78,7 @@ USAGE: claude++ [options] [-- <extra claude args>]
   --profile <name>            profile for new tabs: full|sources|lean or one of yours (see PROFILES) (change per tab with /profile, /new <profile>)
                         sources = project+local settings only; lean = that plus core tools, no MCP
   --sources <list>      which settings to load: user,project,local (default all). Excluding
-                        `user` drops your ~/.claude CLAUDE.md/AGENTS.md, skills, hooks, plugins
+                        `user` drops your ~/.claude CLAUDE.md, skills, hooks, plugins
   --tools <list>        built-in tools to offer, e.g. Bash,Read,Edit,Write
   --no-mcp              ignore all MCP servers
   --env KEY=VAL         set an env var on every claude process (repeatable), e.g.
@@ -82,25 +97,28 @@ USAGE: claude++ [options] [-- <extra claude args>]
                         spawned), or a shell command to run instead. Default: what /statusline last saved in
                         ~/.config/claude++/config.json, else builtin
   --claude-bin <path>   claude executable (default: claude)
-  --bench [prompt]      measure prompt tokens / memory per profile, then exit
 
-KEYS  enter send · alt/shift+enter or ctrl+j newline · esc/ctrl+c interrupt
+KEYS  enter send · shift+enter, alt+enter or ctrl+j newline · esc/ctrl+c interrupt
+      esc esc on an empty input: rewind to an earlier message (conversation, files, or both)
       ctrl+t new tab · ctrl+n/ctrl+p next/prev tab · alt+1..9 jump · ctrl+d close tab
-      shift+tab permission mode · ctrl+o expand tool output · wheel or pgup/pgdn scroll · ctrl+end jump to latest
-      ctrl+r browse earlier sessions · tab completes a /command or an @file (↑↓ to pick, esc hides)
+      shift+tab permission mode · ctrl+o expand all tool output · alt+o or a click folds one call · wheel or pgup/pgdn scroll · ctrl+end jump to latest
+      ctrl+g edit the message in $VISUAL / $EDITOR · ctrl+b move a running command to the background (/tasks stops it)
+      alt+q manage queued messages (reorder, send now, edit) · ctrl+f search the conversation or what you sent
+      /vim, /helix: modal keys in the box (esc normal mode; i a o insert; hjkl w b e f t d c y p u v; / searches); /config → Input mode
+      ctrl+r search the messages you sent · ← at the start of the input: earlier sessions · tab completes a /command or an @file (↑↓ to pick, esc hides)
       ctrl+v paste an image as [Image #N] at the cursor (delete the token to drop it)
-COMMANDS  /usage /find /session /new [profile] /profile [name] [--hard] /close /clear /resume [id] /model [m] /effort [level] /mode <m>
-          /config /statusline [claude|builtin] /img <path> /quit
+COMMANDS  /usage (/cost /status) /memory [user] /export [file] /tasks /context /queue /schedule /search /vim /find /session /new [profile] /profile [name] [--hard] /close /clear /resume [id] /model [m] /effort [level] /mode <m>
+          /config (/setting) /statusline [claude|builtin] /img <path> /quit
           anything else starting with / goes to Claude Code (e.g. /compact)
           !<command> runs a shell command here (no model turn); its output goes with your next message
 @FILES    type @ to pick a file or folder; Claude Code reads what you mention (images included)
 PROFILES  your own: ~/.config/claude++/profiles/<name>.json (system prompt, tools, MCP, model, env...; see README)
-EDITING   alt+←/→ word · alt+backspace / ctrl+w delete word · ctrl+k to end · ctrl+z undo · ctrl+y or /copy [code] copies the last answer
+EDITING   alt+←/→ word · alt+backspace / ctrl+w delete word · ctrl+u / ctrl+k cut to line start / end · ↑↓ move between rows, then history · ctrl+z or ctrl+_ undo, ctrl+shift+z or alt+z redo · alt+p model picker · ctrl+l repaint · ctrl+y copies the text selected with the mouse, else the last answer (also /copy [code])
 IMAGES    ctrl+v, drag a file into the window or /img <path> to attach; pictures in the transcript are drawn
           inline in kitty/Ghostty (CLAUDEPP_IMAGES=on|off overrides detection)";
 
 /// Commands claude++ handles itself: (name, argument hint, description).
-const LOCAL_COMMANDS: [(&str, &str, &str); 21] = [
+const LOCAL_COMMANDS: [(&str, &str, &str); 32] = [
     ("new", "[profile]", "open a new tab"),
     ("profile", "[name] [--hard]", "show or change this tab's profile"),
     ("close", "", "close this tab"),
@@ -109,16 +127,27 @@ const LOCAL_COMMANDS: [(&str, &str, &str); 21] = [
     ("sessions", "", "list sessions: this directory's and background ones (also ←)"),
     ("model", "[name]", "pick a model and effort, or switch directly"),
     ("effort", "[level]", "pick or set the thinking effort"),
-    ("mode", "<mode>", "set the permission mode"),
+    ("color", "[name]", "pick this conversation's colour: the tab, frames and highlights wear it"),
+    ("mode", "[mode]", "set the permission mode (no argument: this tab's mode and rules)"),
+    ("memory", "[user]", "edit this project's CLAUDE.md (or your own ~/.claude/CLAUDE.md) in $EDITOR"),
+    ("export", "[file]", "save this conversation as text (default: a dated file here)"),
     ("img", "<path>", "attach an image to the next message"),
     ("find", "<text>", "jump to the newest match in the conversation; again for older"),
+    ("queue", "", "messages waiting for Claude: reorder, send now, edit, delete (alt+q)"),
+    ("schedule", "<when> <message>", "send a message later: 10m, 2h30m or a time like 14:30"),
+    ("search", "[text]", "search this conversation or the messages you sent (ctrl+f)"),
+    ("vim", "", "turn vim keys in the message box on or off"),
+    ("helix", "", "turn helix keys in the message box on or off"),
     ("copy", "[code]", "copy the last answer, or its last code block, to the clipboard"),
-    ("config", "", "claude++'s own config"),
+    ("config", "", "settings: claude++'s and Claude Code's, by section, searchable"),
+    ("setting", "", "same as /config"),
     ("session", "", "this tab's permission mode and tool rules"),
     ("usage", "", "where this tab's context goes, and your plan limits"),
+    ("context", "", "the context window drawn: what fills it, category by category"),
+    ("tasks", "", "this tab's subagents: state, steps and report"),
     ("optimize", "[light|balanced|aggressive|off|now]", "trim this project's start-up context from evidence (reversible)"),
     ("permissions", "", "saved allow/ask/deny rules from your settings files: add and delete"),
-    ("instructions", "", "tick CLAUDE.md / AGENTS.md files and sections in or out of new sessions"),
+    ("instructions", "", "tick CLAUDE.md files and sections in or out of new sessions"),
     ("statusline", "[claude|builtin]", "choose which status line to show"),
     ("help", "", "keys and commands"),
     ("quit", "", "leave claude++"),
@@ -141,6 +170,12 @@ pub struct App {
     pub input: String,
     /// Earlier states of the message box for ctrl+z: (text, cursor).
     undo: Vec<(String, usize)>,
+    /// What ctrl+z took off, for ctrl+shift+z (alt+z) to put back; any new edit forgets it.
+    redo: Vec<(String, usize)>,
+    /// Columns the message box wraps at, as last drawn: ↑/↓ move by the rows it shows.
+    pub input_w: usize,
+    /// What was typed before ↑ first recalled history, for ↓ to bring back.
+    hist_draft: String,
     last_edit: Instant,
     reset_undo: bool,
     close_armed: Option<Instant>,
@@ -162,6 +197,8 @@ pub struct App {
     mem_budget_kb: u64,
     budget_warned: Option<Instant>,
     pub explorer: Option<explorer::Explorer>,
+    /// Where the last frame put the tabs and lists, for mouse clicks.
+    pub hits: ui::Hits,
     /// Config "sessions = panel": ← opens a docked list first, a second ← the full screen.
     pub dock_mode: bool,
     /// `--profile` was given: a project's own profile does not override it.
@@ -173,7 +210,18 @@ pub struct App {
     sent_notices: Vec<String>,
     /// Real terminal attached: only then are mouse-mode escapes written.
     tty: bool,
+    /// The title last written to the terminal.
+    term_title: String,
     mouse: bool,
+    /// Copy-on-select: a mouse selection is copied as soon as the button is released (else ctrl+y copies it).
+    autocopy: bool,
+    /// The text selected with the mouse: where the drag started and where it ended (screen cells). It stays
+    /// until the next click, key or scroll.
+    drag: Option<((u16, u16), (u16, u16))>,
+    /// The button is still down.
+    dragging: bool,
+    /// The conversation's cells as last drawn while a drag was active, for the text to copy.
+    snap: Vec<Vec<String>>,
     pub dock: Option<explorer::Explorer>,
     pub dock_focus: bool,
     /// Session-list preferences shared by the side panel and the full list, and saved: grouping, folded groups.
@@ -189,12 +237,40 @@ pub struct App {
     /// Models Claude Code offers, remembered like the commands.
     known_models: Vec<ModelInfo>,
     pub model_picker: Option<ModelPicker>,
+    /// `/color` picker: the highlighted row (0 = default, then the palette in order).
+    pub color_picker: Option<usize>,
+    pub rewind: Option<RewindPicker>,
+    /// First Esc of a double-Esc rewind.
+    esc_armed: Option<Instant>,
     pub settings: Option<settings::Ui>,
     pub tabcfg: Option<tabcfg::Ui>,
     pub instr: Option<instructions::Ui>,
     pub perms: Option<permissions::Ui>,
     pub opt: Option<optimize::Ui>,
     pub usage_open: bool,
+    /// `/tasks`: the tab's subagents.
+    pub lanes: Option<lanes::Ui>,
+    pub ctx_ui: Option<context::Ui>,
+    /// `/queue`: the tab's waiting messages.
+    pub queue_ui: Option<queue::Ui>,
+    /// `/schedule`: the time and message being set.
+    pub sched_ui: Option<schedule::Ui>,
+    /// A time was picked: what is typed in the message box next is scheduled for it instead of sent.
+    pub sched_at: Option<SystemTime>,
+    /// Search as you type (ctrl+f).
+    pub search: Option<search::Ui>,
+    /// Vim keys in the message box (`/vim`).
+    pub vim: vim::Vim,
+    /// Messages sent while Claude works wait in the queue (else they go at once).
+    pub queue_on: bool,
+    /// ctrl+g was pressed: the main loop hands the terminal to the editor.
+    edit_request: bool,
+    /// ctrl+l: clear and repaint the whole screen before the next frame.
+    clear_request: bool,
+    /// `/memory`: a file to open in the editor before the next frame.
+    edit_file: Option<std::path::PathBuf>,
+    /// The cursor shape last asked of the terminal, so it is sent only when the mode changes.
+    cursor_mode: Option<vim::Mode>,
     /// File index for `@`, rebuilt when the popup opens and the list is older than 30 s.
     files: Vec<String>,
     files_at: Option<Instant>,
@@ -220,6 +296,25 @@ pub struct App {
     pub cache_ttl: Duration,
 }
 
+/// Selection state of the double-Esc rewind picker: a message, and what to restore (an index into
+/// `RewindPicker::choices`).
+#[derive(Clone, Copy)]
+pub struct RewindPicker {
+    pub sel: usize,
+    pub restore: usize,
+}
+
+impl RewindPicker {
+    /// (conversation, code) for each restore choice; code only when files were edited since.
+    pub fn choices(edited: bool) -> &'static [(&'static str, bool, bool)] {
+        if edited {
+            &[("conversation and code", true, true), ("conversation", true, false), ("code", false, true)]
+        } else {
+            &[("conversation", true, false)]
+        }
+    }
+}
+
 /// Selection state of the `/model` picker: a row in the model list and a level in its effort row.
 #[derive(Clone, Copy)]
 pub struct ModelPicker {
@@ -238,7 +333,6 @@ struct Opts {
     profile: String,
     cache_ttl_min: Option<u64>,
     statusline: String,
-    bench: Option<String>,
 }
 
 fn profile_args(p: &str) -> Result<Vec<String>, String> {
@@ -255,17 +349,105 @@ fn project_profile(dir: &str) -> Option<String> {
 const HEAVY_TAB_KB: u64 = 400 * 1024;
 
 static ENHANCED: AtomicBool = AtomicBool::new(false);
+/// Set while an external editor owns the terminal: the reader thread must leave its keys alone.
+static EDITING: AtomicBool = AtomicBool::new(false);
+
+/// `text` edited in `editor` (a shell command, so `code -w` works) through a private temp file; the editor's
+/// last line break is not part of the message. Err when the editor could not run or failed.
+fn edit_text(editor: &str, text: &str) -> io::Result<String> {
+    use std::os::unix::fs::OpenOptionsExt;
+    static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let path = std::env::temp_dir().join(format!("claudepp-message-{}-{}.md", std::process::id(), N.fetch_add(1, Ordering::Relaxed)));
+    let mut f = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&path)?;
+    f.write_all(text.as_bytes())?;
+    drop(f);
+    let status = std::process::Command::new("sh").arg("-c").arg(format!("{editor} \"$1\"")).arg("sh").arg(&path).status();
+    let edited = std::fs::read_to_string(&path);
+    let _ = std::fs::remove_file(&path);
+    let status = status?;
+    if !status.success() {
+        return Err(io::Error::other(format!("{editor} {status}")));
+    }
+    let edited = edited?;
+    Ok(edited.strip_suffix('\n').unwrap_or(&edited).to_string())
+}
+
+/// The editor to use: `$VISUAL`, else `$EDITOR`, else `vi`.
+fn editor_command() -> String {
+    ["VISUAL", "EDITOR"].iter().filter_map(|k| std::env::var(k).ok()).find(|v| !v.trim().is_empty()).unwrap_or_else(|| "vi".into())
+}
+
+/// Give the terminal to a program (the editor) for the length of `f`, then take it back and repaint.
+fn with_terminal_lent<T>(term: &mut ratatui::DefaultTerminal, app: &mut App, f: impl FnOnce() -> T) -> T {
+    EDITING.store(true, Ordering::Relaxed);
+    thread::sleep(Duration::from_millis(120)); // the reader thread is out of its read by now
+    let mut out = io::stdout();
+    let _ = write!(out, "\x1b[?1002l\x1b[?1000l\x1b[?1006l\x1b[0 q");
+    if ENHANCED.load(Ordering::Relaxed) {
+        let _ = execute!(out, PopKeyboardEnhancementFlags);
+    }
+    let _ = execute!(out, DisableBracketedPaste);
+    ratatui::restore();
+    let res = f();
+    // Not `ratatui::init()`: that installs another panic hook each time, one that restores the terminal
+    // on a worker thread's panic too.
+    let _ = terminal::enable_raw_mode();
+    let _ = execute!(io::stdout(), terminal::EnterAlternateScreen);
+    let mut out = io::stdout();
+    let _ = execute!(out, EnableBracketedPaste);
+    if ENHANCED.load(Ordering::Relaxed) {
+        let _ = execute!(out, PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES));
+    }
+    if app.mouse {
+        app.set_mouse(true);
+    }
+    app.cursor_mode = None;
+    let _ = term.clear();
+    EDITING.store(false, Ordering::Relaxed);
+    res
+}
+
+/// ctrl+g: hand the terminal to the editor with the message in it, take the result back into the box.
+fn edit_in_editor(term: &mut ratatui::DefaultTerminal, app: &mut App) {
+    let editor = editor_command();
+    let old = (app.input.clone(), app.cursor);
+    let res = with_terminal_lent(term, app, || edit_text(&editor, &old.0));
+    match res {
+        Ok(text) if text != old.0 => {
+            app.undo.push(old);
+            app.redo.clear();
+            app.set_input(text);
+            app.vim.mode = vim::Mode::Insert;
+            app.flash("message edited");
+        }
+        Ok(_) => app.flash("message unchanged"),
+        Err(e) => app.flash(format!("editor: {e}; your message is as it was (set $VISUAL or $EDITOR)")),
+    }
+    app.vim_shape();
+}
+
+/// `/memory`: edit a CLAUDE.md in place. Claude Code watches it, so the next turn reads the change.
+fn edit_file_in_editor(term: &mut ratatui::DefaultTerminal, app: &mut App, path: &std::path::Path) {
+    let editor = editor_command();
+    let status = with_terminal_lent(term, app, || std::process::Command::new("sh").arg("-c").arg(format!("{editor} \"$1\"")).arg("sh").arg(path).status());
+    match status {
+        Ok(s) if s.success() => app.flash(format!("saved {}", path.display())),
+        Ok(s) => app.flash(format!("editor: {editor} {s}")),
+        Err(e) => app.flash(format!("editor: {e} (set $VISUAL or $EDITOR)")),
+    }
+}
 
 /// Put the terminal back the way we found it: mouse reporting off, paste and key modes reset, images
 /// deleted, raw mode and the alternate screen left. Safe to call twice (the panic hook and normal exit).
 fn restore_terminal() {
     let mut out = io::stdout();
-    let _ = write!(out, "\x1b[?1000l\x1b[?1006l");
+    let _ = write!(out, "\x1b[?1002l\x1b[?1000l\x1b[?1006l\x1b[0 q");
     if ENHANCED.swap(false, Ordering::Relaxed) {
         let _ = execute!(out, PopKeyboardEnhancementFlags);
     }
     let _ = execute!(out, DisableBracketedPaste);
     image::clear_all();
+    let _ = write!(out, "\x1b[23;0t"); // give the terminal its own title back
     ratatui::restore();
 }
 
@@ -289,7 +471,8 @@ fn last_code_block(text: &str) -> Option<String> {
 fn parse_args() -> Result<Opts, String> {
     let mut a = std::env::args().skip(1);
     let mut o = Opts {
-        launch: Launch { bin: "claude".into(), ..Default::default() },
+        // Headless Claude Code keeps no file checkpoints unless asked; a rewind restores code from them.
+        launch: Launch { bin: "claude".into(), env: vec![("CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING".into(), "1".into())], ..Default::default() },
         resume: None,
         cont: false,
         idle: None,
@@ -297,7 +480,6 @@ fn parse_args() -> Result<Opts, String> {
         profile: String::new(),
         cache_ttl_min: None,
         statusline: String::new(),
-        bench: None,
     };
     let mut profile = String::new(); // empty: not given, so the saved or project choice applies
     let mut extra = vec![];
@@ -328,13 +510,14 @@ fn parse_args() -> Result<Opts, String> {
             "--cache-ttl" => o.cache_ttl_min = Some(need(&mut a, &arg)?.parse().map_err(|_| "bad --cache-ttl")?),
             "--statusline" => o.statusline = need(&mut a, &arg)?,
             "--claude-bin" => o.launch.bin = need(&mut a, &arg)?,
-            "--bench" => o.bench = Some("Reply with exactly: OK".into()),
             "--" => extra.extend(a.by_ref()),
-            other if o.bench.is_some() && !other.starts_with('-') => o.bench = Some(other.into()),
             other => return Err(format!("unknown option {other}\n\n{HELP}")),
         }
     }
     profile_args(if profile.is_empty() { "full" } else { &profile })?; // validate; each tab applies its own profile at launch
+    // Bypass joins the shift+tab cycle when the backend is allowed to bypass (flags after `--`).
+    let bypass = extra.iter().any(|a| a.contains("dangerously-skip-permissions")) || extra.windows(2).any(|w| w[0] == "--permission-mode" && w[1] == "bypassPermissions");
+    tabcfg::BYPASS.store(bypass, std::sync::atomic::Ordering::Relaxed);
     o.profile = profile;
     o.launch.args = extra;
     Ok(o)
@@ -344,13 +527,10 @@ fn main() {
     let opts = match parse_args() {
         Ok(o) => o,
         Err(msg) => {
-            println!("{msg}");
+            println!("{}", theme::keys(&msg));
             std::process::exit(if msg == HELP { 0 } else { 2 });
         }
     };
-    if let Some(prompt) = opts.bench {
-        std::process::exit(bench(&opts.launch, &prompt));
-    }
     if let Err(e) = run(opts) {
         eprintln!("claude++: {e}");
         std::process::exit(1);
@@ -361,7 +541,6 @@ fn run(opts: Opts) -> io::Result<()> {
     let (tx, rx) = mpsc::channel();
     let cwd = std::env::current_dir()?.to_string_lossy().into_owned();
     // Every setting: a flag wins for this run, else what /config saved, else the built-in default.
-    config::migrate_dirs();
     let config_path = config::path();
     let saved = |key: &str| config_path.as_deref().and_then(|p| config::get_str(p, key));
     let saved_num = |key: &str| saved(key).and_then(|v| v.parse::<u64>().ok());
@@ -383,12 +562,18 @@ fn run(opts: Opts) -> io::Result<()> {
         app.list_prefs = (explorer::group(), folds.unwrap_or_default());
     }
     app.dock_mode = saved("side_panel").as_deref() == Some("on");
+    // "vim": "on" is what older configs say.
+    let mode = saved("input_mode").unwrap_or_else(|| if saved("vim").as_deref() == Some("on") { "vim".into() } else { "default".into() });
+    (app.vim.on, app.vim.helix) = (mode == "vim" || mode == "helix", mode == "helix");
+    app.autocopy = saved("autocopy").as_deref() == Some("on");
+    app.queue_on = saved("queue").as_deref() != Some("off");
     if let Some(n) = saved("notify").filter(|n| ["off", "bell", "desktop"].contains(&n.as_str())) {
         app.notify = n;
     }
     let mode = statusline::Mode::parse(&opts.statusline).or_else(|| saved("statusline").as_deref().and_then(statusline::Mode::parse));
     app.startup_note = app.apply_statusline_mode(mode.unwrap_or(statusline::Mode::Builtin));
     app.known_commands = load_commands();
+    app.history = history::sent_prompts(&app.cwd);
     app.known_models = cache_path("models.json").map(|p| read_models(&p)).unwrap_or_default();
     app.new_tab();
     if let Some(n) = app.startup_note.take() {
@@ -410,6 +595,10 @@ fn run(opts: Opts) -> io::Result<()> {
         });
     }
     let mut term = ratatui::init();
+    theme::set_mode(saved("theme").as_deref().unwrap_or("auto"));
+    if let Some(light) = theme::query_light_background() {
+        theme::set_light(light);
+    }
     app.tty = true;
     app.mouse = saved("mouse").as_deref() != Some("off");
     if app.mouse {
@@ -433,7 +622,33 @@ fn run(opts: Opts) -> io::Result<()> {
         previous(info);
     }));
     thread::spawn(move || {
-        while let Ok(e) = event::read() {
+        let (mut last_input, mut last_check) = (Instant::now(), Instant::now());
+        loop {
+            // Polling, not blocking in read: an editor started with ctrl+g must get the keys, not this thread.
+            if EDITING.load(Ordering::Relaxed) || !event::poll(Duration::from_millis(50)).unwrap_or(false) {
+                if EDITING.load(Ordering::Relaxed) {
+                    thread::sleep(Duration::from_millis(20));
+                    continue;
+                }
+                // The terminal may switch light/dark under us (macOS appearance at sunset). Its notification of
+                // that would wedge crossterm's parser, so ask again instead: from this thread, the only reader of
+                // the terminal, and only while nobody types (a key arriving during the round trip would be
+                // read as part of the reply), and only from a terminal that answered at startup.
+                // ponytail: a key typed in the query's ~ms window is lost; a raw-input reader could re-inject it.
+                if theme::follows_terminal() && last_input.elapsed() > Duration::from_secs(3) && last_check.elapsed() > Duration::from_secs(3) {
+                    last_check = Instant::now();
+                    if let Some(was) = theme::detected()
+                        && let Some(now) = theme::query_light_background()
+                        && now != was
+                        && tx.send(AppEvent::Theme(now)).is_err()
+                    {
+                        break;
+                    }
+                }
+                continue;
+            }
+            last_input = Instant::now();
+            let Ok(e) = event::read() else { break };
             if tx.send(AppEvent::Term(e)).is_err() {
                 break;
             }
@@ -443,17 +658,44 @@ fn run(opts: Opts) -> io::Result<()> {
     let res = (|| -> io::Result<()> {
         while !app.quit {
             term.draw(|f| ui::draw(f, &mut app))?;
+            app.sync_title();
             let wait = if app.sessions.iter().any(|s| s.busy) { 100 } else { 1000 };
+            let drawn = Instant::now();
+            let mut typed = false;
             match rx.recv_timeout(Duration::from_millis(wait)) {
-                Ok(ev) => app.on_event(ev),
+                Ok(ev) => {
+                    typed = matches!(ev, AppEvent::Term(_));
+                    app.on_event(ev)
+                }
                 Err(RecvTimeoutError::Timeout) => {}
                 Err(RecvTimeoutError::Disconnected) => break,
             }
-            // Coalesce bursts (streaming deltas) into a single redraw.
+            // Coalesce bursts (streaming deltas) into a single redraw, at most ~30 a second unless a key
+            // arrives: a long reply is re-rendered per frame, so frames per delta would grow quadratic.
+            let frame = Duration::from_millis(33);
+            while !typed {
+                let Some(left) = frame.checked_sub(drawn.elapsed()) else { break };
+                match rx.recv_timeout(left) {
+                    Ok(ev) => {
+                        typed = matches!(ev, AppEvent::Term(_));
+                        app.on_event(ev);
+                    }
+                    Err(_) => break,
+                }
+            }
             while let Ok(ev) = rx.try_recv() {
                 app.on_event(ev);
             }
             app.tick();
+            if std::mem::take(&mut app.clear_request) {
+                let _ = term.clear(); // ctrl+l: repaint everything, e.g. after another program wrote to the screen
+            }
+            if std::mem::take(&mut app.edit_request) {
+                edit_in_editor(&mut term, &mut app);
+            }
+            if let Some(path) = app.edit_file.take() {
+                edit_file_in_editor(&mut term, &mut app, &path);
+            }
         }
         Ok(())
     })();
@@ -474,6 +716,9 @@ impl App {
             next_id: 0,
             input: String::new(),
             undo: vec![],
+            redo: vec![],
+            input_w: 80,
+            hist_draft: String::new(),
             last_edit: Instant::now(),
             reset_undo: false,
             close_armed: None,
@@ -494,13 +739,19 @@ impl App {
             mem_budget_kb: 0,
             budget_warned: None,
             explorer: None,
+            hits: Default::default(),
             dock_mode: false,
             profile_forced: false,
             notify: "bell".into(),
             #[cfg(test)]
             sent_notices: vec![],
             tty: false,
+            term_title: String::new(),
             mouse: true,
+            autocopy: false,
+            drag: None,
+            dragging: false,
+            snap: vec![],
             dock: None,
             dock_focus: false,
             list_prefs: (0, vec![]),
@@ -510,12 +761,27 @@ impl App {
             sel: 0,
             known_models: vec![],
             model_picker: None,
+            color_picker: None,
+            rewind: None,
+            esc_armed: None,
             settings: None,
             tabcfg: None,
             instr: None,
             perms: None,
             opt: None,
             usage_open: false,
+            lanes: None,
+            ctx_ui: None,
+            queue_ui: None,
+            sched_ui: None,
+            sched_at: None,
+            search: None,
+            vim: Default::default(),
+            queue_on: true,
+            edit_request: false,
+            clear_request: false,
+            edit_file: None,
+            cursor_mode: None,
             files: vec![],
             files_at: None,
             file_rows: vec![],
@@ -548,6 +814,20 @@ impl App {
         }
     }
 
+    /// The terminal's title follows the active conversation (`claude++ · name`), written only when it changes.
+    fn sync_title(&mut self) {
+        let t = match self.sessions[self.active].title.as_str() {
+            "" => "claude++".to_string(),
+            n => format!("claude++ · {n}"),
+        };
+        if t != self.term_title {
+            let first = self.term_title.is_empty();
+            // Save the terminal's own title once so exit can restore it.
+            let _ = write!(io::stdout(), "{}\x1b]2;{}\x07", if first { "\x1b[22;0t" } else { "" }, t.replace(|c: char| c.is_control(), ""));
+            self.term_title = t;
+        }
+    }
+
     fn s(&mut self) -> &mut Session {
         &mut self.sessions[self.active]
     }
@@ -555,7 +835,7 @@ impl App {
     pub fn placeholder(&self) -> &'static str {
         if !self.sessions[self.active].pending.is_empty() {
             "answer in the panel above…"
-        } else if self.explorer.is_some() || self.model_picker.is_some() || self.settings.is_some() || self.tabcfg.is_some() || self.instr.is_some() || self.perms.is_some() || self.opt.is_some() || self.usage_open {
+        } else if self.overlay_open() {
             "use the panel above…"
         } else {
             "message Claude…  (/help)"
@@ -591,12 +871,17 @@ impl App {
     }
 
     /// Directory of the tab in front: what `@`, the status line and history are relative to.
+    /// Some panel owns the keyboard (the input box is not the focus).
+    fn overlay_open(&self) -> bool {
+        self.explorer.is_some() || self.model_picker.is_some() || self.color_picker.is_some() || self.rewind.is_some() || self.settings.is_some() || self.tabcfg.is_some() || self.instr.is_some() || self.perms.is_some() || self.opt.is_some() || self.usage_open || self.ctx_ui.is_some() || self.lanes.is_some() || self.queue_ui.is_some() || self.sched_ui.is_some() || self.search.is_some()
+    }
+
     fn cwd(&self) -> &str {
-        self.sessions[self.active].cwd.as_deref().unwrap_or(&self.cwd)
+        self.sessions.get(self.active).and_then(|s| s.cwd.as_deref()).unwrap_or(&self.cwd)
     }
 
     fn flash(&mut self, msg: impl Into<String>) {
-        self.flash = Some(msg.into());
+        self.flash = Some(theme::keys(&msg.into()));
         self.flash_at = Instant::now();
     }
 
@@ -616,10 +901,25 @@ impl App {
         // Shown until claude reports the real mode, so a new tab does not claim "manual" by mistake.
         let flag = self.launch.args.iter().position(|a| a == "--permission-mode").and_then(|i| self.launch.args.get(i + 1));
         s.mode = flag.cloned().unwrap_or_else(|| permissions::default_mode(&self.cwd));
-        self.save_draft();
+        self.leave_tab();
         self.sessions.push(s);
         self.active = self.sessions.len() - 1;
         self.load_draft();
+    }
+
+    /// Called just before another tab takes the front. Leaving counts as use, so its idle time restarts here
+    /// (otherwise a tab idle for minutes is stopped the moment you look away); its `/tasks` list is its own.
+    fn leave_tab(&mut self) {
+        if let Some(s) = self.sessions.get_mut(self.active) {
+            s.last_active = Instant::now();
+        }
+        self.lanes = None;
+        self.ctx_ui = None;
+        self.queue_ui = None;
+        self.sched_ui = None;
+        self.sched_at = None;
+        self.search = None;
+        self.save_draft();
     }
 
     /// The message box belongs to the tab in front: leaving a tab keeps what was typed in it.
@@ -638,7 +938,7 @@ impl App {
 
     fn goto(&mut self, i: usize) {
         if i != self.active {
-            self.save_draft();
+            self.leave_tab();
             self.active = i;
             self.load_draft();
             self.files_at = None; // the `@` index belongs to the tab's directory
@@ -700,6 +1000,25 @@ impl App {
                         self.notify(&format!("{name} finished"));
                     }
                 }
+                self.drain_queues();
+            }
+            AppEvent::Mem(mem, own) => self.on_mem(mem, own),
+            AppEvent::Theme(light) => {
+                theme::set_light(light);
+                self.restyle();
+            }
+            AppEvent::Files(cwd, list) => {
+                if cwd == self.cwd() {
+                    self.files = list;
+                    self.file_key = None; // re-rank what is typed against the new list
+                    self.refresh_files();
+                }
+            }
+            AppEvent::Rewound(sid, said) => {
+                if let Some(s) = self.sessions.iter_mut().find(|s| s.id == sid) {
+                    s.rewinding = false;
+                    s.note(said.unwrap_or_else(|e| format!("files not restored: {e}")));
+                }
             }
             AppEvent::Shell(sid, id, cmd, out) => {
                 if let Some(s) = self.sessions.iter_mut().find(|s| s.id == sid) {
@@ -748,6 +1067,10 @@ impl App {
             }
             AppEvent::Term(Event::Key(k)) if k.kind == KeyEventKind::Press => {
                 self.last_input = Instant::now();
+                // Any key drops the selection, except ctrl+y, which copies it.
+                if !(k.code == KeyCode::Char('y') && k.modifiers.contains(KeyModifiers::CONTROL)) {
+                    self.drag = None;
+                }
                 self.on_key(k)
             }
             AppEvent::Term(Event::Paste(p)) => {
@@ -755,10 +1078,37 @@ impl App {
                 self.on_paste(p)
             }
             AppEvent::Term(Event::Mouse(m)) => {
-                let s = self.s();
+                let p = (m.column, m.row);
                 match m.kind {
-                    MouseEventKind::ScrollUp => s.scroll += 3,
-                    MouseEventKind::ScrollDown => s.scroll = s.scroll.saturating_sub(3),
+                    MouseEventKind::Down(MouseButton::Left) => {
+                        self.last_input = Instant::now();
+                        self.drag = self.hits.body.contains(p.into()).then_some((p, p));
+                        self.dragging = self.drag.is_some();
+                        return self.click(m.column, m.row);
+                    }
+                    MouseEventKind::Drag(MouseButton::Left) => {
+                        if let Some((a, _)) = self.drag.filter(|_| self.dragging) {
+                            self.drag = Some((a, p));
+                        }
+                    }
+                    MouseEventKind::Up(MouseButton::Left) => {
+                        if self.dragging {
+                            self.dragging = false;
+                            self.drag = self.drag.map(|(a, _)| (a, p)).filter(|s| s.0 != s.1);
+                            if self.autocopy {
+                                self.copy_selection();
+                            }
+                        }
+                    }
+                    MouseEventKind::ScrollUp => {
+                        self.drag = None; // the cells it marked have moved
+                        self.s().scroll += 3
+                    }
+                    MouseEventKind::ScrollDown => {
+                        self.drag = None;
+                        let s = self.s();
+                        s.scroll = s.scroll.saturating_sub(3)
+                    }
                     _ => {}
                 }
             }
@@ -830,7 +1180,11 @@ impl App {
     }
 
     fn tick(&mut self) {
+        self.drain_queues(); // scheduled messages come due with the clock
         self.pump_statusline();
+        for s in &mut self.sessions {
+            s.poll_mcp();
+        }
         self.opt_poll();
         if self.dock_at.elapsed() > Duration::from_secs(5) && self.dock.is_some() {
             let (here, open) = (self.cwd().to_string(), self.open_states());
@@ -862,15 +1216,30 @@ impl App {
                 }
             }
         }
+        // `ps` and `footprint` take 20–90 ms: measured off the UI thread, applied when they report.
         let roots: Vec<u32> = self.sessions.iter().filter_map(|s| s.backend.as_ref().map(|b| b.pid)).collect();
-        let mem = tree_mem_kb(&roots);
+        let sample = move || {
+            let me = std::process::id();
+            // Our own process only: its tree would include the backends, which are counted separately.
+            let own = footprint_kb(&[me]).first().or(rss_kb(&[me]).first()).map_or(0, |r| r.1);
+            (tree_mem_kb(&roots), own)
+        };
+        if cfg!(test) {
+            let (mem, own) = sample(); // tests read their event channel themselves
+            return self.on_mem(mem, own);
+        }
+        let tx = self.tx.clone();
+        std::thread::spawn(move || {
+            let (mem, own) = sample();
+            let _ = tx.send(AppEvent::Mem(mem, own));
+        });
+    }
+
+    fn on_mem(&mut self, mem: Vec<(u32, u64)>, own: u64) {
         for s in &mut self.sessions {
             s.mem_kb = s.backend.as_ref().and_then(|b| mem.iter().find(|r| r.0 == b.pid)).map_or(0, |r| r.1);
         }
-        // Our own process only: its tree would include the backends, which are counted above.
-        let me = std::process::id();
-        let own = footprint_kb(&[me]);
-        self.ui_mem_kb = own.first().or(rss_kb(&[me]).first()).map_or(0, |r| r.1);
+        self.ui_mem_kb = own;
         // A full-profile tab carries MCP servers and hooks: say once what `lean` would save.
         for s in &mut self.sessions {
             if s.profile == "full" && s.mem_kb > HEAVY_TAB_KB && !std::mem::replace(&mut s.lean_hinted, true) {
@@ -906,15 +1275,17 @@ impl App {
     }
 
     fn on_paste(&mut self, p: String) {
-        if self.explorer.is_some() || self.model_picker.is_some() || self.settings.is_some() || self.tabcfg.is_some() || self.instr.is_some() || self.perms.is_some() || self.opt.is_some() || self.usage_open {
+        if self.overlay_open() {
             return;
         }
-        // A question takes pasted text as its typed answer; a permission prompt takes nothing (a pasted "y"
-        // must never approve anything).
+        // A question takes pasted text as its typed answer; a permission prompt only as the reason on its
+        // "No" row (a pasted "y" must never approve anything).
         if let Some(pending) = self.sessions[self.active].pending.front_mut() {
             if pending.is_question() {
                 let qs = pending.questions().to_vec();
                 pending.ui.question_paste(&qs, &p);
+            } else {
+                pending.ui.paste_feedback(&p, pending.suggestions.as_array().is_some_and(|a| !a.is_empty()));
             }
             return;
         }
@@ -1037,19 +1408,38 @@ impl App {
     }
 
     fn on_key(&mut self, k: KeyEvent) {
-        let box_is_free = self.explorer.is_none() && self.model_picker.is_none() && self.settings.is_none() && self.tabcfg.is_none() && self.instr.is_none() && self.perms.is_none() && self.opt.is_none() && !self.usage_open && self.sessions[self.active].pending.is_empty();
-        if box_is_free && k.code == KeyCode::Char('z') && k.modifiers.contains(KeyModifiers::CONTROL) {
-            return match self.undo.pop() {
-                Some((text, cursor)) => (self.input, self.cursor) = (text, cursor),
-                None => self.flash("nothing to undo"),
-            };
+        let box_is_free = !self.overlay_open() && self.sessions[self.active].pending.is_empty();
+        let (ctrl, alt, shift) = (k.modifiers.contains(KeyModifiers::CONTROL), k.modifiers.contains(KeyModifiers::ALT), k.modifiers.contains(KeyModifiers::SHIFT));
+        // ctrl+z undoes; ctrl+shift+z redoes, and so does alt+z for terminals that cannot tell shift apart.
+        // In vim's normal mode `u` and ctrl+r do the same.
+        let in_normal = self.vim.on && self.vim.mode == vim::Mode::Normal && !self.vim.pending() && !alt;
+        let redo_asked = match k.code {
+            KeyCode::Char('z' | 'Z') if box_is_free && (ctrl || alt) => Some(shift || alt),
+            KeyCode::Char('_' | '7') if box_is_free && ctrl => Some(false), // Claude Code's undo key
+            KeyCode::Char('u') if box_is_free && in_normal && !ctrl => Some(false),
+            KeyCode::Char('r') if box_is_free && in_normal && ctrl => Some(true),
+            KeyCode::Char('U') if box_is_free && in_normal && self.vim.helix && !ctrl => Some(true),
+            _ => None,
+        };
+        if let Some(redo) = redo_asked {
+            let (from, to, none) = if redo { (&mut self.redo, &mut self.undo, "nothing to redo") } else { (&mut self.undo, &mut self.redo, "nothing to undo") };
+            match from.pop() {
+                Some(state) => {
+                    to.push((std::mem::replace(&mut self.input, state.0), self.cursor));
+                    self.cursor = state.1;
+                }
+                None => self.flash(none),
+            }
+            return self.vim_settle();
         }
         let before = (self.input.clone(), self.cursor);
         self.reset_undo = false;
         self.handle_key(k);
         if std::mem::take(&mut self.reset_undo) {
             self.undo.clear(); // sent, or a different tab's box: nothing earlier belongs to this one
+            self.redo.clear();
         } else if self.input != before.0 {
+            self.redo.clear();
             // A burst of typing is one undo step; any other edit, or a pause, starts a new one.
             let typing = self.input.chars().count() == before.0.chars().count() + 1 && self.cursor == before.1 + 1;
             if !typing || self.undo.is_empty() || self.last_edit.elapsed() > Duration::from_millis(800) {
@@ -1063,6 +1453,7 @@ impl App {
             self.drop_orphan_images("");
         }
         self.refresh_files();
+        self.vim_shape();
     }
 
     /// Free attachments whose `[Image #n]` token is in neither the input, `also`, nor anything ctrl+z can bring back.
@@ -1072,7 +1463,7 @@ impl App {
         }
         let mut present = image::tokens_in(&self.input);
         present.extend(image::tokens_in(also));
-        present.extend(self.undo.iter().flat_map(|(t, _)| image::tokens_in(t)));
+        present.extend(self.undo.iter().chain(&self.redo).flat_map(|(t, _)| image::tokens_in(t)));
         self.s().attachments.retain(|a| {
             let keep = present.contains(&a.n);
             if !keep {
@@ -1094,7 +1485,7 @@ impl App {
 
     /// Keep the `@` popup's rows in step with the word under the cursor.
     fn refresh_files(&mut self) {
-        let tok = if self.explorer.is_some() || self.model_picker.is_some() || self.settings.is_some() || self.tabcfg.is_some() || self.instr.is_some() || self.perms.is_some() || self.opt.is_some() || self.usage_open { None } else { self.at_token() };
+        let tok = if self.overlay_open() { None } else { self.at_token() };
         let Some((_, q)) = tok else {
             self.file_rows.clear();
             self.file_key = None;
@@ -1104,8 +1495,18 @@ impl App {
             return;
         }
         if self.file_key.is_none() && self.files_at.is_none_or(|t| t.elapsed() > Duration::from_secs(30)) {
-            self.files = files::list(self.cwd());
+            // Listing walks the tree outside a git repo (over a second in a home folder): built off the
+            // UI thread, the popup ranks the previous list until it arrives.
             self.files_at = Some(Instant::now());
+            let (cwd, tx) = (self.cwd().to_string(), self.tx.clone());
+            if cfg!(test) {
+                self.files = files::list(&cwd); // tests read their event channel themselves
+            } else {
+                std::thread::spawn(move || {
+                    let list = files::list(&cwd);
+                    let _ = tx.send(AppEvent::Files(cwd, list));
+                });
+            }
         }
         self.file_rows = files::rank(&self.files, &q, 30)
             .into_iter()
@@ -1131,7 +1532,7 @@ impl App {
         // Sorted by (name only contains the query, not one of ours, name): prefix hits first, ours before Claude Code's.
         let mut rows: Vec<(bool, bool, Completion)> = LOCAL_COMMANDS
             .iter()
-            .map(|(n, h, d)| (true, Completion { prefix: '/', name: n.to_string(), hint: h.to_string(), desc: d.to_string() }))
+            .map(|(n, h, d)| (true, Completion { prefix: '/', name: n.to_string(), hint: h.to_string(), desc: theme::keys(d) }))
             .chain(
                 theirs
                     .iter()
@@ -1184,6 +1585,49 @@ impl App {
     }
 
     /// `/copy` and ctrl+y: the last answer, or with `code` the last fenced code block in it.
+    /// `/export [file]`: the conversation as plain text, your messages marked `>` and tool calls `●`.
+    fn export(&mut self, arg: &str) {
+        let mut out = String::new();
+        for i in &self.sessions[self.active].items {
+            let block = match &i.entry {
+                Entry::User(_) | Entry::Rich(_) => i.entry.text().lines().map(|l| format!("> {l}")).collect::<Vec<_>>().join("\n"),
+                Entry::Assistant { text, .. } => text.trim_end().to_string(),
+                Entry::Tool { name, input, result, nested, .. } if !nested && name != "Thinking" => {
+                    let res = result.as_ref().map_or(String::new(), |r| {
+                        let mut t: String = r.0.trim_end().chars().take(2000).collect();
+                        if t.len() < r.0.trim_end().len() {
+                            t.push_str("\n…");
+                        }
+                        t.lines().map(|l| format!("\n  ⎿ {l}")).collect()
+                    });
+                    let mut input = input.clone();
+                    if let Some(o) = input.as_object_mut() {
+                        o.retain(|k, _| !k.starts_with('_')); // our own bookkeeping (patches, agent steps)
+                    }
+                    format!("● {name}({input}){res}")
+                }
+                _ => continue,
+            };
+            out.push_str(&block);
+            out.push_str("\n\n");
+        }
+        if out.is_empty() {
+            return self.flash("nothing to export yet");
+        }
+        let name = if arg.is_empty() {
+            let stamp = std::process::Command::new("date").arg("+%Y-%m-%d-%H%M%S").output().map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string()).unwrap_or_default();
+            format!("conversation-{stamp}.txt")
+        } else {
+            arg.to_string()
+        };
+        let path = std::path::Path::new(self.cwd()).join(name);
+        let file = std::fs::OpenOptions::new().write(true).create_new(true).open(&path);
+        match file.and_then(|mut f| f.write_all(out.as_bytes())) {
+            Ok(()) => self.flash(format!("exported to {}", path.display())),
+            Err(e) => self.flash(format!("export failed: {e}")),
+        }
+    }
+
     fn copy_last(&mut self, what: &str) {
         let last = self.sessions[self.active].items.iter().rev().find_map(|i| match &i.entry {
             Entry::Assistant { text, .. } if !text.trim().is_empty() => Some(text.clone()),
@@ -1201,6 +1645,18 @@ impl App {
         let n = text.chars().count();
         self.copy_text(&text);
         self.flash(format!("copied the last {label} ({n} chars)"));
+    }
+
+    /// Copy what the mouse selected, if anything; false when there was nothing.
+    fn copy_selection(&mut self) -> bool {
+        let Some((a, b)) = self.drag else { return false };
+        let text = ui::selection_text(&self.snap, self.hits.body, a, b);
+        if text.is_empty() {
+            return false;
+        }
+        self.copy_text(&text);
+        self.flash("copied");
+        true
     }
 
     /// Clipboard via the OSC 52 escape (works over ssh in terminals that allow it) and, where it exists,
@@ -1222,10 +1678,50 @@ impl App {
         }
     }
 
+    /// A left click: a tab switches to it; a row of a list moves the cursor there, and a click on the row
+    /// the cursor is already on does what Enter does. Done as the keys, so every panel keeps its own rules.
+    fn click(&mut self, col: u16, row: u16) {
+        let hits = self.hits.clone();
+        if row == hits.tab_y
+            && let Some(i) = hits.tabs.iter().position(|(a, b)| (*a..*b).contains(&col))
+        {
+            self.dock_peek = false;
+            return self.goto(i);
+        }
+        // A permission prompt or question is answered with the keys; a stray click must not pick for you.
+        if !self.sessions[self.active].pending.is_empty() {
+            return;
+        }
+        if hits.queue.is_some_and(|r| row >= r.y && row < r.bottom()) {
+            return self.queue_ui = Some(Default::default());
+        }
+        let (hit, in_dock) = match (hits.dock, hits.list) {
+            (Some((r, h)), _) if !self.overlay_open() && col >= r.x && col < r.right() && row >= r.y && row < r.bottom() => (Some(h), true),
+            (_, l) => (l, false),
+        };
+        let Some(target) = hit.and_then(|h| h.row_at(col, row)) else {
+            // Not on a list: a click on a tool call in the conversation folds or unfolds it.
+            if hit.is_none() && let Some(&(_, _, i)) = hits.calls.iter().find(|c| (c.0..c.1).contains(&row)) {
+                self.s().flip_call(Some(i));
+            }
+            return;
+        };
+        let h = hit.unwrap();
+        if in_dock {
+            self.dock_focus = true;
+        }
+        let key = |code| KeyEvent::new(code, KeyModifiers::NONE);
+        let (code, n) = if target >= h.cursor { (KeyCode::Down, target - h.cursor) } else { (KeyCode::Up, h.cursor - target) };
+        (0..n).for_each(|_| self.handle_key(key(code)));
+        if n == 0 || h.input_focus {
+            self.handle_key(key(if h.input_focus { KeyCode::Tab } else { KeyCode::Enter }));
+        }
+    }
+
     fn set_mouse(&mut self, on: bool) {
         self.mouse = on;
         if self.tty {
-            let _ = write!(io::stdout(), "\x1b[?1000{0}\x1b[?1006{0}", if on { 'h' } else { 'l' });
+            let _ = write!(io::stdout(), "\x1b[?1002{0}\x1b[?1000{0}\x1b[?1006{0}", if on { 'h' } else { 'l' });
             let _ = io::stdout().flush();
         }
     }
@@ -1270,7 +1766,7 @@ impl App {
         self.dock_focus = focus;
     }
 
-    /// ctrl+r and /sessions: the docked list when configured (toggle), else the full-screen one.
+    /// /sessions: the docked list when configured (toggle), else the full-screen one.
     fn toggle_sessions(&mut self) {
         if !self.dock_mode {
             self.open_explorer();
@@ -1284,13 +1780,16 @@ impl App {
     fn dock_key(&mut self, k: KeyEvent) {
         match k.code {
             KeyCode::Left => self.open_explorer(),
-            KeyCode::Right => (self.dock, self.dock_focus) = (None, false),
             KeyCode::Esc => (self.dock_focus, self.dock_peek) = (false, false),
             _ => {
                 if let Some(o) = self.dock.as_mut().map(|d| d.key(k)) {
+                    // → is "done browsing": the conversation in view stays, the panel goes.
+                    let leave = matches!(o, explorer::Outcome::OpenHere(..) | explorer::Outcome::Close);
                     let opened = matches!(o, explorer::Outcome::Open(..));
                     self.explorer_outcome(o);
-                    if opened {
+                    if leave {
+                        (self.dock, self.dock_focus, self.dock_peek) = (None, false, false);
+                    } else if opened {
                         (self.dock_focus, self.dock_peek) = (false, false); // typing now goes to that conversation
                     } else {
                         self.dock_follow();
@@ -1305,6 +1804,7 @@ impl App {
         use explorer::Outcome::*;
         match o {
             Open(id, title, cwd) => self.open_session(id, title, cwd),
+            OpenHere(id, title, cwd) => self.open_here(id, title, cwd),
             Fork(id, title, cwd) => {
                 self.open_in_tab(id, title, cwd);
                 self.s().fork = true;
@@ -1342,6 +1842,20 @@ impl App {
             self.goto(i);
             return;
         }
+        self.open_in_tab(id, title, cwd);
+    }
+
+    /// → in a list: the conversation takes the tab in front (its backend stops, as with `/clear`). One that
+    /// is already open in another tab is switched to; a tab mid-turn is not thrown away.
+    fn open_here(&mut self, id: String, title: String, cwd: Option<String>) {
+        if self.sessions.iter().any(|s| s.session_id.as_deref() == Some(id.as_str())) {
+            return self.open_session(id, title, cwd);
+        }
+        let s = &self.sessions[self.active];
+        if s.busy || !s.pending.is_empty() {
+            return self.open_session(id, title, cwd); // a working tab is not thrown away: new tab instead
+        }
+        self.s().clear();
         self.open_in_tab(id, title, cwd);
     }
 
@@ -1415,11 +1929,22 @@ impl App {
             }
             return;
         }
+        if self.color_picker.is_some() {
+            return self.color_key(k);
+        }
         if self.model_picker.is_some() {
             return self.picker_key(k);
         }
-        if self.dock_focus && self.dock.is_some() && self.settings.is_none() && self.tabcfg.is_none() && self.instr.is_none() && self.perms.is_none() && self.opt.is_none() && !self.usage_open && self.sessions[self.active].pending.is_empty() {
+        if self.rewind.is_some() {
+            return self.rewind_key(k);
+        }
+        if self.dock_focus && self.dock.is_some() && self.settings.is_none() && self.tabcfg.is_none() && self.instr.is_none() && self.perms.is_none() && self.opt.is_none() && !self.usage_open && self.ctx_ui.is_none() && self.lanes.is_none() && self.queue_ui.is_none() && self.sched_ui.is_none() && self.search.is_none() && self.sessions[self.active].pending.is_empty() {
             use KeyCode::*;
+            if k.code == Char('t') && ctrl {
+                self.new_tab();
+                (self.dock_focus, self.dock_peek) = (false, false); // typing now starts the new conversation
+                return;
+            }
             if matches!(k.code, Up | Down | PageUp | PageDown | Home | End | Enter | Right | Esc | Left | Tab) && !ctrl && !alt {
                 return self.dock_key(k);
             }
@@ -1440,6 +1965,47 @@ impl App {
         if self.opt.is_some() {
             return self.opt_key(k);
         }
+        if let Some(mut ui) = self.ctx_ui.take() {
+            let ctx = self.sessions[self.active].usage.ctx.clone();
+            match ui.key(k, ctx.as_ref().map_or(0, context::count)) {
+                context::Out::Keep => self.ctx_ui = Some(ui),
+                context::Out::Close => {}
+                context::Out::Refresh => {
+                    self.ctx_ui = Some(ui);
+                    self.ask_usage();
+                }
+                context::Out::Act => match ctx.and_then(|c| context::action(&c, ui.sel)) {
+                    Some((cmd, _)) => {
+                        self.input = cmd.into();
+                        self.cursor = self.input.chars().count();
+                        self.submit();
+                    }
+                    None => self.ctx_ui = Some(ui),
+                },
+            }
+            return;
+        }
+        if let Some(mut ui) = self.lanes.take() {
+            let all = lanes::collect(&self.sessions[self.active].items, &self.sessions[self.active].shells, self.cwd());
+            let keep = ui.key(k, all.len());
+            if let Some(id) = ui.stop.take().and_then(|i| all.get(i)?.stop.clone()) {
+                self.s().control("stop_task", json!({"task_id": id}));
+                self.flash("stopping the command");
+            }
+            if keep {
+                self.lanes = Some(ui);
+            }
+            return;
+        }
+        if self.sched_ui.is_some() {
+            return self.schedule_key(k);
+        }
+        if self.queue_ui.is_some() {
+            return self.queue_key(k);
+        }
+        if self.search.is_some() {
+            return self.search_key(k);
+        }
         if self.usage_open {
             match k.code {
                 KeyCode::Esc | KeyCode::Char('q') => self.usage_open = false,
@@ -1454,8 +2020,7 @@ impl App {
             let sel = self.sel.min(rows.len() - 1);
             match k.code {
                 KeyCode::Tab => return self.accept_completion(),
-                KeyCode::Up => return self.sel = (sel + rows.len() - 1) % rows.len(),
-                KeyCode::Down => return self.sel = (sel + 1) % rows.len(),
+                KeyCode::Up | KeyCode::Down => return self.sel = panel::cycle(sel, rows.len(), k.code == KeyCode::Up),
                 // Enter completes a partial name; once the name is complete it runs the command.
                 KeyCode::Enter
                     if !alt
@@ -1471,6 +2036,9 @@ impl App {
         if !matches!(k.code, KeyCode::Char('c')) || !ctrl {
             self.quit_armed = None;
         }
+        if k.code != KeyCode::Esc {
+            self.esc_armed = None;
+        }
 
         // A permission or question panel owns the keyboard, except keys the app keeps (ctrl/alt chords for
         // tabs, interrupt..., and page keys that scroll the transcript behind it).
@@ -1479,7 +2047,17 @@ impl App {
             return self.prompt_key(k);
         }
 
+        if self.sched_at.is_some() && k.code == KeyCode::Esc {
+            self.sched_at = None;
+            return self.flash("schedule cancelled");
+        }
+        if self.vim.on && self.vim_key(k) {
+            return;
+        }
         match k.code {
+            KeyCode::Char('f') if ctrl => self.open_search(),
+            KeyCode::Char('g') if ctrl => self.edit_request = true,
+            KeyCode::Char('q') if alt => self.queue_ui = Some(Default::default()),
             KeyCode::Char('c') if ctrl => {
                 if self.s().busy {
                     self.s().interrupt();
@@ -1492,10 +2070,26 @@ impl App {
                     self.flash("press ctrl+c again to quit");
                 }
             }
-            KeyCode::Esc => self.s().interrupt(),
+            KeyCode::Esc if self.s().busy => self.s().interrupt(),
+            // Esc Esc on an empty box goes back to an earlier message, as in Claude Code.
+            KeyCode::Esc if self.input.is_empty() => {
+                if self.esc_armed.take().is_some_and(|t| t.elapsed() < Duration::from_millis(800)) {
+                    self.open_rewind();
+                } else if !self.s().rewind_points().is_empty() {
+                    self.esc_armed = Some(Instant::now());
+                    self.flash("esc again to rewind");
+                }
+            }
             KeyCode::Char('d') if ctrl && self.input.is_empty() => self.close_tab_asking(),
             KeyCode::Char('t') if ctrl => self.new_tab(),
-            KeyCode::Char('r') if ctrl => self.toggle_sessions(),
+            // As in Claude Code: search what you sent before. The session list is ← (or /sessions).
+            KeyCode::Char('r') if ctrl => {
+                self.open_search();
+                if let Some(ui) = self.search.as_mut() {
+                    ui.history = true;
+                    ui.refresh(&self.sessions[self.active].items, &self.history);
+                }
+            }
             KeyCode::Char('v') if ctrl => {
                 self.paste_image("no image on the clipboard (ctrl+v pastes images; paste text with your terminal's paste)");
             }
@@ -1510,27 +2104,53 @@ impl App {
             KeyCode::Char('o') if ctrl => {
                 self.expanded = !self.expanded;
                 for s in &mut self.sessions {
-                    s.items.iter_mut().for_each(|i| i.cache = None);
+                    s.items.iter_mut().for_each(|i| (i.cache, i.flipped) = (None, false));
                 }
             }
-            KeyCode::Char('y') if ctrl => self.copy_last(""),
+            KeyCode::Char('o') if alt => {
+                if !self.s().flip_call(None) {
+                    self.flash("no tool call to fold");
+                }
+            }
+            KeyCode::Char('y') if ctrl => {
+                if self.copy_selection() {
+                    self.drag = None;
+                } else {
+                    self.copy_last("")
+                }
+            }
             KeyCode::Char('j') if ctrl => self.insert("\n"),
             KeyCode::Enter if alt || k.modifiers.contains(KeyModifiers::SHIFT) => self.insert("\n"),
             KeyCode::Enter => self.submit(),
             KeyCode::BackTab => {
-                let next = MODES[(MODES.iter().position(|m| *m == self.s().mode).map_or(0, |i| i + 1)) % MODES.len()];
+                let modes = tabcfg::modes();
+                let next = modes[(modes.iter().position(|m| *m == self.s().mode).map_or(0, |i| i + 1)) % modes.len()];
                 self.set_mode(next);
             }
-            KeyCode::Char('a') if ctrl => self.cursor = 0,
-            KeyCode::Char('e') if ctrl => self.cursor = self.input.chars().count(),
-            KeyCode::Char('u') if ctrl => self.set_input(String::new()),
+            KeyCode::Char('a') if ctrl => self.cursor = self.line_bounds().0,
+            KeyCode::Char('e') if ctrl => self.cursor = self.line_bounds().1,
+            // ctrl+u / ctrl+k cut to the start / end of the line; at its edge they take the line break with them.
+            KeyCode::Char('u') if ctrl => {
+                let a = self.line_bounds().0;
+                self.delete_range(a.saturating_sub((a == self.cursor) as usize), self.cursor)
+            }
             KeyCode::Char('w') if ctrl => self.delete_range(self.word_left(), self.cursor),
             KeyCode::Backspace if alt => self.delete_range(self.word_left(), self.cursor),
             KeyCode::Char('d') if alt => self.delete_range(self.cursor, self.word_right()),
             KeyCode::Char('b') if alt => self.cursor = self.word_left(),
             KeyCode::Char('f') if alt => self.cursor = self.word_right(),
-            KeyCode::Char('k') if ctrl => self.delete_range(self.cursor, self.input.chars().count()),
-            KeyCode::Char(c) if !ctrl => {
+            KeyCode::Char('k') if ctrl => {
+                let b = self.line_bounds().1;
+                self.delete_range(self.cursor, if b == self.cursor { (b + 1).min(self.input.chars().count()) } else { b })
+            }
+            KeyCode::Char('p') if alt => self.open_model_picker(), // as in Claude Code
+            KeyCode::Char('b') if ctrl => {
+                let said = self.s().background_shell();
+                self.flash(said);
+            }
+            KeyCode::Char('l') if ctrl => self.clear_request = true,
+            // An unbound alt+letter is a shortcut that does not exist here, not text to type.
+            KeyCode::Char(c) if !ctrl && !(alt && c.is_ascii_alphabetic()) => {
                 self.insert(c.encode_utf8(&mut [0; 4]));
                 self.warm();
             }
@@ -1564,18 +2184,280 @@ impl App {
             KeyCode::Right => self.cursor = (self.cursor + 1).min(self.input.chars().count()),
             KeyCode::Home if ctrl => self.s().scroll = usize::MAX / 2,
             KeyCode::End if ctrl => self.s().scroll = 0,
-            KeyCode::Home => self.cursor = 0,
-            KeyCode::End => self.cursor = self.input.chars().count(),
+            KeyCode::Home => self.cursor = self.line_bounds().0,
+            KeyCode::End => self.cursor = self.line_bounds().1,
             KeyCode::Up if k.modifiers.contains(KeyModifiers::SHIFT) => self.s().scroll += 1,
             KeyCode::Down if k.modifiers.contains(KeyModifiers::SHIFT) => {
                 self.s().scroll = self.s().scroll.saturating_sub(1)
             }
             KeyCode::PageUp => self.s().scroll += self.s().view_h.saturating_sub(2).max(1),
             KeyCode::PageDown => self.s().scroll = self.s().scroll.saturating_sub(self.s().view_h.saturating_sub(2).max(1)),
-            KeyCode::Up => self.history_step(-1),
-            KeyCode::Down => self.history_step(1),
+            // ↑/↓ move through a message that is more than one row; from its first / last row they walk history.
+            KeyCode::Up if !self.move_row(-1) => self.history_step(-1),
+            KeyCode::Down if !self.move_row(1) => self.history_step(1),
             _ => {}
         }
+    }
+
+    /// A key for vim's modes. True when it was used up; false hands it on to the ordinary keys.
+    fn vim_key(&mut self, k: KeyEvent) -> bool {
+        let mut t: Vec<char> = self.input.chars().collect();
+        let mut cur = self.cursor.min(t.len());
+        let out = self.vim.key(k, &mut t, &mut cur);
+        let text: String = t.iter().collect();
+        if text != self.input {
+            self.input = text;
+        }
+        self.cursor = cur;
+        match out {
+            vim::Out::Pass => return false,
+            vim::Out::Row(d) => {
+                (0..d.unsigned_abs()).for_each(|_| _ = self.move_row(d.signum()));
+                self.vim_settle();
+                self.vim.moved(self.cursor);
+            }
+            vim::Out::Search => self.open_search(),
+            vim::Out::Done | vim::Out::Undo | vim::Out::Redo => {}
+        }
+        true
+    }
+
+    /// In vim's normal and visual modes the cursor sits on a character, not after the last one.
+    fn vim_settle(&mut self) {
+        if self.vim.on {
+            let t: Vec<char> = self.input.chars().collect();
+            self.vim.settle(&t, &mut self.cursor);
+        }
+    }
+
+    /// Ask the terminal for a block cursor in normal mode and a bar in insert mode.
+    fn vim_shape(&mut self) {
+        let want = self.vim.on.then_some(self.vim.mode);
+        if want == self.cursor_mode {
+            return;
+        }
+        self.cursor_mode = want;
+        if self.tty {
+            let shape = match want {
+                None => 0,
+                Some(vim::Mode::Insert) => 6,
+                Some(_) => 2,
+            };
+            let _ = write!(io::stdout(), "\x1b[{shape} q");
+            let _ = io::stdout().flush();
+        }
+    }
+
+    fn open_search(&mut self) {
+        let scroll = self.s().scroll;
+        let mut ui = search::Ui::new(scroll);
+        ui.refresh(&self.sessions[self.active].items, &self.history);
+        self.search = Some(ui);
+    }
+
+    fn search_key(&mut self, k: KeyEvent) {
+        let Some(mut ui) = self.search.take() else { return };
+        let out = ui.key(k, &self.sessions[self.active].items, &self.history);
+        let at = ui.reveal();
+        match out {
+            search::Outcome::Stay => {
+                self.s().reveal = at.or(self.s().reveal);
+                self.search = Some(ui);
+            }
+            search::Outcome::Close => self.s().scroll = ui.scroll,
+            search::Outcome::Go => {
+                let s = self.s();
+                s.reveal = at;
+                (s.find_query, s.found) = (ui.query.to_lowercase(), at);
+            }
+            search::Outcome::Recall(i) => {
+                let text = self.history[i].clone();
+                self.set_input(text);
+            }
+        }
+    }
+
+    /// Put a message in this tab's queue, with the pictures it mentions.
+    fn queue_message(&mut self, text: String, due: Option<SystemTime>) {
+        let used = image::tokens_in(&text);
+        let (keep, gone): (Vec<_>, Vec<_>) = std::mem::take(&mut self.s().attachments).into_iter().partition(|a| used.contains(&a.n));
+        gone.iter().for_each(|a| a.preview.iter().for_each(|p| image::delete(p.id)));
+        let keep = keep
+            .into_iter()
+            .map(|mut a| {
+                a.preview.take().iter().for_each(|p| image::delete(p.id)); // the box no longer shows it
+                a
+            })
+            .collect();
+        self.undo.clear();
+        self.redo.clear();
+        let s = self.s();
+        if due.is_none() {
+            s.queue_hold = false; // sending something new means carrying on
+        }
+        s.queue.push(session::Queued { text, atts: keep, due });
+        let n = s.queue.len();
+        self.flash(match due {
+            Some(d) => format!("scheduled for {} · alt+q to manage", queue::clock(d)),
+            None => format!("queued ({n}) · alt+q to manage"),
+        });
+    }
+
+    /// Send the next waiting message of every tab that is free to take one.
+    fn drain_queues(&mut self) {
+        for i in 0..self.sessions.len() {
+            let s = &mut self.sessions[i];
+            if s.busy || s.queue_hold || s.rewinding || !s.pending.is_empty() {
+                continue;
+            }
+            // The first message that is not waiting for a time of its own.
+            let now = SystemTime::now();
+            let Some(at) = s.queue.iter().position(|q| q.due.is_none_or(|d| d <= now)) else { continue };
+            let q = s.queue.remove(at);
+            self.send_queued(i, q);
+        }
+    }
+
+    fn send_queued(&mut self, i: usize, q: session::Queued) {
+        let (launch, tx) = (self.launch_for(i), self.tx.clone());
+        let mentioned = self.mentioned_images(&q.text);
+        let mine = std::mem::replace(&mut self.sessions[i].attachments, q.atts);
+        self.sessions[i].submit(q.text, &mentioned, &launch, &tx);
+        self.sessions[i].attachments = mine;
+    }
+
+    fn queue_key(&mut self, k: KeyEvent) {
+        use queue::Act;
+        let Some(mut ui) = self.queue_ui.take() else { return };
+        let i = self.active;
+        let act = ui.key(k, &mut self.sessions[i].queue);
+        let keep = match act {
+            Act::Close => false,
+            Act::None => true,
+            Act::Send(n) => {
+                // It goes first; if Claude is mid-turn that turn is stopped, and the message follows its end.
+                let s = &mut self.sessions[i];
+                let mut q = s.queue.remove(n);
+                q.due = None;
+                s.queue.insert(0, q);
+                s.interrupt();
+                s.queue_hold = false;
+                self.drain_queues();
+                true
+            }
+            Act::Steer(n) => {
+                let mut q = self.sessions[i].queue.remove(n);
+                q.due = None;
+                self.send_queued(i, q);
+                true
+            }
+            Act::Edit(_) if !self.input.is_empty() => {
+                self.flash("send or clear the message box first: editing a queued message needs it");
+                true
+            }
+            Act::Edit(n) => {
+                let q = self.sessions[i].queue.remove(n);
+                self.set_input(q.text);
+                self.sessions[i].attachments.extend(q.atts);
+                false
+            }
+            Act::Remove(n) => {
+                self.sessions[i].queue.remove(n);
+                true
+            }
+            Act::Clear => {
+                self.sessions[i].queue.clear();
+                true
+            }
+            Act::Schedule(n) => {
+                let mut s = schedule::Ui::new("");
+                (s.target, s.from_queue) = (Some(n), true);
+                self.sched_ui = Some(s);
+                false
+            }
+            Act::Pause => {
+                let s = &mut self.sessions[i];
+                s.queue_hold = !s.queue_hold;
+                self.drain_queues();
+                true
+            }
+        };
+        if keep {
+            self.queue_ui = Some(ui);
+        }
+    }
+
+    fn schedule_key(&mut self, k: KeyEvent) {
+        use schedule::Act;
+        let Some(mut ui) = self.sched_ui.take() else { return };
+        let i = self.active;
+        let unset = ui.target.and_then(|n| self.sessions[i].queue.get(n)).is_some_and(|q| q.due.is_some());
+        let done = match ui.key(k, SystemTime::now(), unset) {
+            Act::None => false,
+            Act::Close => true,
+            Act::Bad => {
+                self.flash("not a time: try 45m, 2h30m or 17:30");
+                false
+            }
+            Act::Pick(due) => {
+                if let Some(n) = ui.target {
+                    self.sessions[i].queue.get_mut(n).iter_mut().for_each(|q| q.due = due);
+                    self.flash(due.map_or("no longer scheduled: it goes when the turn ends".into(), |d| format!("scheduled for {}", queue::clock(d))));
+                } else if let (Some(msg), Some(due)) = (ui.msg.take(), due) {
+                    self.queue_message(msg, Some(due));
+                } else {
+                    self.sched_at = due;
+                    self.flash("now type the message: enter schedules it, esc cancels");
+                }
+                true
+            }
+        };
+        if !done {
+            self.sched_ui = Some(ui);
+        } else if ui.from_queue {
+            self.queue_ui = Some(Default::default());
+        }
+    }
+
+    /// The message box's current line (between line breaks) as (start, end) char positions.
+    fn line_bounds(&self) -> (usize, usize) {
+        let chars: Vec<char> = self.input.chars().collect();
+        let a = chars[..self.cursor.min(chars.len())].iter().rposition(|c| *c == '\n').map_or(0, |i| i + 1);
+        (a, chars[a..].iter().position(|c| *c == '\n').map_or(chars.len(), |i| a + i))
+    }
+
+    /// Move the cursor one row up or down in the box, keeping its column. False when there is no such row
+    /// and the key is history's (↓ with no history shown just goes to the end).
+    fn move_row(&mut self, d: isize) -> bool {
+        let (rows, (col, row)) = ui::input_layout(&self.input, self.cursor, self.input_w.max(1));
+        let to = row as isize + d;
+        if to < 0 {
+            return false;
+        }
+        let to = to as usize;
+        if to >= rows.len() {
+            if self.hist_pos.is_some() {
+                return false;
+            }
+            self.cursor = self.input.chars().count();
+            return true;
+        }
+        let chars: Vec<char> = self.input.chars().collect();
+        let mut start = 0;
+        for r in &rows[..to] {
+            start += r.chars().count();
+            start += (chars.get(start) == Some(&'\n')) as usize;
+        }
+        let (mut w, mut n) = (0, 0);
+        for ch in rows[to].chars() {
+            w += unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
+            if w > col {
+                break;
+            }
+            n += 1;
+        }
+        self.cursor = start + n;
+        true
     }
 
     fn history_step(&mut self, d: isize) {
@@ -1584,7 +2466,10 @@ impl App {
         }
         let n = self.history.len();
         let pos = match (self.hist_pos, d) {
-            (None, -1) => Some(n - 1),
+            (None, -1) => {
+                self.hist_draft = self.input.clone();
+                Some(n - 1)
+            }
             (None, _) => None,
             (Some(0), -1) => Some(0),
             (Some(p), -1) => Some(p - 1),
@@ -1592,7 +2477,11 @@ impl App {
             (Some(_), _) => None,
         };
         self.hist_pos = pos;
-        self.set_input(pos.map(|p| self.history[p].clone()).unwrap_or_default());
+        let text = match pos {
+            Some(p) => self.history[p].clone(),
+            None => std::mem::take(&mut self.hist_draft),
+        };
+        self.set_input(text);
     }
 
     /// Route a key to the panel at the front of this tab's prompt queue.
@@ -1706,6 +2595,7 @@ impl App {
         let u = &self.sessions[self.active].usage;
         let (skills, total) = u.ctx.as_ref().map_or((None, 0), |c| (Some(c.skill_list.as_slice()), c.total));
         ui.poll(skills, total);
+        ui.poll_review();
     }
 
     fn opt_key(&mut self, k: KeyEvent) {
@@ -1720,10 +2610,13 @@ impl App {
         }
         let n = ui.items.len();
         match k.code {
-            KeyCode::Up if n > 0 => ui.sel = (ui.sel + n - 1) % n,
-            KeyCode::Down if n > 0 => ui.sel = (ui.sel + 1) % n,
+            KeyCode::Up | KeyCode::Down if n > 0 => ui.sel = panel::cycle(ui.sel, n, k.code == KeyCode::Up),
             KeyCode::Left | KeyCode::BackTab => ui.step_level(-1),
             KeyCode::Right | KeyCode::Tab => ui.step_level(1),
+            KeyCode::Char('c') if !ctrl_c => {
+                let cwd = self.cwd().to_string();
+                ui.ask_claude(&self.launch.bin, &self.launch.env, &cwd);
+            }
             KeyCode::Char(' ') | KeyCode::Char('x') => {
                 if let Some(it) = ui.items.get_mut(ui.sel) {
                     it.on = !it.on;
@@ -1857,8 +2750,7 @@ impl App {
         }
         if let Some(&row) = rows.get(sel) {
             match k.code {
-                KeyCode::Up => ui.sel = (sel + rows.len() - 1) % rows.len(),
-                KeyCode::Down => ui.sel = (sel + 1) % rows.len(),
+                KeyCode::Up | KeyCode::Down => ui.sel = panel::cycle(sel, rows.len(), k.code == KeyCode::Up),
                 KeyCode::Right | KeyCode::Char('l') => {
                     if let instructions::Row::File(f) = row {
                         ui.open.insert(f);
@@ -1910,12 +2802,12 @@ impl App {
         match (k.code, &rows[sel]) {
             (KeyCode::Esc, _) => return,
             (KeyCode::Char('c'), _) if k.modifiers.contains(KeyModifiers::CONTROL) => return,
-            (KeyCode::Up, _) => ui.sel = (sel + rows.len() - 1) % rows.len(),
-            (KeyCode::Down, _) => ui.sel = (sel + 1) % rows.len(),
+            (KeyCode::Up | KeyCode::Down, _) => ui.sel = panel::cycle(sel, rows.len(), k.code == KeyCode::Up),
             (KeyCode::Enter, Row::Add) | (_, Row::Add) if delta != 0 || k.code == KeyCode::Enter => ui.adding = Some(String::new()),
             (_, Row::Mode) if delta != 0 || k.code == KeyCode::Enter => {
-                let cur = MODES.iter().position(|m| *m == self.sessions[self.active].mode).map_or(0, |i| i as isize);
-                let next = MODES[(cur + if delta == 0 { 1 } else { delta }).rem_euclid(MODES.len() as isize) as usize];
+                let modes = tabcfg::modes();
+                let cur = modes.iter().position(|m| *m == self.sessions[self.active].mode).map_or(0, |i| i as isize);
+                let next = modes[(cur + if delta == 0 { 1 } else { delta }).rem_euclid(modes.len() as isize) as usize];
                 self.set_mode(next);
             }
             (KeyCode::Char('d') | KeyCode::Delete | KeyCode::Backspace, Row::Tool(name, _)) => self.s().set_rule(name, None),
@@ -1937,17 +2829,102 @@ impl App {
     }
 
     fn settings_key(&mut self, k: KeyEvent) {
-        let Some(mut ui) = self.settings else { return };
+        use settings::Row;
+        let Some(mut ui) = self.settings.take() else { return };
+        let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
+        ui.note = None;
+        if let Some(mut text) = ui.edit.take() {
+            match k.code {
+                KeyCode::Esc => {}
+                KeyCode::Char('c') if ctrl => {}
+                KeyCode::Enter => {
+                    if let Some(Row::Cc(i)) = ui.at() {
+                        let key = &cc_keys::KEYS[i];
+                        if let Err(e) = settings::parse(key, &text).and_then(|v| ui.save(key, v)) {
+                            ui.note = Some((e, true));
+                            ui.edit = Some(text);
+                        } else {
+                            ui.note = Some((format!("{} saved to {} settings", key.key, ui.scope.name()), false));
+                        }
+                    }
+                }
+                KeyCode::Backspace => {
+                    text.pop();
+                    ui.edit = Some(text);
+                }
+                KeyCode::Char(c) if !ctrl => {
+                    text.push(c);
+                    ui.edit = Some(text);
+                }
+                _ => ui.edit = Some(text),
+            }
+            return self.settings = Some(ui);
+        }
         match k.code {
-            KeyCode::Esc => return self.settings = None,
-            KeyCode::Char('c') if k.modifiers.contains(KeyModifiers::CONTROL) => return self.settings = None,
+            KeyCode::Esc | KeyCode::Char('c') if k.code == KeyCode::Esc || ctrl => {
+                if ui.query.is_empty() {
+                    return; // closed
+                }
+                (ui.query, ui.sel) = (String::new(), 0);
+            }
             KeyCode::Up => ui.step(-1),
             KeyCode::Down => ui.step(1),
-            KeyCode::Left | KeyCode::BackTab => self.change_setting(ui.sel, -1),
-            KeyCode::Right | KeyCode::Tab | KeyCode::Enter | KeyCode::Char(' ') => self.change_setting(ui.sel, 1),
+            KeyCode::PageUp => ui.step(-10),
+            KeyCode::PageDown => ui.step(10),
+            KeyCode::Tab => ui.switch_tab(1),
+            KeyCode::BackTab => ui.switch_tab(-1),
+            KeyCode::Left => self.settings_change(&mut ui, -1),
+            KeyCode::Right | KeyCode::Enter => self.settings_change(&mut ui, 1),
+            KeyCode::Char(' ') if ui.query.is_empty() => self.settings_change(&mut ui, 1),
+            KeyCode::Char('s') if ctrl => ui.cycle_scope(),
+            KeyCode::Delete => {
+                if let Some(Row::Cc(i)) = ui.at() {
+                    let key = &cc_keys::KEYS[i];
+                    ui.note = Some(match ui.save(key, None) {
+                        Ok(()) => (format!("{} removed from {} settings", key.key, ui.scope.name()), false),
+                        Err(e) => (e, true),
+                    });
+                }
+            }
+            KeyCode::Backspace => {
+                ui.query.pop();
+                ui.sel = 0;
+            }
+            KeyCode::Char(c) if !ctrl => {
+                ui.query.push(c);
+                ui.sel = 0;
+            }
             _ => {}
         }
         self.settings = Some(ui);
+    }
+
+    /// ←→/enter on a `/config` row: step a choice, or start typing a value.
+    fn settings_change(&mut self, ui: &mut settings::Ui, delta: isize) {
+        match ui.at() {
+            Some(settings::Row::Own(i)) => self.change_setting(i, delta),
+            Some(settings::Row::Cc(i)) => {
+                let key = &cc_keys::KEYS[i];
+                match ui.cycled(key, delta) {
+                    Some(v) => {
+                        ui.note = Some(match ui.save(key, v) {
+                            Ok(()) => (format!("{} saved to {} settings", key.key, ui.scope.name()), false),
+                            Err(e) => (e, true),
+                        })
+                    }
+                    None => ui.edit = Some(ui.edit_text(key)),
+                }
+            }
+            None => {}
+        }
+    }
+
+    /// Colours changed: drop every rendered line that baked the old ones in, and repaint the whole screen.
+    fn restyle(&mut self) {
+        for s in &mut self.sessions {
+            s.items.iter_mut().for_each(|i| i.cache = None);
+        }
+        self.clear_request = true;
     }
 
     /// What a setting is right now (the live value, which a flag may have set).
@@ -1961,7 +2938,11 @@ impl App {
             "mem_budget_mb" => (self.mem_budget_kb / 1024).to_string(),
             "notify" => self.notify.clone(),
             "mouse" => if self.mouse { "on" } else { "off" }.to_string(),
+            "autocopy" => if self.autocopy { "on" } else { "off" }.to_string(),
             "side_panel" => if self.dock_mode { "on" } else { "off" }.to_string(),
+            "input_mode" => if self.vim.helix { "helix" } else if self.vim.on { "vim" } else { "default" }.to_string(),
+            "theme" => theme::mode_name().to_string(),
+            "queue" => if self.queue_on { "on" } else { "off" }.to_string(),
             _ => String::new(),
         }
     }
@@ -1991,7 +2972,18 @@ impl App {
             "idle_suspend_s" => self.idle_suspend = Duration::from_secs(num),
             "mem_budget_mb" => self.mem_budget_kb = num * 1024,
             "mouse" => self.set_mouse(value != "off"),
+            "autocopy" => self.autocopy = value == "on",
             "notify" => self.notify = value.into(),
+            "theme" => {
+                theme::set_mode(value);
+                self.restyle();
+            }
+            "input_mode" => {
+                (self.vim.on, self.vim.helix) = (value != "default", value == "helix");
+                self.vim.mode = vim::Mode::Insert;
+                self.vim_shape();
+            }
+            "queue" => self.queue_on = value == "on",
             "side_panel" => {
                 self.dock_mode = value == "on";
                 if !self.dock_mode {
@@ -2020,6 +3012,103 @@ impl App {
         self.model_picker = Some(ModelPicker { sel, effort, fast });
     }
 
+    /// The colour the whole UI wears: the highlighted one while `/color` is open, else that of the conversation
+    /// being browsed in the session list, else that of the tab in front.
+    pub fn accent_color(&mut self) -> Option<String> {
+        if let Some(c) = self.picked_color() {
+            return c;
+        }
+        let list = if self.explorer.is_some() { self.explorer.as_mut() } else if self.dock_focus { self.dock.as_mut() } else { None };
+        if let Some(list) = list
+            && let Some((id, _)) = list.selected()
+        {
+            return match self.sessions.iter().find(|s| s.session_id.as_deref() == Some(id.as_str())) {
+                Some(s) => s.color.clone(),
+                None => list.color(),
+            };
+        }
+        self.sessions[self.active].color.clone()
+    }
+
+    /// Tab `i`'s colour; the tab in front shows the colour being picked.
+    pub fn tab_color(&self, i: usize) -> Option<&str> {
+        match self.color_picker.and_then(|p| Self::color_choices().get(p).copied()) {
+            Some(c) if i == self.active => Some(c).filter(|c| *c != "default"),
+            _ => self.sessions[i].color.as_deref(),
+        }
+    }
+
+    /// While `/color` is open: the highlighted choice (`None` inside is `default`).
+    fn picked_color(&self) -> Option<Option<String>> {
+        let c = *Self::color_choices().get(self.color_picker?)?;
+        Some((c != "default").then(|| c.to_string()))
+    }
+
+    /// The picker's rows: `default`, then each colour.
+    pub fn color_choices() -> Vec<&'static str> {
+        std::iter::once("default").chain(theme::color_names()).collect()
+    }
+
+    fn color_key(&mut self, k: KeyEvent) {
+        let Some(sel) = self.color_picker else { return };
+        let n = Self::color_choices().len();
+        match k.code {
+            KeyCode::Esc => self.color_picker = None,
+            KeyCode::Char('c') if k.modifiers.contains(KeyModifiers::CONTROL) => self.color_picker = None,
+            KeyCode::Up | KeyCode::Down => self.color_picker = Some(panel::cycle(sel, n, k.code == KeyCode::Up)),
+            KeyCode::Enter => {
+                self.color_picker = None;
+                // Through the normal path, so Claude Code records it with the conversation.
+                self.input = format!("/color {}", Self::color_choices()[sel]);
+                self.cursor = self.input.chars().count();
+                self.submit();
+            }
+            _ => {}
+        }
+    }
+
+    fn open_rewind(&mut self) {
+        let n = self.s().rewind_points().len();
+        if n == 0 {
+            return self.flash("nothing to rewind to");
+        }
+        self.flash = None;
+        self.rewind = Some(RewindPicker { sel: n - 1, restore: 0 });
+    }
+
+    fn rewind_key(&mut self, k: KeyEvent) {
+        let Some(mut p) = self.rewind else { return };
+        let points = self.s().rewind_points();
+        let n = points.len();
+        if n == 0 {
+            return self.rewind = None;
+        }
+        p.sel = p.sel.min(n - 1);
+        let choices = RewindPicker::choices(self.s().edits_since(points[p.sel].0));
+        match k.code {
+            KeyCode::Esc => return self.rewind = None,
+            KeyCode::Char('c') if k.modifiers.contains(KeyModifiers::CONTROL) => return self.rewind = None,
+            KeyCode::Up | KeyCode::Down => p.sel = panel::cycle(p.sel, n, k.code == KeyCode::Up),
+            KeyCode::Left => p.restore = p.restore.saturating_sub(1),
+            KeyCode::Right => p.restore += 1,
+            KeyCode::Enter => {
+                self.rewind = None;
+                let (_, conversation, code) = choices[p.restore.min(choices.len() - 1)];
+                let (launch, tx) = (self.launch_for(self.active), self.tx.clone());
+                match self.s().rewind(points[p.sel].0, conversation, code, &launch, &tx) {
+                    Ok(Some(text)) => self.set_input(text),
+                    Ok(None) => {}
+                    Err(e) => self.flash(&e),
+                }
+                return;
+            }
+            _ => return,
+        }
+        // Each message offers its own choices; keep the cursor on one that exists.
+        p.restore = p.restore.min(RewindPicker::choices(self.s().edits_since(points[p.sel].0)).len() - 1);
+        self.rewind = Some(p);
+    }
+
     fn picker_key(&mut self, k: KeyEvent) {
         let n = self.model_list().len();
         let Some(mut p) = self.model_picker else { return };
@@ -2031,7 +3120,7 @@ impl App {
             KeyCode::Char('c') if k.modifiers.contains(KeyModifiers::CONTROL) => return self.model_picker = None,
             KeyCode::Enter => return self.apply_model_picker(),
             KeyCode::Up | KeyCode::Down if n > 0 => {
-                let new = if k.code == KeyCode::Up { (p.sel + n - 1) % n } else { (p.sel + 1) % n };
+                let new = panel::cycle(p.sel, n, k.code == KeyCode::Up);
                 // Keep the same level name when the next model offers it.
                 let name = self.model_list()[p.sel].efforts.get(p.effort).cloned();
                 let keep = name.and_then(|e| self.model_list()[new].efforts.iter().position(|x| *x == e));
@@ -2086,7 +3175,13 @@ impl App {
     }
 
     fn submit(&mut self) {
+        if self.sessions[self.active].rewinding {
+            return self.flash("restoring files; send once they are back");
+        }
         self.reset_undo = true;
+        if self.vim.on {
+            self.vim.mode = vim::Mode::Insert; // sent: type the next one
+        }
         let text = std::mem::take(&mut self.input);
         self.cursor = 0;
         self.hist_pos = None;
@@ -2095,8 +3190,16 @@ impl App {
         }
         // Recalled text cannot bring a pasted picture back, so history keeps the words only.
         let words = image::strip_tokens(&text);
-        if self.history.last() != Some(&words) && !words.trim().is_empty() {
-            self.history.push(words);
+        if !words.trim().is_empty() {
+            let sid = self.sessions[self.active].session_id.clone();
+            history::record_prompt(self.cwd(), &words, sid.as_deref());
+            if self.history.last() != Some(&words) {
+                self.history.push(words);
+            }
+        }
+        // A time was picked with /schedule: this message waits for it.
+        if let Some(due) = self.sched_at.take() {
+            return self.queue_message(text, Some(due));
         }
         // `!command` runs here, as in Claude Code: no model turn, its output rides along with the next message.
         if let Some(cmd) = text.trim().strip_prefix('!').map(str::trim).filter(|c| !c.is_empty()) {
@@ -2166,11 +3269,22 @@ impl App {
             "/sessions" => self.toggle_sessions(),
             "/resume" => {
                 // An id, or the start of one; the explorer is for when you do not know it.
-                let found = history::recent(self.cwd(), 500).into_iter().find(|f| f.id.starts_with(&arg));
+                // Also a conversation's name, and from any folder, as `claude --resume` takes them.
+                let hit = |f: &history::Summary| f.id.starts_with(&arg) || f.title.eq_ignore_ascii_case(&arg);
+                let mut here: Vec<_> = history::recent(self.cwd(), 500).into_iter().filter(|f| hit(f)).map(|f| (f, None)).collect();
+                if here.is_empty() {
+                    here = history::recent_all(2000).into_iter().filter(|f| hit(f)).map(|f| { let d = Some(f.cwd.clone()).filter(|d| !d.is_empty()); (f, d) }).collect();
+                }
+                if here.len() > 1 && !here.iter().any(|(f, _)| f.id == arg) {
+                    let n = here.len();
+                    self.s().note(format!("{n} sessions match {arg:?}: type more of the id, or /resume to pick one"));
+                    return;
+                }
+                let found = here.into_iter().next();
                 match (found, history::find(&arg)) {
-                    (Some(f), _) => self.open_session(f.id, f.title, None),
+                    (Some((f, dir)), _) => self.open_session(f.id, f.title, dir),
                     (None, Some(_)) => self.open_session(arg, String::new(), None),
-                    (None, None) => self.s().note(format!("no session starting with {arg:?} here; /resume lists them")),
+                    (None, None) => self.s().note(format!("no session with an id starting {arg:?} or named so; /resume lists them")),
                 }
             }
             "/statusline" => match statusline::Mode::parse(&arg).filter(|m| !matches!(m, statusline::Mode::Command(_))) {
@@ -2199,12 +3313,56 @@ impl App {
                     self.s().note(format!("status line → {name}{extra} ({saved})"));
                 }
             },
-            "/config" => self.settings = Some(settings::Ui::default()),
+            "/config" | "/setting" => self.settings = Some(settings::Ui::new(self.cwd())),
             "/session" => self.tabcfg = Some(tabcfg::Ui::default()),
             "/optimize" => self.optimize_cmd(&arg),
             "/permissions" => self.perms = Some(permissions::Ui::new(self.cwd(), &self.sessions[self.active])),
             "/instructions" => self.instr = Some(instructions::Ui::new(self.cwd(), instructions::rules_path().map(|f| instructions::load_rules(&f)).unwrap_or_default())),
-            "/usage" => self.open_usage(),
+            "/usage" | "/cost" | "/status" => self.open_usage(),
+            "/context" => {
+                self.ctx_ui = Some(Default::default());
+                self.ask_usage();
+            }
+            "/mode" if arg.is_empty() => self.tabcfg = Some(tabcfg::Ui::default()),
+            "/memory" => {
+                let dir = if arg == "user" { config::claude_dir() } else { Some(self.cwd().into()) };
+                self.edit_file = dir.map(|d| d.join("CLAUDE.md"));
+            }
+            "/export" => self.export(&arg),
+            "/tasks" => self.lanes = Some(Default::default()),
+            "/queue" => self.queue_ui = Some(Default::default()),
+            "/schedule" => {
+                // `10m do this` schedules at once; `2h` waits for the message to be typed; anything else asks for the time.
+                let arg = arg.trim();
+                let (when, msg) = arg.split_once(char::is_whitespace).unwrap_or((arg, ""));
+                let (msg, due) = (msg.trim(), queue::parse_when(when, SystemTime::now()));
+                match due {
+                    Some(due) if !msg.is_empty() => self.queue_message(msg.to_string(), Some(due)),
+                    Some(due) => {
+                        self.sched_at = Some(due);
+                        self.flash("now type the message: enter schedules it, esc cancels");
+                    }
+                    None => {
+                        let mut ui = schedule::Ui::new(when);
+                        ui.msg = Some(msg.to_string()).filter(|m| !m.is_empty());
+                        self.sched_ui = Some(ui);
+                    }
+                }
+            }
+            "/search" => {
+                self.open_search();
+                if !arg.is_empty() && let Some(ui) = self.search.as_mut() {
+                    ui.query = arg;
+                    ui.refresh(&self.sessions[self.active].items, &self.history);
+                    let at = ui.reveal();
+                    self.s().reveal = at;
+                }
+            }
+            "/vim" | "/helix" => {
+                let mode = &cmd[1..];
+                self.apply_setting("input_mode", if self.setting_value("input_mode") == mode { "default" } else { mode });
+                self.flash(if self.vim.on { format!("{mode} keys on: esc for normal mode; /{mode} turns them off") } else { format!("{mode} keys off") });
+            }
             "/close" => self.close_tab_asking(),
             "/clear" => self.s().clear(),
             "/copy" => self.copy_last(arg.as_str()),
@@ -2225,6 +3383,10 @@ impl App {
             "/img" if arg.is_empty() => self.flash("usage: /img <path to png/jpeg/gif/webp>"),
             "/img" => self.attach(arg.trim_matches(|c| c == '\'' || c == '"')),
             "/model" | "/effort" if arg.is_empty() => self.open_model_picker(),
+            "/color" if arg.is_empty() => {
+                let cur = self.sessions[self.active].color.as_deref().unwrap_or("default");
+                self.color_picker = Self::color_choices().iter().position(|c| *c == cur);
+            }
             "/model" => {
                 let warn = self.s().recache_warning();
                 self.s().choose_model(&arg);
@@ -2246,9 +3408,18 @@ impl App {
                 self.s().status_dirty = true;
             }
             _ => {
+                if cmd == "/color" {
+                    self.s().set_color(&arg);
+                }
                 let (launch, tx) = (self.launch_for(self.active), self.tx.clone());
                 let mentioned = self.mentioned_images(&text);
+                // Claude is working (or messages already wait): this one waits its turn, managed with alt+q.
+                if !text.starts_with('/') && ((self.queue_on && self.s().busy) || self.s().queue.iter().any(|q| q.due.is_none())) {
+                    self.queue_message(text, None);
+                    return self.drain_queues();
+                }
                 self.undo.clear(); // sent: what was only kept for undo goes now
+                self.redo.clear();
                 self.drop_orphan_images(&text);
                 self.s().submit(text, &mentioned, &launch, &tx);
             }
@@ -2257,10 +3428,7 @@ impl App {
 }
 
 fn cache_path(name: &str) -> Option<std::path::PathBuf> {
-    let base = std::env::var_os("XDG_CACHE_HOME")
-        .map(std::path::PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".cache")))?;
-    Some(base.join(config::DIR).join(name))
+    config::cache_dir().map(|d| d.join(name))
 }
 
 fn commands_cache() -> Option<std::path::PathBuf> {
@@ -2384,62 +3552,6 @@ fn rss_kb(pids: &[u32]) -> Vec<(u32, u64)> {
             Some((it.next()?.parse().ok()?, it.next()?.parse().ok()?))
         })
         .collect()
-}
-
-/// One-shot measurement of each profile: same prompt, fresh unsaved session.
-fn bench(base: &Launch, prompt: &str) -> i32 {
-    let passthrough = base.args.clone();
-    println!("prompt: {prompt:?}\n");
-    println!("{:<6} {:>6} {:>9} {:>14} {:>8} {:>8} {:>9}", "prof", "tools", "init ms", "prompt tokens", "output", "cost $", "peak RSS");
-    for profile in ["full", "lean"] {
-        let mut args = profile_args(profile).unwrap();
-        args.extend(passthrough.iter().cloned());
-        args.push("--no-session-persistence".into());
-        let launch = Launch { bin: base.bin.clone(), args, env: base.env.clone(), cwd: None };
-        let (tx, rx) = mpsc::channel();
-        let t0 = Instant::now();
-        let mut b = match Backend::spawn(&launch, Resume::New, tx, |_, m| m) {
-            Ok(b) => b,
-            Err(e) => {
-                eprintln!("spawn failed: {e}");
-                return 1;
-            }
-        };
-        if b.user(json!(prompt)).is_err() {
-            return 1;
-        }
-        let (mut init_ms, mut tools, mut peak) = (0, 0, 0);
-        loop {
-            match rx.recv_timeout(Duration::from_millis(200)) {
-                Ok(Msg::Line(v)) if v["type"] == "system" && v["subtype"] == "init" && init_ms == 0 => {
-                    init_ms = t0.elapsed().as_millis();
-                    tools = v["tools"].as_array().map_or(0, Vec::len);
-                }
-                Ok(Msg::Line(v)) if v["type"] == "result" => {
-                    let u = &v["usage"];
-                    let n = |k: &str| u[k].as_u64().unwrap_or(0);
-                    let prompt_tokens = n("input_tokens") + n("cache_read_input_tokens") + n("cache_creation_input_tokens");
-                    peak = peak.max(rss_kb(&[b.pid]).first().map_or(0, |r| r.1));
-                    println!(
-                        "{profile:<6} {tools:>6} {init_ms:>9} {prompt_tokens:>14} {:>8} {:>8.4} {:>8}M",
-                        n("output_tokens"),
-                        v["total_cost_usd"].as_f64().unwrap_or(0.0),
-                        peak / 1024
-                    );
-                    break;
-                }
-                Ok(Msg::Exited { stderr_tail, .. }) => {
-                    eprintln!("{profile}: claude exited early\n{stderr_tail}");
-                    return 1;
-                }
-                Ok(_) => {}
-                Err(RecvTimeoutError::Timeout) => peak = peak.max(rss_kb(&[b.pid]).first().map_or(0, |r| r.1)),
-                Err(RecvTimeoutError::Disconnected) => return 1,
-            }
-        }
-    }
-    println!("\nprompt tokens = input + cache read + cache write for the turn (cache reads bill at ~10%).");
-    0
 }
 
 #[cfg(test)]

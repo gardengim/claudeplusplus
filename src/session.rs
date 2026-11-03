@@ -10,13 +10,29 @@ use ratatui::text::Line;
 use serde_json::{Value, json};
 use std::collections::VecDeque;
 use std::sync::mpsc::Sender;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 /// One piece of a user message that contains pasted images.
 pub enum Part {
     Text(String),
     /// Image number and, if the terminal can show it, how to draw it.
     Image(u32, Option<Shown>),
+}
+
+/// A message waiting for the running turn to end, with the pictures it mentions. With `due` it is a scheduled
+/// one: it goes when that time has come and the tab is free.
+pub struct Queued {
+    pub text: String,
+    pub atts: Vec<Attachment>,
+    pub due: Option<std::time::SystemTime>,
+}
+
+impl Session {
+    /// Stopping Claude, or losing it, pauses the messages that were waiting for the turn to end; scheduled
+    /// ones wait for their time and are not part of that.
+    fn hold_waiting(&mut self) {
+        self.queue_hold |= self.queue.iter().any(|q| q.due.is_none());
+    }
 }
 
 /// A pasted image waiting for the message it was pasted into.
@@ -30,6 +46,9 @@ pub struct Attachment {
     /// The small preview shown under its `[Image #n]` token in the input box.
     pub preview: Option<Shown>,
 }
+
+/// Result text of an agent call that is still working after its turn ended (Claude Code backgrounds agents).
+pub const BACKGROUND: &str = "running in the background…";
 
 pub enum Entry {
     User(String),
@@ -67,8 +86,11 @@ pub struct Cmd {
 
 pub struct Item {
     pub entry: Entry,
-    /// Rendered lines for a given width; dropped whenever the entry changes.
-    pub cache: Option<(u16, Vec<Line<'static>>)>,
+    /// For a given width: how many rows the entry takes, and its rendered lines. Dropped whenever the
+    /// entry changes; far from the view the lines alone are dropped (empty) and the count stays.
+    pub cache: Option<(u16, usize, Vec<Line<'static>>)>,
+    /// This tool call is shown the other way round from ctrl+o's global setting (a click or alt+o).
+    pub flipped: bool,
 }
 
 pub struct Pending {
@@ -105,14 +127,25 @@ enum Start {
 pub struct Session {
     pub id: u64,
     pub title: String,
+    /// The conversation's `/color`: tints the tab and the UI's accent while it is in front.
+    pub color: Option<String>,
     pub backend: Option<Backend>,
     /// Directory this tab works in; `None` follows the directory claude++ started in.
     pub cwd: Option<String>,
     /// Resume as a copy: the first spawn adds `--fork-session`.
     pub fork: bool,
+    /// The agent's task list (TaskCreate / TaskUpdate): (id, subject, status), shown above the input.
+    pub tasks: Vec<(String, String, String)>,
+    /// Shell commands Claude Code runs as tasks (`task_started` with `local_bash`): what ctrl+b
+    /// backgrounds and `/tasks` lists and stops.
+    pub shells: Vec<Shell>,
+    thinking_n: u64,
     /// `/find`: the item last jumped to, and the item the next frame should bring into view.
     pub found: Option<usize>,
     pub find_query: String,
+    /// Messages sent while Claude works, in the order they go; held (not sent) after an interrupt or a crash.
+    pub queue: Vec<Queued>,
+    pub queue_hold: bool,
     pub reveal: Option<usize>,
     /// Last `/usage` data: the context breakdown and plan limits Claude Code reported.
     pub usage: crate::usage::Usage,
@@ -133,6 +166,8 @@ pub struct Session {
     pub busy: bool,
     pub busy_since: Instant,
     pub activity: String,
+    /// Characters the model has streamed this turn (text, thinking, tool input): the spinner's token count.
+    pub turn_chars: usize,
     pub model: String,
     pub mode: String,
     /// Prompt size of the latest top-level API request (≈ context window in use).
@@ -143,6 +178,12 @@ pub struct Session {
     pub out_tokens: u64,
     pub rate: String,
     pub last_active: Instant,
+    /// Index into `items` where the current backend's life began: replayed history before it started nothing.
+    bg_from: usize,
+    /// A message was written to the current backend. Until then it has no conversation to resume.
+    sent: bool,
+    /// Permission mode chosen this session; a respawned backend starts in the launch default otherwise.
+    mode_pref: Option<String>,
     /// Launch profile for this tab (see `profile_args` in main.rs).
     pub profile: String,
     /// When the last API response arrived; the prompt cache's lifetime is measured from here.
@@ -218,14 +259,24 @@ pub struct Session {
     rebuild_expected: bool,
     /// Messages a compaction kept; Claude Code sends them again after the boundary, already shown.
     preserved: Vec<String>,
-    /// Output of `!command`s run since the last message; it goes to the model ahead of the next one.
-    shell_context: String,
+    /// Output of `!command`s run since the last message, oldest first; it goes to the model ahead of the next
+    /// one. The total is capped.
+    shell_context: Vec<String>,
     /// Numbers `!command` entries; never reset, so a command finishing after /clear matches nothing.
     shell_n: u64,
     /// Steps already listed under each running Agent call, so the next one goes right after them.
     children: std::collections::HashMap<String, usize>,
+    /// After a rewind: the transcript entry the next backend resumes at (`--resume-session-at`).
+    resume_at: Option<String>,
+    /// Files are being restored by a rewind: hold new messages until they are back.
+    pub rewinding: bool,
     /// Control requests to send once a backend exists (mode/model changes while suspended).
-    deferred: Vec<(String, Value)>,
+    pub(crate) deferred: Vec<(String, Value)>,
+    /// Since when a fresh backend's MCP servers may still be connecting: messages wait in `held` meanwhile, so
+    /// the first request is not sent without their tools. None once they settled (or never in tests).
+    pub(crate) mcp_wait: Option<Instant>,
+    held: Vec<Value>,
+    mcp_polled: Instant,
     live: Vec<(u64, usize)>,
     cur_msg: String,
     turn_text: bool,
@@ -235,7 +286,7 @@ pub struct Session {
 
 impl Entry {
     /// The words of this entry, for search.
-    fn text(&self) -> String {
+    pub fn text(&self) -> String {
         match self {
             Entry::User(t) | Entry::Note(t) | Entry::Error(t) => t.clone(),
             Entry::Rich(parts) => parts.iter().filter_map(|p| if let Part::Text(t) = p { Some(t.as_str()) } else { None }).collect::<Vec<_>>().join(" "),
@@ -251,11 +302,17 @@ impl Session {
         Session {
             id,
             title,
+            color: None,
             backend: None,
             cwd: None,
             fork: false,
+            tasks: vec![],
+            shells: vec![],
+            thinking_n: 0,
             found: None,
             find_query: String::new(),
+            queue: Vec::new(),
+            queue_hold: false,
             reveal: None,
             usage: Default::default(),
             lean_hinted: false,
@@ -270,6 +327,7 @@ impl Session {
             pending: VecDeque::new(),
             busy: false,
             busy_since: Instant::now(),
+            turn_chars: 0,
             activity: String::new(),
             model: String::new(),
             mode: String::new(),
@@ -280,6 +338,9 @@ impl Session {
             out_tokens: 0,
             rate: String::new(),
             last_active: Instant::now(),
+            bg_from: 0,
+            sent: false,
+            mode_pref: None,
             profile: String::new(),
             last_api: None,
             cold_noted: false,
@@ -331,10 +392,15 @@ impl Session {
             last_req_at: None,
             rebuild_expected: false,
             preserved: Vec::new(),
-            shell_context: String::new(),
+            shell_context: Vec::new(),
             shell_n: 0,
             children: Default::default(),
+            resume_at: None,
+            rewinding: false,
             deferred: Vec::new(),
+            mcp_wait: None,
+            held: Vec::new(),
+            mcp_polled: Instant::now(),
             live: Vec::new(),
             cur_msg: String::new(),
             turn_text: false,
@@ -352,20 +418,59 @@ impl Session {
     }
 
     pub fn continue_last(&mut self, cwd: &str) {
-        match history::recent(cwd, 1).first().and_then(|s| history::find(&s.id)) {
-            Some(path) => self.show_history(&path),
-            None => self.note("continuing the most recent conversation in this directory".into()),
+        // Pin the id now: `claude --continue` picks at backend launch, by which time another session in
+        // this folder may be newer than the one shown.
+        match history::recent(cwd, 1).into_iter().next() {
+            Some(s) => self.resume(s.id),
+            None => {
+                self.note("continuing the most recent conversation in this directory".into());
+                self.start = Start::Continue;
+            }
         }
-        self.start = Start::Continue;
+    }
+
+    /// `/color <name>`: a colour of the palette sets it, `default` clears it, anything else is left for Claude Code to reject.
+    pub fn set_color(&mut self, arg: &str) {
+        match arg.trim().to_lowercase().as_str() {
+            "default" => self.color = None,
+            c if crate::theme::is_color(c) => self.color = Some(c.into()),
+            _ => {}
+        }
+    }
+
+    /// The conversation's name (`/rename`, else the generated one) is the tab's title.
+    fn follow_name(&mut self, path: &std::path::Path) {
+        if let Some(n) = history::session_name(path) {
+            self.title = n.chars().take(18).collect::<String>().trim().to_string();
+        }
     }
 
     fn show_history(&mut self, path: &std::path::Path) {
+        self.follow_name(path);
+        self.color = history::session_color(path);
         let (lines, skipped) = history::tail(path);
         if skipped > 0 {
             self.note(format!("… {skipped} earlier messages not shown"));
         }
         for v in &lines {
             self.replay(v);
+        }
+        // A foreground agent's report reached Claude through the agent's own transcript; the main one keeps
+        // only a receipt. Show the report.
+        let waiting: Vec<String> = self
+            .items
+            .iter()
+            .filter_map(|i| match &i.entry {
+                Entry::Tool { id, name, result: Some((r, false)), .. } if matches!(name.as_str(), "Agent" | "Task") && r.trim_start().starts_with(AGENT_RECEIPT) => Some(id.clone()),
+                _ => None,
+            })
+            .collect();
+        if !waiting.is_empty() {
+            let reports = history::agent_reports(path);
+            for id in waiting {
+                let report = reports.get(&id).cloned().unwrap_or_else(|| "finished (its report was not saved)".into());
+                self.set_result(&id, report, false);
+            }
         }
         self.note("— resumed —".into());
         // The cache clock runs from the transcript's last write, not from the replay.
@@ -383,7 +488,7 @@ impl Session {
             let tag = |name: &str| text.split(&format!("<{name}>")).nth(1).and_then(|r| r.split(&format!("</{name}>")).next()).map(str::trim);
             if let (Some(id), Some(summary)) = (tag("tool-use-id"), tag("summary")) {
                 let running = self.items.iter().any(|i| {
-                    matches!(&i.entry, Entry::Tool { id: t, result, .. } if t == id && result.as_ref().is_none_or(|r| r.0 == "running in the background…"))
+                    matches!(&i.entry, Entry::Tool { id: t, result, .. } if t == id && result.as_ref().is_none_or(|r| r.0 == BACKGROUND))
                 });
                 if running {
                     self.set_result(id, summary.into(), tag("status") != Some("completed"));
@@ -599,8 +704,7 @@ impl Session {
         let hits: Vec<usize> = (0..self.items.len()).filter(|&i| self.items[i].entry.text().to_lowercase().contains(&self.find_query)).collect();
         let n = hits.len();
         let pos = match self.found.and_then(|f| hits.iter().position(|&h| h == f)) {
-            Some(p) if older => (p + n - 1) % n,
-            Some(p) => (p + 1) % n,
+            Some(p) => crate::panel::cycle(p, n, older),
             None => n.checked_sub(1)?,
         };
         (self.found, self.reveal) = (Some(hits[pos]), Some(hits[pos]));
@@ -615,7 +719,7 @@ impl Session {
     }
 
     pub fn push(&mut self, entry: Entry) {
-        self.items.push(Item { entry, cache: None });
+        self.items.push(Item { entry, cache: None, flipped: false });
     }
 
     /// A turn that ended (or a backend that died) mid-stream leaves no text block still "typing".
@@ -632,7 +736,7 @@ impl Session {
     }
 
     pub fn note(&mut self, s: String) {
-        self.push(Entry::Note(s));
+        self.push(Entry::Note(crate::theme::keys(&s)));
     }
 
     fn error(&mut self, s: String) {
@@ -651,14 +755,14 @@ impl Session {
             (None, Start::New) => Resume::New,
         };
         let sid = self.id;
-        let mut forked;
-        let launch = if self.fork && self.session_id.is_none() && matches!(self.start, Start::Resume(_)) {
-            forked = launch.clone();
-            forked.args.push("--fork-session".into());
-            &forked
-        } else {
-            launch
-        };
+        let mut launch = launch.clone();
+        if self.fork && self.session_id.is_none() && matches!(self.start, Start::Resume(_)) {
+            launch.args.push("--fork-session".into());
+        }
+        if let Some(at) = self.resume_at.take() {
+            launch.args.extend(["--resume-session-at".into(), at]);
+        }
+        let launch = &launch;
         let mut b = Backend::spawn(launch, resume, tx.clone(), move |pid, m| AppEvent::Backend(sid, pid, m))?;
         if let Some(m) = &self.model_pref {
             b.control("set_model", json!({"model": m}))?;
@@ -666,6 +770,10 @@ impl Session {
         if let Some(e) = &self.effort_pref {
             b.control("apply_flag_settings", json!({"settings": {"effortLevel": e}}))?;
         }
+        if let Some(m) = &self.mode_pref {
+            b.control("set_permission_mode", json!({"mode": m}))?;
+        }
+        (self.bg_from, self.sent) = (self.items.len(), false);
         if !self.rules.is_empty() {
             let pick = |allow: bool| self.rules.iter().filter(|r| r.1 == allow).map(|r| r.0.clone()).collect::<Vec<_>>();
             b.control("apply_flag_settings", json!({"settings": {"permissions": {"allow": pick(true), "deny": pick(false)}}}))?;
@@ -681,6 +789,7 @@ impl Session {
         self.deferred.clear();
         b.control("get_settings", json!({}))?;
         self.backend = Some(b);
+        self.mcp_wait = (!cfg!(test)).then(Instant::now);
         Ok(())
     }
 
@@ -742,7 +851,7 @@ impl Session {
         self.scroll = 0;
         self.last_active = Instant::now();
         // A /command must stay first to be a command; the shell output waits for a real message.
-        let ctx = if text.starts_with('/') { String::new() } else { std::mem::take(&mut self.shell_context) };
+        let ctx = if text.starts_with('/') { String::new() } else { std::mem::take(&mut self.shell_context).concat() };
         let content = match ctx {
             ctx if ctx.is_empty() => content,
             ctx => match content {
@@ -756,15 +865,24 @@ impl Session {
         };
         let res = self
             .ensure_backend(launch, tx)
-            .and_then(|_| self.backend.as_mut().unwrap().user(content));
+            .and_then(|_| match self.mcp_wait {
+                Some(_) => {
+                    self.held.push(content);
+                    self.mcp_polled = Instant::now();
+                    self.backend.as_mut().unwrap().control("mcp_status", json!({}))
+                }
+                None => self.backend.as_mut().unwrap().user(content),
+            });
         match res {
             Ok(()) => {
+                self.sent = true;
                 if !self.busy {
                     self.busy = true;
                     self.busy_since = Instant::now();
                     self.turn_text = false;
+                    self.turn_chars = 0;
                 }
-                self.activity = "waiting".into();
+                self.activity = if self.held.is_empty() { "waiting" } else { "connecting MCP servers" }.into();
                 // Claude Code reads `@image` mentions itself; this only shows them in the transcript.
                 for path in mentioned {
                     if let (Some(media), Ok(bytes)) = (path.to_str().and_then(image::media_type), std::fs::read(path)) {
@@ -779,8 +897,17 @@ impl Session {
         }
     }
 
+    /// The permission mode the backend moved to by itself (an answered prompt): shown, and kept for a respawn.
+    fn set_mode(&mut self, mode: &str) {
+        self.mode = mode.into();
+        self.mode_pref = Some(mode.into());
+    }
+
     /// Send a control request now, or once the backend is started.
     pub fn control(&mut self, subtype: &str, fields: Value) {
+        if subtype == "set_permission_mode" {
+            self.mode_pref = fields["mode"].as_str().map(String::from);
+        }
         match self.backend.as_mut() {
             Some(b) => {
                 if let Err(e) = b.control(subtype, fields) {
@@ -791,8 +918,46 @@ impl Session {
         }
     }
 
+    /// Called every tick: while a message waits for MCP servers, ask how they are doing (4× a second), and send
+    /// it anyway after 5 s, so a slow or older server never blocks the conversation.
+    pub fn poll_mcp(&mut self) {
+        let Some(since) = self.mcp_wait else { return };
+        if self.held.is_empty() {
+            return;
+        }
+        if since.elapsed() > Duration::from_secs(5) {
+            self.release_held();
+        } else if self.mcp_polled.elapsed() >= Duration::from_millis(250) {
+            self.mcp_polled = Instant::now();
+            self.control("mcp_status", json!({}));
+        }
+    }
+
+    fn release_held(&mut self) {
+        self.mcp_wait = None;
+        let held = std::mem::take(&mut self.held);
+        if !held.is_empty() && self.activity == "connecting MCP servers" {
+            self.activity = "waiting".into();
+        }
+        for content in held {
+            if let Err(e) = self.backend.as_mut().map_or(Err(std::io::Error::other("no backend")), |b| b.user(content)) {
+                self.error(format!("could not reach claude: {e}"));
+                return;
+            }
+        }
+    }
+
     pub fn interrupt(&mut self) {
+        if !self.held.is_empty() {
+            // Nothing reached Claude yet: drop what was waiting rather than stopping a turn that never began.
+            self.held.clear();
+            self.busy = false;
+            self.note("not sent".into());
+            return;
+        }
         if self.busy {
+            // Stopping Claude is not a request to start on the next message.
+            self.hold_waiting();
             self.control("interrupt", json!({}));
             self.pending.clear();
             self.activity = "interrupting".into();
@@ -805,8 +970,29 @@ impl Session {
         self.backend.is_some()
             && !self.busy
             && self.pending.is_empty()
-            && self.session_id.is_some()
+            // The init event (and the id) only arrive with a turn, so a backend nobody has sent to has nothing to resume.
+            && (self.session_id.is_some() || !self.sent)
             && !self.has_background_work()
+            // Stopping the process would kill them.
+            && !self.shells.iter().any(|s| s.status.is_none())
+    }
+
+    /// ctrl+b: move the command running in the foreground to the background, so the turn goes on.
+    pub fn background_shell(&mut self) -> &'static str {
+        let running = |s: &&mut Shell| s.status.is_none() && !s.background;
+        match self.shells.iter_mut().rev().find(running) {
+            Some(s) => {
+                s.background = true;
+                let id = s.tool_use_id.clone();
+                self.control("background_tasks", json!({"tool_use_id": id}));
+                "moved to the background: /tasks lists it"
+            }
+            // Claude Code registers a command as a task a few seconds after it starts.
+            None if self.busy && self.items.iter().rev().any(|i| matches!(&i.entry, Entry::Tool { name, result: None, .. } if name == "Bash")) => {
+                "the command has only just started: press ctrl+b again in a moment"
+            }
+            None => "no command running in the foreground",
+        }
     }
 
     pub fn suspend(&mut self) -> bool {
@@ -843,14 +1029,92 @@ impl Session {
         Ok(())
     }
 
+    /// Earlier messages this tab can rewind to: (item index, text).
+    pub fn rewind_points(&self) -> Vec<(usize, String)> {
+        let points = self.items.iter().enumerate().filter_map(|(i, it)| Some((i, user_said(&it.entry)?)));
+        points.filter(|(_, t)| !t.starts_with('/')).collect()
+    }
+
+    /// Whether Claude edited files at or after item `at`, so restoring code would change something.
+    pub fn edits_since(&self, at: usize) -> bool {
+        let edit = |n: &str| matches!(n, "Edit" | "MultiEdit" | "Write" | "NotebookEdit");
+        self.items[at.min(self.items.len())..].iter().any(|i| {
+            matches!(&i.entry, Entry::Tool { name, input, .. }
+                if edit(name) || input["_steps"].as_array().is_some_and(|a| a.iter().any(|s| edit(s["name"].as_str().unwrap_or_default()))))
+        })
+    }
+
+    /// Go back to just before the message at item `at`, as Claude Code's double-Esc does: the conversation
+    /// (the next message resumes at the transcript entry before it), the files edited since (restored from
+    /// Claude Code's checkpoints by `--rewind-files`, off the UI thread), or both. A conversation rewind
+    /// returns the message's text, to edit and send again.
+    pub fn rewind(&mut self, at: usize, conversation: bool, code: bool, launch: &Launch, tx: &Sender<AppEvent>) -> Result<Option<String>, String> {
+        let Some(text) = self.items.get(at).and_then(|i| user_said(&i.entry)) else { return Err("no such message".into()) };
+        let id = match (&self.session_id, &self.start) {
+            (Some(id), _) | (None, Start::Resume(id)) => id.clone(),
+            _ => return Err("nothing saved to rewind yet".into()),
+        };
+        let path = history::find(&id).ok_or("the saved conversation was not found")?;
+        let want = prompt_words(&text);
+        let later = self.items[at + 1..].iter().filter(|i| user_said(&i.entry).is_some_and(|t| prompt_words(&t) == want)).count();
+        // Only prompts on the branch shown: an earlier rewind leaves abandoned ones in the file.
+        let prompt = saved_prompt(history::prompts(&path), &text, later).ok_or("that message is not in the saved conversation")?;
+        let old_pid = self.backend.as_ref().map(|b| b.pid);
+        self.restart_later().map_err(String::from)?;
+        if code {
+            self.rewinding = true;
+            let uuid = prompt["uuid"].as_str().unwrap_or_default().to_string();
+            let mut cmd = std::process::Command::new(&launch.bin);
+            cmd.args(["-p", "--resume", &id, "--rewind-files", &uuid])
+                .envs(launch.env.iter().cloned())
+                .stdin(std::process::Stdio::null());
+            if let Some(dir) = &launch.cwd {
+                cmd.current_dir(dir);
+            }
+            let (tx, sid) = (tx.clone(), self.id);
+            std::thread::spawn(move || {
+                // The dropped backend gets up to a second to exit; restore files only once it has.
+                if let Some(pid) = old_pid {
+                    let gone = || unsafe { libc::kill(pid as i32, 0) } != 0;
+                    let deadline = Instant::now() + std::time::Duration::from_secs(2);
+                    while !gone() && Instant::now() < deadline {
+                        std::thread::sleep(std::time::Duration::from_millis(25));
+                    }
+                }
+                let said = match cmd.output() {
+                    Ok(o) if String::from_utf8_lossy(&o.stdout).contains("Files rewound") => Ok("files restored to before that message".into()),
+                    Ok(o) => Err(String::from_utf8_lossy(if o.stdout.is_empty() { &o.stderr } else { &o.stdout }).trim().replace("Error: ", "")),
+                    Err(e) => Err(e.to_string()),
+                };
+                let _ = tx.send(AppEvent::Rewound(sid, said));
+            });
+        }
+        if !conversation {
+            return Ok(None);
+        }
+        match prompt["parentUuid"].as_str() {
+            Some(p) => self.resume_at = Some(p.to_string()),
+            // Nothing before the first message: a new conversation (and nothing to resume at).
+            None => (self.session_id, self.start, self.resume_at) = (None, Start::New, None),
+        }
+        self.items.truncate(at);
+        self.live.retain(|(_, i)| *i < at);
+        self.children.clear();
+        self.preserved.clear();
+        self.shell_context.clear();
+        self.ctx_tokens = 0;
+        self.last_usage = Value::Null;
+        self.interrupted = false;
+        self.scroll = 0;
+        self.note("rewound: the conversation continues from here".into());
+        // Pictures do not come back with the words: drop their tokens rather than leave dangling ones.
+        Ok(Some(image::strip_tokens(&text).trim().to_string()))
+    }
+
     /// Heuristic: the session started something that outlives a turn (background shell, monitor,
     /// cron/wakeup), which a restart would silently lose.
     fn has_background_work(&self) -> bool {
-        self.items.iter().any(|i| {
-            matches!(&i.entry, Entry::Tool { name, input, .. }
-                if name == "Monitor" || name == "ScheduleWakeup" || name.starts_with("Cron")
-                    || input["run_in_background"] == true)
-        })
+        self.items.iter().skip(self.bg_from).any(|i| outlives_a_turn(&i.entry))
     }
 
     /// Start a fresh conversation in this tab.
@@ -862,6 +1126,10 @@ impl Session {
         self.pending.clear();
         self.busy = false;
         self.interrupted = false;
+        self.queue.clear();
+        self.queue_hold = false;
+        self.tasks.clear();
+        self.shells.clear();
         self.shell_context.clear();
         self.children.clear();
         self.ctx_tokens = 0;
@@ -898,8 +1166,8 @@ impl Session {
         // Claude Code changes mode without telling us; keep the label honest.
         let set_mode = p.suggestions.as_array().into_iter().flatten().find(|s| s["type"] == "setMode").and_then(|s| s["mode"].as_str());
         match (choice, set_mode) {
-            (Choice::Always, Some(m)) => self.mode = m.into(),
-            (Choice::Allow, _) if p.tool == "ExitPlanMode" => self.mode = "default".into(),
+            (Choice::Always, Some(m)) => self.set_mode(m),
+            (Choice::Allow, _) if p.tool == "ExitPlanMode" => self.set_mode("default"),
             _ => {}
         }
         let resp = match choice {
@@ -909,7 +1177,11 @@ impl Session {
                 "updatedInput": p.input,
                 "updatedPermissions": p.suggestions,
             }),
-            Choice::Deny => json!({"behavior": "deny", "message": "The user declined this action."}),
+            Choice::Deny if p.ui.feedback.trim().is_empty() => json!({"behavior": "deny", "message": "The user declined this action."}),
+            Choice::Deny => json!({
+                "behavior": "deny",
+                "message": format!("The user declined this action and said what to do instead: {}", p.ui.feedback.trim()),
+            }),
         };
         self.respond(&p.request_id, resp);
     }
@@ -940,9 +1212,20 @@ impl Session {
             Msg::Exited { status, stderr_tail } => {
                 self.backend = None;
                 self.pending.clear();
+                self.hold_waiting();
                 self.end_streams();
                 // An interrupt the backend died before answering has nothing left to silence.
                 self.interrupted = false;
+                // The conversation to resume no longer exists: forget it, or every keystroke (`warm`) would
+                // spawn `--resume <id>` again and fail the same way.
+                if stderr_tail.contains("No conversation found") {
+                    self.session_id = None;
+                    self.start = Start::New;
+                    (self.fork, self.resume_at) = (false, None);
+                    self.busy = false;
+                    self.error(format!("claude {status}\n{stderr_tail}\nnot resuming it again; your next message starts a new conversation"));
+                    return;
+                }
                 if self.busy || !stderr_tail.is_empty() {
                     self.busy = false;
                     let tail = if stderr_tail.is_empty() { String::new() } else { format!("\n{stderr_tail}") };
@@ -965,6 +1248,7 @@ impl Session {
             self.busy = true;
             self.busy_since = Instant::now();
             self.turn_text = false;
+            self.turn_chars = 0;
         }
         match kind {
             "system" => match v["subtype"].as_str().unwrap_or("") {
@@ -984,13 +1268,33 @@ impl Session {
                     }
                 }
                 // A background agent ended: its report (or why it failed) becomes the Agent call's result.
+                "task_started" if v["task_type"] == "local_bash" => {
+                    let id = v["task_id"].as_str().unwrap_or_default().to_string();
+                    if !id.is_empty() && !self.shells.iter().any(|s| s.task_id == id) {
+                        self.shells.push(Shell {
+                            task_id: id,
+                            tool_use_id: v["tool_use_id"].as_str().unwrap_or_default().into(),
+                            desc: v["description"].as_str().unwrap_or_default().into(),
+                            background: v["is_backgrounded"] == true,
+                            status: None,
+                            summary: String::new(),
+                        });
+                    }
+                }
+                // A shell's end, not an agent's report.
+                "task_notification" if self.shells.iter().any(|s| v["task_id"].as_str() == Some(s.task_id.as_str())) => {
+                    if let Some(sh) = self.shells.iter_mut().find(|s| v["task_id"].as_str() == Some(s.task_id.as_str())) {
+                        sh.status = Some(v["status"].as_str().unwrap_or("done").into());
+                        sh.summary = v["summary"].as_str().unwrap_or_default().into();
+                    }
+                }
                 "task_notification" => {
                     let ok = v["status"] == "completed";
                     let id = v["tool_use_id"].as_str().unwrap_or_default();
                     let report = v["handback_report"]["text"].as_str();
                     // Without a report, the summary only replaces the "running" placeholder (or nothing).
                     let placeholder = self.items.iter().any(|i| {
-                        matches!(&i.entry, Entry::Tool { id: t, result, .. } if t == id && result.as_ref().is_none_or(|r| r.0 == "running in the background…"))
+                        matches!(&i.entry, Entry::Tool { id: t, result, .. } if t == id && result.as_ref().is_none_or(|r| r.0 == BACKGROUND))
                     });
                     if report.is_some() || !ok || placeholder {
                         let text = report.or(v["summary"].as_str()).unwrap_or_default();
@@ -1047,6 +1351,13 @@ impl Session {
                                 None => {}
                             }
                         }
+                        // Kept folded, like a finished tool call: ctrl+o or a click reads it.
+                        "thinking" if top_level && block["thinking"].as_str().is_some_and(|t| !t.trim().is_empty()) => {
+                            self.thinking_n += 1;
+                            let id = format!("thinking-{}", self.thinking_n);
+                            let text = block["thinking"].as_str().unwrap_or_default().to_string();
+                            self.push(Entry::Tool { id, name: "Thinking".into(), input: json!({}), result: Some((text, false)), nested: false });
+                        }
                         // The subagent's report: show it as the Agent call's result, not as a step.
                         "tool_use" if !top_level && block["name"] == "SubagentHandback" => {
                             let report = block["input"]["message"].as_str().unwrap_or_default().trim().to_string();
@@ -1068,7 +1379,7 @@ impl Session {
                                     let n = self.children.entry(parent.to_string()).or_default();
                                     let pos = (at + 1 + *n).min(self.items.len());
                                     *n += 1;
-                                    self.items.insert(pos, Item { entry, cache: None });
+                                    self.items.insert(pos, Item { entry, cache: None, flipped: false });
                                     // Text still streaming further down moved one place.
                                     self.live.iter_mut().filter(|(_, i)| *i >= pos).for_each(|(_, i)| *i += 1);
                                 }
@@ -1120,7 +1431,7 @@ impl Session {
                                         continue; // a subagent's report already arrived; this is only its receipt
                                     }
                                     let text = if text.starts_with("Async agent launched") {
-                                        "running in the background…".to_string()
+                                        BACKGROUND.to_string()
                                     } else {
                                         text
                                     };
@@ -1129,10 +1440,19 @@ impl Session {
                                         self.lines_added += a;
                                         self.lines_removed += r;
                                     }
+                                    // Edit/Write report the change as hunks with line numbers: show those, as Claude Code does.
+                                    let extra = if v["tool_use_result"].is_object() { &v["tool_use_result"] } else { &v["toolUseResult"] };
+                                    if !err && extra["structuredPatch"].as_array().is_some_and(|p| !p.is_empty()) && input.is_object() {
+                                        input["_patch"] = extra["structuredPatch"].clone();
+                                    }
+                                    if !err {
+                                        track_task(&mut self.tasks, name, input, &text);
+                                    }
                                     *result = Some((text, err));
                                 }
                                 item.cache = None;
                             }
+                            self.fold_steps(id);
                             for b in block["content"].as_array().into_iter().flatten().filter(|b| b["type"] == "image") {
                                 self.push_image(b);
                             }
@@ -1162,6 +1482,9 @@ impl Session {
                 let window = usage.and_then(|m| m.get(&self.model).or_else(|| m.values().next())).and_then(|m| m["contextWindow"].as_u64());
                 self.ctx_window = window.unwrap_or(self.ctx_window);
                 self.status_dirty = true;
+                if let Some(path) = self.session_id.as_deref().and_then(history::find) {
+                    self.follow_name(&path);
+                }
                 let u = &v["usage"];
                 let n = |k: &str| u[k].as_u64().unwrap_or(0);
                 self.cache_read += n("cache_read_input_tokens");
@@ -1187,6 +1510,9 @@ impl Session {
                 } else if !self.turn_text && !text.trim().is_empty() {
                     // Local slash commands answer only through `result`.
                     self.note(text.into());
+                } else if self.turn_chars > 0 {
+                    // How long the model worked, as Claude Code says after each turn.
+                    self.note(format!("✻ Worked for {}", duration(self.busy_since.elapsed())));
                 }
             }
             "control_request" => {
@@ -1222,6 +1548,12 @@ impl Session {
                 // Older Claude Code versions lack some of the requests we probe with; that is not news.
                 if r["subtype"] == "error" && !err.starts_with("Unsupported control request") {
                     self.note(format!("backend refused a request: {err}"));
+                }
+                if let Some(list) = r["response"]["mcpServers"].as_array()
+                    && self.mcp_wait.is_some()
+                    && !list.iter().any(|m| m["status"] == "pending")
+                {
+                    self.release_held();
                 }
                 if let Some(c) = crate::usage::parse_context(&r["response"]) {
                     self.usage.ctx = Some(c);
@@ -1328,6 +1660,7 @@ impl Session {
             }
             "content_block_delta" => {
                 let d = &e["delta"];
+                self.turn_chars += ["text", "thinking", "partial_json"].iter().find_map(|k| d[*k].as_str()).map_or(0, str::len);
                 if d["type"] != "text_delta" {
                     return;
                 }
@@ -1341,6 +1674,19 @@ impl Session {
             }
             _ => {}
         }
+    }
+}
+
+/// How a foreground agent's tool result starts when its report went to Claude separately.
+const AGENT_RECEIPT: &str = "This agent's report was delivered to you";
+
+/// `7s`, `2m 5s`, `1h 3m`.
+pub fn duration(d: std::time::Duration) -> String {
+    let s = d.as_secs();
+    match s {
+        0..60 => format!("{s}s"),
+        60..3600 => format!("{}m {}s", s / 60, s % 60),
+        _ => format!("{}h {}m", s / 3600, s % 3600 / 60),
     }
 }
 
@@ -1371,6 +1717,8 @@ fn line_delta(tool: &str, input: &Value) -> (u64, u64) {
     }
 }
 
+const SHELL_CAP: usize = 30_000;
+
 impl Session {
     /// A `!command` the user ran in this tab: show it like a Bash call, and keep its output for the model,
     /// in the form Claude Code itself uses, so the next message can refer to it.
@@ -1382,16 +1730,29 @@ impl Session {
     }
 
     pub fn shell_done(&mut self, id: &str, cmd: &str, out: &str, err: &str, ok: bool) {
-        // Claude Code keeps 30k characters of a command's output; so do we.
-        let cap = |s: &str| s.chars().take(30_000).collect::<String>();
-        let (out, err) = (cap(out), cap(err));
+        // Claude Code keeps 30k characters of a command's output; so do we, stdout and stderr together.
+        // stderr keeps up to a quarter of the budget: the error text of a failing command is what the model needs.
+        let err_room = err.chars().count().min(SHELL_CAP / 4);
+        let out: String = out.chars().take(SHELL_CAP - err_room).collect();
+        let err: String = err.chars().take(SHELL_CAP - out.chars().count()).collect();
         let shown = [out.trim_end(), err.trim_end()].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join("\n");
         if !self.items.iter().any(|i| matches!(&i.entry, Entry::Tool { id: t, result: None, .. } if t == id)) {
             return; // the conversation it belonged to was cleared
         }
         self.set_result(id, shown, !ok);
-        self.shell_context +=
-            &format!("<bash-input>{cmd}</bash-input>\n<bash-stdout>{out}</bash-stdout>\n<bash-stderr>{err}</bash-stderr>\n\n");
+        self.shell_context.push(format!("<bash-input>{cmd}</bash-input>\n<bash-stdout>{out}</bash-stdout>\n<bash-stderr>{err}</bash-stderr>\n\n"));
+        // Several commands before one message must not add up past that either: the oldest go first.
+        while self.shell_context.len() > 1 && self.shell_context.iter().map(|b| b.chars().count()).sum::<usize>() > SHELL_CAP {
+            self.shell_context.remove(0);
+        }
+    }
+
+    /// Fold or unfold one tool call; `None` is the latest one. Returns whether there was a call to flip.
+    pub fn flip_call(&mut self, at: Option<usize>) -> bool {
+        let i = at.or_else(|| self.items.iter().rposition(|i| matches!(i.entry, Entry::Tool { nested: false, .. })));
+        let Some(item) = i.and_then(|i| self.items.get_mut(i)) else { return false };
+        (item.flipped, item.cache) = (!item.flipped, None);
+        true
     }
 
     fn set_result(&mut self, tool_id: &str, text: String, err: bool) {
@@ -1401,7 +1762,79 @@ impl Session {
             }
             item.cache = None;
         }
+        self.fold_steps(tool_id);
     }
+
+    /// A finished agent's steps move into its Agent entry (`input._steps`), as Claude Code folds them:
+    /// the report then reads right under the call, and ctrl+o still lists the steps.
+    fn fold_steps(&mut self, parent: &str) {
+        let Some(at) = self.items.iter().position(|i| {
+            matches!(&i.entry, Entry::Tool { id, result: Some((r, _)), .. } if id == parent && r != BACKGROUND)
+        }) else {
+            return;
+        };
+        let n = self.children.remove(parent).unwrap_or(0).min(self.items.len() - at - 1);
+        if n == 0 {
+            return;
+        }
+        let steps: Vec<Value> = self
+            .items
+            .drain(at + 1..at + 1 + n)
+            .filter_map(|i| match i.entry {
+                Entry::Tool { name, input, .. } => Some(json!({"name": name, "input": input})),
+                _ => None,
+            })
+            .collect();
+        self.live.iter_mut().filter(|(_, i)| *i > at).for_each(|(_, i)| *i -= n);
+        let item = &mut self.items[at];
+        if let Entry::Tool { input, .. } = &mut item.entry
+            && input.is_object()
+        {
+            let mut all = input["_steps"].as_array().cloned().unwrap_or_default();
+            all.extend(steps);
+            input["_steps"] = Value::Array(all);
+        }
+        item.cache = None;
+    }
+}
+
+/// A tool call that keeps working after its turn ends, which a restart would lose.
+fn outlives_a_turn(entry: &Entry) -> bool {
+    let Entry::Tool { name, input, result, .. } = entry else { return false };
+    let long_running_tool = name == "Monitor" || name == "ScheduleWakeup" || name.starts_with("Cron");
+    // Claude Code backgrounds agents by default, without the flag; the agent's report replaces this text.
+    let agent_still_working = matches!(name.as_str(), "Agent" | "Task") && result.as_ref().is_some_and(|r| r.0 == BACKGROUND);
+    long_running_tool || input["run_in_background"] == true || agent_still_working
+}
+
+/// The words of a message you sent (pictures as their tokens), or None for any other entry.
+fn user_said(e: &Entry) -> Option<String> {
+    match e {
+        Entry::User(t) => Some(t.clone()),
+        Entry::Rich(parts) => Some(
+            parts
+                .iter()
+                .map(|p| match p {
+                    Part::Text(t) => t.clone(),
+                    Part::Image(n, _) => image::token(*n),
+                })
+                .collect::<Vec<_>>()
+                .join(" "),
+        ),
+        _ => None,
+    }
+}
+
+/// A prompt's words, as shown and as saved alike (they differ in image tokens and spacing).
+fn prompt_words(t: &str) -> String {
+    image::strip_tokens(t).replace("[image]", "").split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// The transcript entry of the prompt shown as `text`; the same words sent more than once are told
+/// apart by `later`, how many of them come after it.
+fn saved_prompt(prompts: Vec<Value>, text: &str, later: usize) -> Option<Value> {
+    let want = prompt_words(text);
+    prompts.into_iter().filter(|v| history::user_text(v).is_some_and(|t| prompt_words(&t) == want)).nth_back(later)
 }
 
 fn result_text(c: &Value) -> String {
@@ -1495,7 +1928,8 @@ mod tests {
         assert!(!s.busy);
         assert!(s.pending.is_empty());
         assert_eq!(s.cost, 0.5);
-        assert_eq!(s.items.len(), 2, "result text already shown is not duplicated");
+        assert_eq!(s.items.len(), 3, "result text already shown is not duplicated");
+        assert!(matches!(&s.items[2].entry, Entry::Note(n) if n.starts_with("✻ Worked for ")), "how long the turn took");
     }
 
     #[test]
@@ -1510,6 +1944,22 @@ mod tests {
         );
         assert_eq!(s.items.len(), 1);
         assert!(matches!(&s.items[0].entry, Entry::Error(_)));
+    }
+
+    #[test]
+    fn a_rewind_finds_the_saved_prompt_even_when_the_same_words_were_sent_twice() {
+        let saved = [
+            r#"{"type":"user","uuid":"u1","parentUuid":"h","message":{"content":"run the tests"}}"#,
+            r#"{"type":"user","uuid":"r1","parentUuid":"a1","message":{"content":[{"type":"tool_result","tool_use_id":"t","content":"ok"}]}}"#,
+            r#"{"type":"user","uuid":"u2","parentUuid":"a2","message":{"content":"<bash-input>ls</bash-input><bash-stdout>x</bash-stdout><bash-stderr></bash-stderr>\n\nrun  the tests"}}"#,
+            r#"{"type":"user","uuid":"u3","parentUuid":"a3","message":{"content":[{"type":"text","text":"what is"},{"type":"image","source":{}},{"type":"text","text":"this"}]}}"#,
+        ]
+        .map(|l| serde_json::from_str::<Value>(l).unwrap());
+        let saved_prompt = |t: &str, later| saved_prompt(saved.to_vec(), t, later);
+        assert_eq!(saved_prompt("run the tests", 0).unwrap()["uuid"], "u2", "the last one, typed after a !command");
+        assert_eq!(saved_prompt("run the tests", 1).unwrap()["parentUuid"], "h");
+        assert_eq!(saved_prompt("what is [Image #1] this", 0).unwrap()["uuid"], "u3");
+        assert!(saved_prompt("never said", 0).is_none());
     }
 
     #[test]
@@ -1582,6 +2032,36 @@ mod tests {
     }
 
     #[test]
+    fn only_what_the_current_backend_started_counts_as_background_work() {
+        let mut s = Session::new(1, String::new());
+        s.push(Entry::User("old question".into()));
+        s.push(Entry::Tool { id: "b".into(), name: "Bash".into(), input: json!({"command": "sleep 99", "run_in_background": true}), result: None, nested: false });
+        assert!(s.has_background_work(), "before any spawn everything on screen counts");
+        s.bg_from = s.items.len(); // a backend spawns after history was replayed
+        assert!(!s.has_background_work(), "replayed background work died with the old backend");
+        s.push(Entry::Tool { id: "c".into(), name: "Bash".into(), input: json!({"run_in_background": true}), result: None, nested: false });
+        assert!(s.has_background_work());
+    }
+
+    #[test]
+    fn a_permission_mode_chosen_is_remembered_for_the_next_backend() {
+        let mut s = Session::new(1, String::new());
+        s.control("set_permission_mode", json!({"mode": "plan"}));
+        assert_eq!(s.mode_pref.as_deref(), Some("plan"));
+    }
+
+    #[test]
+    fn an_agent_backgrounded_by_default_blocks_suspension_until_its_report_arrives() {
+        let mut s = Session::new(1, String::new());
+        let agent = |r: &str| Entry::Tool { id: "g".into(), name: "Agent".into(), input: json!({"prompt": "p"}), result: Some((r.into(), false)), nested: false };
+        s.push(agent(BACKGROUND));
+        assert!(s.has_background_work());
+        s.items.clear();
+        s.push(agent("the report"));
+        assert!(!s.has_background_work());
+    }
+
+    #[test]
     fn interrupt_error_result_is_suppressed() {
         let mut s = Session::new(1, String::new());
         s.busy = true;
@@ -1589,6 +2069,39 @@ mod tests {
         feed(&mut s, &[r#"{"type":"result","subtype":"error_during_execution","is_error":true,"errors":["[ede_diagnostic] x"]}"#]);
         assert!(s.items.is_empty());
         assert!(!s.busy);
+    }
+
+    #[test]
+    fn a_missing_conversation_is_not_resumed_again() {
+        let dir = std::env::temp_dir().join(format!("claudeplusplus-gone-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = dir.join("claude");
+        std::fs::write(&script, format!("#!/bin/sh\necho \"$@\" >> {}/args\necho 'No conversation found with session ID: x' >&2\n", dir.display())).unwrap();
+        std::process::Command::new("chmod").arg("+x").arg(&script).status().unwrap();
+        let launch = crate::backend::Launch { bin: script.to_string_lossy().into(), ..Default::default() };
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut s = Session::new(1, String::new());
+        s.session_id = Some("x".into());
+        s.warm(&launch, &tx);
+        loop {
+            match rx.recv_timeout(std::time::Duration::from_secs(5)).expect("backend exited") {
+                AppEvent::Backend(_, pid, m @ Msg::Exited { .. }) => break s.on_backend(pid, m),
+                AppEvent::Backend(_, pid, m) => s.on_backend(pid, m),
+                _ => {}
+            }
+        }
+        assert!(s.session_id.is_none() && matches!(s.start, Start::New));
+        assert!(s.items.iter().any(|i| matches!(&i.entry, Entry::Error(e) if e.contains("new conversation"))));
+        s.warm(&launch, &tx);
+        drop(s);
+        let args = (0..60)
+            .find_map(|_| {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+                std::fs::read_to_string(dir.join("args")).ok().filter(|t| t.lines().count() >= 2)
+            })
+            .expect("respawned");
+        assert!(args.lines().next().unwrap().contains("--resume x") && !args.lines().nth(1).unwrap().contains("--resume"));
     }
 
     #[test]
@@ -1894,6 +2407,17 @@ mod tests {
             })
             .collect();
         assert_eq!(ids, ["a", "a1", "b", "b1", "b2", "text:hi"]);
+        // Agent a reports: its step folds into it, and text still streaming below keeps flowing.
+        feed(
+            &mut s,
+            &[
+                r#"{"type":"system","subtype":"task_notification","tool_use_id":"a","status":"completed","handback_report":{"text":"done"}}"#,
+                r#"{"type":"stream_event","parent_tool_use_id":null,"event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"!"}}}"#,
+            ],
+        );
+        assert_eq!(s.items.len(), 5);
+        assert!(matches!(&s.items[0].entry, Entry::Tool { input, result: Some((r, false)), .. } if r == "done" && input["_steps"][0]["name"] == "Bash"));
+        assert!(matches!(&s.items[4].entry, Entry::Assistant { text, .. } if text == "hi!"));
     }
 
     #[test]
@@ -1906,7 +2430,26 @@ mod tests {
         s.shell_done(&old, "cat .env", "SECRET=1", "", true);
         assert!(matches!(&s.items[0].entry, Entry::Tool { result: None, .. }), "the old result lands nowhere");
         s.shell_done(&new, "ls", "a.txt", "", true);
-        assert!(s.shell_context.contains("a.txt") && !s.shell_context.contains("SECRET"));
+        let ctx = s.shell_context.concat();
+        assert!(ctx.contains("a.txt") && !ctx.contains("SECRET"));
+    }
+
+    #[test]
+    fn shell_output_is_capped_in_total_per_command_and_across_commands() {
+        let mut s = Session::new(1, String::new());
+        let run = |s: &mut Session, cmd: &str, out: &str, err: &str| {
+            let id = s.start_shell(cmd);
+            s.shell_done(&id, cmd, out, err, true);
+        };
+        run(&mut s, "big", &"o".repeat(50_000), &"e".repeat(50_000));
+        let ctx = s.shell_context.concat();
+        assert!(ctx.chars().count() <= SHELL_CAP + 200, "output of 100k chars was cut to the cap plus tags: {}", ctx.chars().count());
+        assert!(ctx.matches("ooooo").count() > 0 && ctx.matches("eeeee").count() > 0, "a chatty stdout must not starve the error text");
+        for i in 0..5 {
+            run(&mut s, &format!("c{i}"), &"x".repeat(20_000), "");
+        }
+        let total: usize = s.shell_context.iter().map(|b| b.chars().count()).sum();
+        assert!(total <= SHELL_CAP + 200 && s.shell_context.last().unwrap().contains("c4"), "oldest dropped, newest kept: {total}");
     }
 
     #[test]
@@ -1920,6 +2463,7 @@ mod tests {
         assert_eq!(s.pending[0].suggestions[0]["mode"], "acceptEdits", "the same choice Claude Code offers");
         s.answer(Choice::Allow);
         assert_eq!(s.mode, "default", "plan mode is over once the plan is approved");
+        assert_eq!(s.mode_pref.as_deref(), Some("default"), "a respawned backend must not go back to plan");
         s.mode = "plan".into();
         feed(&mut s, &[&ask("ExitPlanMode", "[]")]);
         s.answer(Choice::Always);
@@ -1944,7 +2488,7 @@ mod tests {
                 r#"{"type":"result","subtype":"success"}"#,
             ],
         );
-        assert_eq!(report(&s, 0).0, "running in the background…");
+        assert_eq!(report(&s, 0).0, BACKGROUND);
         assert!(!s.busy, "a subagent working after the turn does not make the tab busy");
         feed(
             &mut s,
@@ -1977,4 +2521,63 @@ mod tests {
         );
         assert_eq!(report(&s, 2), ("Agent finished".into(), false));
     }
+}
+
+/// Follow the task list: `TaskCreate` answers "Task #3 created successfully: <subject>", `TaskUpdate`
+/// takes `{taskId, status?, subject?}` (status `deleted` removes it).
+fn track_task(tasks: &mut Vec<(String, String, String)>, name: &str, input: &Value, result: &str) {
+    match name {
+        "TaskCreate" => {
+            let Some(rest) = result.strip_prefix("Task #") else { return };
+            let id: String = rest.chars().take_while(char::is_ascii_digit).collect();
+            let subject = input["subject"].as_str().map(String::from).or_else(|| rest.split_once(": ").map(|(_, s)| s.to_string()));
+            if let (false, Some(subject)) = (id.is_empty(), subject) {
+                tasks.retain(|t| t.0 != id);
+                tasks.push((id, subject, "pending".into()));
+            }
+        }
+        "TaskUpdate" => {
+            let id = match &input["taskId"] {
+                Value::String(s) => s.trim_start_matches('#').to_string(),
+                v => v.to_string(),
+            };
+            if input["status"] == "deleted" {
+                tasks.retain(|t| t.0 != id);
+            } else if let Some(t) = tasks.iter_mut().find(|t| t.0 == id) {
+                if let Some(st) = input["status"].as_str() {
+                    t.2 = st.into();
+                }
+                if let Some(sub) = input["subject"].as_str() {
+                    t.1 = sub.into();
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+#[cfg(test)]
+mod task_tests {
+    use serde_json::json;
+    #[test]
+    fn task_list_follows_create_update_and_delete() {
+        let mut t = vec![];
+        super::track_task(&mut t, "TaskCreate", &json!({"subject": "a"}), "Task #1 created successfully: a");
+        super::track_task(&mut t, "TaskCreate", &json!({}), "Task #2 created successfully: b c");
+        super::track_task(&mut t, "TaskUpdate", &json!({"taskId": "1", "status": "in_progress"}), "Updated task #1 status");
+        super::track_task(&mut t, "TaskUpdate", &json!({"taskId": 2, "status": "deleted"}), "ok");
+        assert_eq!(t, [("1".into(), "a".into(), "in_progress".into())] as [(String, String, String); 1]);
+    }
+}
+
+/// A shell command Claude Code tracks as a task.
+#[derive(Clone, Debug)]
+pub struct Shell {
+    pub task_id: String,
+    pub tool_use_id: String,
+    pub desc: String,
+    pub background: bool,
+    /// `None` while it runs, then Claude Code's word for how it ended (completed, failed, stopped...).
+    pub status: Option<String>,
+    pub summary: String,
 }

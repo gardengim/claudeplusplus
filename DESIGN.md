@@ -42,6 +42,10 @@ Key hints are always one line in one shape, built by `theme::hints`: **`key` act
 | `dim` | Descriptions, hints, separators, work still in progress. |
 | `selected` | The row under the cursor (reverse video). |
 | `code` | Code, commands, file contents. |
+| `working` (Claude orange) | The agent at work: the `✻ Thinking… (12s · ↓ 340 tokens · esc to interrupt)` line above the input, and the welcome frame. |
+| `user_band` | The band behind your messages in the transcript (`❯` text, as in Claude Code). |
+| `added_line` / `removed_line` | Diff bands: the changed lines of an Edit/Write, numbered from Claude Code's own hunks, with context lines plain. |
+| `syn_keyword` / `syn_string` / `syn_number` / `syn_comment` | Fenced code with a language. Function names stay plain: yellow is not for decoration. |
 | `❯` cursor · `●` value in effect · `☑ ☐ ▣ ◑` shown / hidden / some / shortened | Same marks in every list; choices are `●value  value`, not words in brackets. |
 | `✓ ? ✗` allow / ask / deny · `⌂ ▤ ◇` user / project / local file | Rules and where they live. |
 | `◆ ◐ ✓ ✗ ·` needs you / working / done / failed / stopped | One state glyph in the tab bar, dock and session list (`jobs::State::glyph`). |
@@ -53,6 +57,19 @@ Colour is for meaning, never decoration: keys in hints and frame titles are cyan
 Glyphs are single-column and non-emoji (`theme::tests::every_glyph_is_one_column_wide`), so columns never shift. A glyph carries state; a word appears only where the glyph alone would be ambiguous.
 
 The colour of a frame tells you who is waiting on whom: yellow, the agent waits on you; cyan, you opened it.
+
+Colours work in either mode, and keep working when the terminal switches between them:
+- Named ANSI colours (red, green, yellow, grey...) come from the terminal's own palette, which each theme tunes for its
+  background, so they need nothing.
+- Anything that sets a background (your message band, diff lines) sets its text colour too. Left to the terminal's
+  default, text on a band disappears as soon as the terminal switches modes under it (black on dark grey).
+- Fixed 256-colour shades (the `/color` accents, syntax colours, some tool icons) have a darker variant for a light
+  background, picked when drawn.
+- Which mode: `/config` → Colors. `auto` asks the terminal for its background (OSC 11, with a DA1 query behind it so
+  the read always ends) at start and again every few seconds while you are not typing, and restyles everything when it
+  changes; `dark` / `light` fix it. The terminal's own change notification (mode 2031) is not used: crossterm 0.29
+  cannot parse it and would hold the keys typed after it. No answer means dark, and is not asked again.
+- Diff bands use quiet 24-bit tints where `COLORTERM` says the terminal takes them.
 
 ## One panel, drawn in one place
 
@@ -70,9 +87,10 @@ does this is `src/panel.rs` and nothing else draws a panel. A surface only build
 | permissions | `permissions.rs` | tabs Allow/Ask/Deny in the head; the file a rule comes from is dim; delete asks in red | the panel's |
 | instructions | `instructions.rs` | checkbox tree: `[x]` in, `[-]` partly, `[ ]` hidden (dim) | the panel's |
 | usage | `usage.rs` | the panel's; plan bars turn yellow at 70%, red at 90% | the panel's |
+| context (`/context`) | `context.rs` | stacked bars in the head (the window, then how the used part divides); one row per category in its own colour; on a wide screen a grid of the window and the row's detail beside the list. The gauge turns yellow at 70%, red at 85% | the panel's; enter acts on skills and memory |
 | session config | `tabcfg.rs` | the panel's; green `allow`, red `deny` | the panel's |
 | session list | `explorer.rs` | the one full-screen surface: no frame, title on the first row, hints on the last (`panel::render_full`); preview beside the list. Always available; → or Esc leaves | its own screen |
-| session dock | `explorer.rs` (`dock_lines`) | cyan border when focused, dim otherwise; yellow `!` = needs you | a 30-column strip, not a panel: opt-in, ← / ctrl+r |
+| session dock | `explorer.rs` (`dock_lines`) | cyan border when focused, dim otherwise; yellow `!` = needs you | a 30-column strip, not a panel: opt-in, ← / `/sessions` |
 | `/command`, `@file` suggestions | `ui::suggest_view` | cyan | the input's (it keeps the cursor) |
 
 Shared pieces keep them alike: `panel::row` (cursor marker + highlight), `theme::hints` (footer shape; middle
@@ -96,7 +114,6 @@ Adding a surface means writing a function that returns a `View`. Adding a config
 
 ## Known gaps (honest list, not promises)
 
-- No light-theme variant; roles are chosen for dark terminals.
 - Config options are choice lists only; free-form values (a number, a path) will need a text-entry row.
 - The transcript's tool/diff rendering predates the theme and is only partly cleaned up.
 - No mouse. Intentional (it would break text selection), but it is a choice.
