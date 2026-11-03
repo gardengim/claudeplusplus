@@ -47,7 +47,9 @@ Where it comes from, and what it costs:
   one verified.
 - **Not better:** keystroke echo (`claude` 0.3 ms, claude++ 1.6–6.7 ms: both imperceptible, claude++ slower) and turn
   time, which the API decides (0.9–4.7 s across all runs here; claude++ in `full` ran about a second slower on the
-  medians, 3.9 s vs 2.9 s, and I cannot tell noise from a real startup cost at this load). A tab you are using costs what Claude Code costs, because its backend *is* Claude Code.
+  medians, 3.9 s vs 2.9 s). The likely cause is by design: a message waits (at most 5 s) for MCP servers that are
+  still connecting, so its first turn has their tools; the 8 servers on the bench machine settle 1.5 s after the
+  process starts. The bench pastes its prompt at once and pays all of it; typing a message overlaps it. A tab you are using costs what Claude Code costs, because its backend *is* Claude Code.
 
 ## Architecture
 
