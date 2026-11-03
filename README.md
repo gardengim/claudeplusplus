@@ -22,16 +22,16 @@ Medians of 3 interleaved runs, each in a clean environment. Reproduce with `pyth
 |---|---|---|
 | Open, nothing sent yet | 268 MB | **4 MB** |
 | After one turn | 295 MB | **252 MB** |
-| Three conversations left open, idle | 824 MB (3 windows, 15 processes) | **238 MB** (3 tabs, 6 processes) |
+| Three conversations left open, idle | 787 MB (3 windows, 15 processes) | **225 MB** (3 tabs, 6 processes) |
 | Context tokens per request, same settings | 45.9k | **32.5k** |
 | First paint | 0.28 s | **0.013 s** |
 | `lean` (same flags for `claude`): tokens per request, memory after a turn | 9.8k, 175 MB | **8.7k, 114 MB** |
 
 Where it comes from, and what it costs:
 - **4 MB:** a tab starts its `claude` only when you begin typing a message, so its startup overlaps with typing.
-- **238 vs 824 MB:** a background tab idle past `--idle-suspend` (120 s; 20 s in the bench) stops its `claude`, and
+- **225 vs 787 MB:** a background tab idle past `--idle-suspend` (120 s; 20 s in the bench) stops its `claude`, and
   the next message resumes the conversation. In the bench the resumed tab still knew its earlier answer, and its
-  first request read 30.2k tokens from the prompt cache and wrote 717.
+  first request read 32.5k tokens from the prompt cache and wrote 117 (re-run on Claude Code 2.1.317, 2026-11-03).
 - **32.5k vs 45.9k tokens:** claude++ runs Claude Code headless (`claude -p`), and on this version headless mode sends
   about 13.5k tokens of built-in tool definitions only when the model asks for one (ToolSearch), where interactive
   `claude` sends them with every request. This is Claude Code's behaviour, not a trick of claude++, and a version
@@ -397,7 +397,7 @@ Release binary: ~1.9 MB.
 |---|---|---|
 | Lazy backend | `claude` starts on a tab's first message | open with nothing sent: **4 MB** footprint vs **268 MB** for `claude` at its prompt (see the table at the top) |
 | Warm on first keystroke | the backend starts when you begin typing (not at launch, not for `/commands`), so its ~0.6 s startup overlaps with composing the message; `initialize` makes no API call | memory stays 4 MB until you type; no startup wait after Enter (verified: no API activity before the first message). A message sent before the MCP servers finish connecting waits for them (at most 5 s, "connecting MCP servers"), so the first request is not sent without their tools: an instant first message measured 32.5k context tokens, the same as a later one (31.0k, MCP tools missing, before this) |
-| Idle suspension | background tabs idle > `--idle-suspend` (120 s; a restart takes ~0.5 s) have their backend stopped; the next message respawns it with `--resume <id>` | three idle conversations: **238 MB** vs 824 MB in three `claude` windows; context kept; the first request after resume read 30.2k tokens from cache and wrote 717 (98%) |
+| Idle suspension | background tabs idle > `--idle-suspend` (120 s; a restart takes ~0.5 s) have their backend stopped; the next message respawns it with `--resume <id>` | three idle conversations: **225 MB** vs 787 MB in three `claude` windows; context kept; the first request after resume read 32.5k tokens from cache and wrote 117 (99.6%) |
 | Memory budget | `--mem-budget <MB>`: when all backends together exceed it (measured as macOS `footprint` incl. child processes), stop the least-recently-used tab that is safe to stop; never the focused, busy, prompting tab, or one that started background work (heuristic: `run_in_background`, Monitor, Cron/ScheduleWakeup) | e2e with 2 real tabs and a 200 MB budget: LRU tab stopped (`1z`), focused tab kept, one `claude` left; warns (max once a minute) if only protected tabs remain |
 | `--profile lean` | core tools + no MCP + `--setting-sources project,local` (skips user-level CLAUDE.md, skills, hooks) | a fresh request: **30.4k → 9.3k** tokens; three small coding tasks cost **$0.0061–0.0075 → $0.0017–0.0019** each, all passed; the backend's process tree **243 → 132 MB** (`bench/run.py`, 2026-10-28, below). Large user-level instruction files (`~/.claude/CLAUDE.md`) count on top and are skipped too. Plus `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` (telemetry, autoupdate, `/ultrareview`, `/advisor`, `/import`, design): footprint **134 → 123 MB**, prompt **9,407 → 8,741** tokens (3 interleaved runs each, identical within a config) |
 | `--sources` / `--tools` / `--no-mcp` | the same levers, individually | a fresh request, 30.4k tokens by default: `--sources project,local` alone 19.5k, the lean `--tools` set alone 11.6k |

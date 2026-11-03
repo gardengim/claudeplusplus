@@ -1,0 +1,27 @@
+{
+ "claude, 3 windows": {
+  "answered": 3,
+  "procs": {
+   "claude": 3,
+   "caveman-mcp": 3,
+   "node": 9
+  },
+  "mb": 787.0
+ },
+ "claude++, 3 tabs": {
+  "answered": 3,
+  "procs": {
+   "claudeplusplus": 1,
+   "claude": 1,
+   "caveman-mcp": 1,
+   "node": 3
+  },
+  "mb": 225.2,
+  "tab 1 resumed and recalled 42": true,
+  "resumed request": {
+   "cache_read": 32506,
+   "cache_write": 117,
+   "input": 2
+  }
+ }
+}
