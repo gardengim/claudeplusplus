@@ -81,9 +81,9 @@ Where it comes from, and what it costs:
   near the view keep them (the rest keep just their row count). Following the newest output, only the entries
   that fill the screen are wrapped at all, so a resize costs the same in a long session as in a short one.
 
-Dependencies: `ratatui` (with its bundled crossterm), `serde_json`, `unicode-width`.
+Dependencies: `ratatui` (with its bundled crossterm), `serde_json`, `unicode-width`, `libc`, `signal-hook`, and `vt100` (the terminal emulator for the editor pane).
 Base64 (for images) and argument parsing are a few lines each, so they are hand-written.
-Release binary: ~1.9 MB.
+Release binary: ~2.3 MB.
 
 ## Habits from Claude Code that carry over
 
@@ -354,13 +354,23 @@ Release binary: ~1.9 MB.
   `p` pause. Esc/ctrl+c to stop Claude holds the queue (the strip shows ⏸) so it does not start the next message
   behind your back; `p` or sending something new carries on. Slash commands are not queued. Pictures travel with
   their message.
-- **External editor** (ctrl+g): opens the message in `$VISUAL`, else `$EDITOR`, else `vi` (any shell command, e.g.
-  `code -w`), through a private temp file. Save and quit and the text replaces the box (ctrl+z undoes it); a failing
-  editor leaves the message as it was. Works in vim normal mode too.
+- **Your editor, inside claude++**: `$VISUAL`, else `$EDITOR`, else `vi` (any shell command, e.g. `nvim -u NONE`; or
+  `"editor": "..."` in config.json), running on a pty that claude++ draws with a terminal emulator (`vt100`), over a
+  private temp file. Two uses, one component. **ctrl+g** opens it full screen on the message in the box: save and quit
+  and the text replaces the box (ctrl+z undoes it); a failing editor leaves the message as it was. While it is open the
+  conversation keeps updating behind it, and a hint row says if Claude is waiting for you. **Input mode `editor`**
+  (`/config`, or `/editor`): the box *is* your editor. The first key you type opens it (and starts Claude's process, as
+  typing does), sized to a third of the screen above the status line; a paste opens it with the paste loaded. Quit the
+  editor (`:wq`, `ctrl+x`...) and its text is sent as the message; quit with an error (`:cq`) and nothing is sent but
+  your text goes into the box. **ctrl+\ always cancels** (nothing is sent), and is the only key the editor never sees.
+  A permission prompt or question takes the keyboard from the pane until you answer it. Not available in that mode:
+  `/` and `@` completion, ↑ history, pasting images (a typed `/model` sent from the editor still runs). Tested with vim,
+  nvim and nano (`bench/editors.py`); editors that need the kitty keyboard protocol or the mouse are not supported.
+  If a pty cannot be opened, ctrl+g falls back to handing the terminal to the editor, and editor mode to the plain box.
 - **Search** (ctrl+f, `/search [text]`, `/` in vim normal mode): filters this conversation as you type (messages,
   replies, tool calls, newest first) and scrolls to the highlighted match; enter stays there (and `/find` continues
   from it), esc goes back. Tab switches to the messages you sent before; enter puts one in the box.
-- **Input mode** (`/config` → Input mode: default or vim; remembered; `/vim` toggles). **Vim**: esc leaves insert mode. Normal: `h l j k` (rows as drawn) `0 ^ $ w b e W B E gg G`
+- **Input mode** (`/config` → Input mode: default, vim or editor; remembered; `/vim` and `/editor` toggle). **Vim**: esc leaves insert mode. Normal: `h l j k` (rows as drawn) `0 ^ $ w b e W B E gg G`
   `f F t T ; ,`, counts, `x X D C s S r J ~ p P u ctrl+r`, `i a I A o O`, operators `d c y` with motions, `dd cc yy`
   and `iw aw i" a" i( a( i[ i{ i<` objects, `v`/`V` visual mode. enter still sends (and returns to insert), esc in
   normal mode still interrupts. Not there: `.` repeat, macros, named registers, `:` commands.
@@ -552,12 +562,13 @@ Run `cargo build --release` first. All use the real `claude` or none at all; non
 
 | Command | Checks | Cost |
 |---|---|---|
-| `cargo test` | 270 unit and end-to-end tests against a fake `claude`; includes a light fuzz run | free, 5 s |
+| `cargo test` | 274 unit and end-to-end tests (the pty ones skip themselves where no pty can be opened) against a fake `claude`; includes a light fuzz run | free, 5 s |
 | `FUZZ_ROUNDS=40 FUZZ_SEED=7 cargo test --release hostile_backend` | the UI against hostile backend messages (mutated real ones: wrong types, huge values, control characters), random keys, read-only panels, terminals from 1×1 to 300×4. Run it in a debug build too: that is where integer overflow shows. Found: an overflow on absurd token counts, now capped at the source (`backend::count`) | free |
 | `FUZZ_FILES=600 cargo test hostile_transcript` | resume and every history reader against corrupt transcripts (cut-off lines, invalid UTF-8, a 3 MB line) | free |
 | `python3 bench/contract.py` | the installed `claude` still behaves as claude++ assumes, including the token saving | cents |
 | `python3 bench/budget.py` | resting claude++ stays tiny: binary, memory, first paint, idle CPU | free |
 | `python3 bench/hostile.py` | SIGTERM/SIGHUP/SIGKILL leave no orphan `claude` and a restored terminal; a backend killed mid-turn; Esc interrupts; a permission prompt can be declined. `HOSTILE_CONFIG=user` uses your own config | cents, 3 min |
+| `python3 bench/editors.py` | real vim, nvim and nano inside claude++: editor-mode send, ctrl+g full screen, ctrl+\\ cancel; a fake `claude` logs exactly what it receives | free |
 | `python3 bench/soak.py` | 3,000 turns cost 23 MB (about 4 KB per turn, linear), echo stays near 1 ms, idle CPU about 0; a single 30 MB tool result costs 191 MB and stays responsive | free |
 | `python3 bench/away.py` | the front tab gives its memory back when you leave, and the conversation survives | cents |
 

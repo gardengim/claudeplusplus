@@ -105,9 +105,9 @@ KEYS  enter send · shift+enter, alt+enter or ctrl+j newline · esc/ctrl+c inter
       esc esc on an empty input: rewind to an earlier message (conversation, files, or both)
       ctrl+t new tab · ctrl+n/ctrl+p next/prev tab · alt+1..9 jump · ctrl+d close tab
       shift+tab permission mode · ctrl+o expand all tool output · alt+o or a click folds one call · wheel or pgup/pgdn scroll · ctrl+end jump to latest
-      ctrl+g edit the message in $VISUAL / $EDITOR · ctrl+b move a running command to the background (/tasks stops it)
+      ctrl+g edit the message in your editor, full screen inside claude++ (ctrl+\\ cancels) · ctrl+b move a running command to the background (/tasks stops it)
       alt+q manage queued messages (reorder, send now, edit) · ctrl+f search the conversation or what you sent
-      /editor: the box is your $EDITOR (quit it to send); ctrl+g: your editor full screen
+      /editor: the box is your editor (quit it to send; ctrl+\\ cancels; no / or @ completion)
       /vim: modal keys in the box (esc normal mode; i a o insert; hjkl w b e f t d c y p u v; / searches); /config → Input mode
       ctrl+r search the messages you sent · ← at the start of the input: earlier sessions · tab completes a /command or an @file (↑↓ to pick, esc hides)
       ctrl+v paste an image as [Image #N] at the cursor (delete the token to drop it)
@@ -686,7 +686,7 @@ fn run(opts: Opts) -> io::Result<()> {
             let mut typed = false;
             match rx.recv_timeout(Duration::from_millis(wait)) {
                 Ok(ev) => {
-                    typed = matches!(ev, AppEvent::Term(_));
+                    typed = matches!(ev, AppEvent::Term(_) | AppEvent::Pane(..)); // the editor's echo of a key is drawn at once too
                     app.on_event(ev)
                 }
                 Err(RecvTimeoutError::Timeout) => {}
@@ -699,7 +699,7 @@ fn run(opts: Opts) -> io::Result<()> {
                 let Some(left) = frame.checked_sub(drawn.elapsed()) else { break };
                 match rx.recv_timeout(left) {
                     Ok(ev) => {
-                        typed = matches!(ev, AppEvent::Term(_));
+                        typed = matches!(ev, AppEvent::Term(_) | AppEvent::Pane(..)); // the editor's echo of a key is drawn at once too
                         app.on_event(ev);
                     }
                     Err(_) => break,

@@ -89,6 +89,7 @@ does this is `src/panel.rs` and nothing else draws a panel. A surface only build
 | usage | `usage.rs` | the panel's; plan bars turn yellow at 70%, red at 90% | the panel's |
 | context (`/context`) | `context.rs` | stacked bars in the head (the window, then how the used part divides); one row per category in its own colour; on a wide screen a grid of the window and the row's detail beside the list. The gauge turns yellow at 70%, red at 85% | the panel's; enter acts on skills and memory |
 | session config | `tabcfg.rs` | the panel's; green `allow`, red `deny` | the panel's |
+| editor pane | `pane.rs` | accent rules; the editor draws inside | the editor's, except `ctrl+\\` (cancel); a prompt takes the keyboard back |
 | session list | `explorer.rs` | the one full-screen surface: no frame, title on the first row, hints on the last (`panel::render_full`); preview beside the list. Always available; → or Esc leaves | its own screen |
 | session dock | `explorer.rs` (`dock_lines`) | cyan border when focused, dim otherwise; yellow `!` = needs you | a 30-column strip, not a panel: opt-in, ← / `/sessions` |
 | `/command`, `@file` suggestions | `ui::suggest_view` | cyan | the input's (it keeps the cursor) |
