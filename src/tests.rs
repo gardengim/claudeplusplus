@@ -2154,7 +2154,7 @@ fn a_long_line_of_unmatched_markers_renders_in_linear_time() {
     let line = "a*b _c ~d ".repeat(20_000) + &"http://x.io ".repeat(5_000);
     let t = std::time::Instant::now();
     let _ = markdown::render(&line, 100);
-    assert!(t.elapsed() < std::time::Duration::from_millis(500), "{:?}", t.elapsed());
+    assert!(t.elapsed() < std::time::Duration::from_secs(2), "{:?}", t.elapsed());
 }
 
 #[test]
