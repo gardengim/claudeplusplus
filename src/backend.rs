@@ -34,6 +34,12 @@ pub struct Launch {
     pub cwd: Option<String>,
 }
 
+/// A count read from the protocol (tokens, milliseconds, sizes). It comes from another process, so it is capped
+/// at 2^40: far beyond anything real, and sums of many of them cannot overflow.
+pub fn count(v: &serde_json::Value) -> u64 {
+    v.as_u64().unwrap_or(0).min(1 << 40)
+}
+
 pub enum Resume<'a> {
     New,
     Id(&'a str),

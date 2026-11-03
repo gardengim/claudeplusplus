@@ -582,7 +582,7 @@ impl Session {
         let started = self.ctx_tokens > 0;
         let round = |x: f64| (x * 100.0).round() / 100.0;
         let pct = started.then(|| round((self.ctx_tokens as f64 / window as f64 * 100.0).min(100.0)));
-        let out_tokens = self.last_usage["output_tokens"].as_u64().unwrap_or(0);
+        let out_tokens = crate::backend::count(&self.last_usage["output_tokens"]);
         // Limit windows whose reset time has passed are dropped, as Claude Code does.
         let mut limits = serde_json::Map::new();
         let mut next: Option<f64> = None;
@@ -1405,7 +1405,7 @@ impl Session {
                 }
                 if top_level {
                     let u = &msg["usage"];
-                    let n = |k: &str| u[k].as_u64().unwrap_or(0);
+                    let n = |k: &str| crate::backend::count(&u[k]);
                     let ctx = n("input_tokens") + n("cache_read_input_tokens") + n("cache_creation_input_tokens");
                     if ctx > 0 {
                         self.last_usage = json!({
@@ -1486,24 +1486,26 @@ impl Session {
                 self.pending.clear();
                 self.end_streams();
                 self.activity.clear();
-                self.cost += v["total_cost_usd"].as_f64().unwrap_or(0.0);
-                self.api_ms += v["duration_api_ms"].as_u64().unwrap_or(0);
+                self.cost += v["total_cost_usd"].as_f64().unwrap_or(0.0).clamp(0.0, 1e9);
+                self.api_ms += crate::backend::count(&v["duration_api_ms"]);
                 if let Some(state) = v["fast_mode_state"].as_str() {
                     self.fast_mode = state == "on";
                 }
                 // The model's real context window size, which only the result reports.
                 let usage = v["modelUsage"].as_object();
-                let window = usage.and_then(|m| m.get(&self.model).or_else(|| m.values().next())).and_then(|m| m["contextWindow"].as_u64());
+                let window = usage.and_then(|m| m.get(&self.model).or_else(|| m.values().next())).map(|m| crate::backend::count(&m["contextWindow"])).filter(|w| *w > 0);
                 self.ctx_window = window.unwrap_or(self.ctx_window);
                 self.status_dirty = true;
                 if let Some(path) = self.session_id.as_deref().and_then(history::find) {
                     self.follow_name(&path);
                 }
                 let u = &v["usage"];
-                let n = |k: &str| u[k].as_u64().unwrap_or(0);
-                self.cache_read += n("cache_read_input_tokens");
-                self.prompt_total += n("input_tokens") + n("cache_read_input_tokens") + n("cache_creation_input_tokens");
-                self.out_tokens += n("output_tokens");
+                let n = |k: &str| crate::backend::count(&u[k]);
+                // Counts come from another process: saturate rather than overflow.
+                self.cache_read = self.cache_read.saturating_add(n("cache_read_input_tokens"));
+                let prompt = n("input_tokens").saturating_add(n("cache_read_input_tokens")).saturating_add(n("cache_creation_input_tokens"));
+                self.prompt_total = self.prompt_total.saturating_add(prompt);
+                self.out_tokens = self.out_tokens.saturating_add(n("output_tokens"));
                 let text = v["result"].as_str().unwrap_or_default();
                 if std::mem::take(&mut self.interrupted) {
                     // The "[Request interrupted by user]" note already says it; the error result is noise.
@@ -2128,6 +2130,46 @@ mod tests {
             })
             .expect("respawned");
         assert!(args.lines().next().unwrap().contains("--resume x") && !args.lines().nth(1).unwrap().contains("--resume"));
+    }
+
+    #[test]
+    fn hostile_transcript_files_never_panic_resume_or_the_readers() {
+        use crate::tests::{Rng, mutate, seed_messages};
+        let seeds = seed_messages();
+        let env = |k: &str, d: u64| std::env::var(k).ok().and_then(|v| v.parse().ok()).unwrap_or(d);
+        let mut r = Rng(env("FUZZ_SEED", 0xDEAD_BEEF_CAFE_F00D) | 1);
+        let dir = std::env::temp_dir().join(format!("claudeplusplus-hostile-transcripts-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        for n in 0..env("FUZZ_FILES", 25) {
+            let mut bytes: Vec<u8> = vec![];
+            for _ in 0..150 {
+                match r.below(10) {
+                    0 => bytes.extend(b"{\"type\":\"user\",\"message\":{\"con"), // cut off mid-write
+                    1 => bytes.extend(b"null"),
+                    2 => bytes.extend(b"[1,2"),
+                    3 => bytes.extend([0xff, 0xfe, b'{', 0xc3]), // not UTF-8
+                    4 => bytes.extend(b"\"just a string\""),
+                    5 if r.below(40) == 0 => bytes.extend(vec![b'x'; 3_000_000]), // one enormous line
+                    _ => {
+                        let mut m = seeds[r.below(seeds.len())].clone();
+                        for _ in 0..r.below(3) {
+                            mutate(&mut m, &mut r);
+                        }
+                        bytes.extend(m.to_string().into_bytes());
+                    }
+                }
+                bytes.push(b'\n');
+            }
+            let path = dir.join(format!("{n}.jsonl"));
+            std::fs::write(&path, &bytes).unwrap();
+            let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let mut s = Session::new(1, String::new());
+                s.show_history(&path);
+                let _ = (history::preview(&path, 10), history::prompts(&path), history::session_name(&path), history::session_color(&path), history::agent_reports(&path));
+            }));
+            assert!(res.is_ok(), "transcript {} panicked resume or a reader (kept for inspection)", path.display());
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

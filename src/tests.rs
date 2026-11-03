@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::backend::Resume;
+use serde_json::{Value, json};
 
 fn run_cmd(app: &mut App, cmd: &str) {
     app.input = cmd.into();
@@ -2467,4 +2468,130 @@ fn a_queued_message_gets_a_time_from_the_queue_panel_and_loses_it_with_an_empty_
     press(&mut app, KeyCode::Char('S'));
     press(&mut app, KeyCode::Enter);
     assert!(app.s().queue[0].due.is_none(), "the first row, no time, takes it off");
+}
+
+// ---- hostile backend: nothing the other side sends may panic the UI -------------------------------------------
+
+/// Every `{...}` JSON message written as a raw string in our own tests: realistic seeds that stay current.
+pub(crate) fn seed_messages() -> Vec<Value> {
+    let mut out = vec![];
+    for src in [include_str!("session.rs"), include_str!("tests.rs")] {
+        let mut rest = src;
+        while let Some(i) = rest.find("r#\"{") {
+            rest = &rest[i + 3..];
+            let Some(end) = rest.find("\"#") else { break };
+            if let Ok(v) = serde_json::from_str::<Value>(&rest[..end])
+                && v.get("type").is_some()
+            {
+                out.push(v);
+            }
+            rest = &rest[end..];
+        }
+    }
+    out
+}
+
+pub(crate) struct Rng(pub u64);
+impl Rng {
+    pub(crate) fn next(&mut self) -> u64 {
+        self.0 ^= self.0 << 13;
+        self.0 ^= self.0 >> 7;
+        self.0 ^= self.0 << 17;
+        self.0
+    }
+    pub(crate) fn below(&mut self, n: usize) -> usize {
+        (self.next() % n.max(1) as u64) as usize
+    }
+}
+
+fn hostile_value(r: &mut Rng) -> Value {
+    match r.below(14) {
+        0 => Value::Null,
+        1 => json!(0),
+        2 => json!(-1),
+        3 => json!(1e308),
+        4 => json!(u64::MAX),
+        5 => json!(""),
+        6 => json!("x".repeat(20_000)),
+        7 => json!("a\u{0}b\u{200b}\u{202e}e\u{301}\u{1F468}\u{200d}\u{1F469}\u{fe0f}\t\r\n\x1b[31m\x1b]0;t\x07"),
+        8 => json!([]),
+        9 => json!({}),
+        10 => json!([null, [], {"a": 1}]),
+        11 => json!(true),
+        12 => json!("日本語のとても長い行".repeat(50)),
+        _ => json!({"type": "text", "text": "nested", "content": [1, 2, 3]}),
+    }
+}
+
+/// Apply one mutation at a random place inside `v`.
+pub(crate) fn mutate(v: &mut Value, r: &mut Rng) {
+    match v {
+        Value::Object(m) if !m.is_empty() => {
+            let keys: Vec<String> = m.keys().cloned().collect();
+            let k = keys[r.below(keys.len())].clone();
+            match r.below(5) {
+                0 => {
+                    m.remove(&k);
+                }
+                1 => {
+                    m.insert(k, hostile_value(r));
+                }
+                _ => mutate(m.get_mut(&k).unwrap(), r),
+            }
+        }
+        Value::Array(a) if !a.is_empty() => {
+            let i = r.below(a.len());
+            match r.below(4) {
+                0 => {
+                    a.remove(i);
+                }
+                1 => a[i] = hostile_value(r),
+                _ => mutate(&mut a[i], r),
+            }
+        }
+        Value::String(s) if r.below(2) == 0 => {
+            let cut = s.chars().take(r.below(s.chars().count() + 1)).collect::<String>();
+            *s = cut;
+        }
+        _ => *v = hostile_value(r),
+    }
+}
+
+#[test]
+fn hostile_backend_messages_and_keys_never_panic_the_ui() {
+    let seeds = seed_messages();
+    assert!(seeds.len() > 40, "seeds are read from our own tests: {}", seeds.len());
+    // A deep run: FUZZ_ROUNDS=100 FUZZ_SEED=7 cargo test --release hostile_backend -- --nocapture
+    let env = |k: &str, d: u64| std::env::var(k).ok().and_then(|v| v.parse().ok()).unwrap_or(d);
+    let mut r = Rng(env("FUZZ_SEED", 0x9E37_79B9_7F4A_7C15) | 1);
+    let keys = [KeyCode::Enter, KeyCode::Esc, KeyCode::Up, KeyCode::Down, KeyCode::Left, KeyCode::Right, KeyCode::Tab,
+        KeyCode::Char('1'), KeyCode::Char('2'), KeyCode::Char('y'), KeyCode::Char('n'), KeyCode::Char('a'), KeyCode::Char(' '), KeyCode::Char('x')];
+    for round in 0..env("FUZZ_ROUNDS", 2) {
+        let (mut app, _d) = fake_app(&format!("hostile-{round}"));
+        let mut log: Vec<String> = vec![];
+        for step in 0..1500 {
+            let mut m = seeds[r.below(seeds.len())].clone();
+            for _ in 0..1 + r.below(3) {
+                mutate(&mut m, &mut r);
+            }
+            log.push(m.to_string().chars().take(300).collect());
+            if log.len() > 6 {
+                log.remove(0);
+            }
+            let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                app.sessions[0].handle(&m);
+                if r.below(3) == 0 {
+                    let k = keys[r.below(keys.len())];
+                    app.on_key(KeyEvent::new(k, KeyModifiers::NONE));
+                }
+                if step % 20 == 0 {
+                    screen(&mut app, 100, 30);
+                    screen(&mut app, 24, 8);
+                }
+            }));
+            if res.is_err() {
+                panic!("round {round} step {step}: a hostile message panicked the UI. Last messages:\n{}", log.join("\n"));
+            }
+        }
+    }
 }

@@ -61,7 +61,7 @@ pub fn iso_epoch(s: &str) -> Option<f64> {
 
 pub fn parse_context(r: &Value) -> Option<Ctx> {
     let cats = r["categories"].as_array()?;
-    let n = |v: &Value| v.as_u64().unwrap_or(0);
+    let n = crate::backend::count;
     let mb = &r["messageBreakdown"];
     Some(Ctx {
         total: n(&r["totalTokens"]),

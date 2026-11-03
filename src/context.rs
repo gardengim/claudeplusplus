@@ -62,7 +62,7 @@ fn arr(v: &Value) -> &[Value] {
 }
 
 pub fn parse(r: &Value) -> Detail {
-    let n = |v: &Value| v.as_u64().unwrap_or(0);
+    let n = crate::backend::count;
     let s = |v: &Value| v.as_str().unwrap_or_default().to_string();
     let (mb, u) = (&r["messageBreakdown"], &r["apiUsage"]);
     Detail {
