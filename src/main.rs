@@ -1211,7 +1211,10 @@ impl App {
         self.last_sample = Instant::now();
         if !self.idle_suspend.is_zero() {
             for (i, s) in self.sessions.iter_mut().enumerate() {
-                if i != self.active && s.last_active.elapsed() > self.idle_suspend && s.suspend() {
+                // The tab in front too, once you have been away five times as long: a resting claude++ is ~4 MB,
+                // and typing restarts the backend (`warm`) while you compose.
+                let away = i != self.active || self.last_input.elapsed() > self.idle_suspend * 5;
+                if away && s.last_active.elapsed() > self.idle_suspend && s.suspend() {
                     s.note("idle: claude process stopped to free memory; it resumes on your next message".into());
                 }
             }

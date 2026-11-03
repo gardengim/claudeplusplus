@@ -37,6 +37,13 @@ Where it comes from, and what it costs:
   `claude` sends them with every request. This is Claude Code's behaviour, not a trick of claude++, and a version
   can change it. The first use of a deferred tool costs one extra round trip. Most of a request is cached, so the
   cost saving is smaller than the token saving.
+- **Away from the keyboard:** the tab in front is stopped too after five times `--idle-suspend` (10 min) without input,
+  when nothing is running (no turn, background task or command). A resting claude++ is then ~4 MB; typing starts the
+  backend again while you compose.
+- **Staying true:** `python3 bench/contract.py` runs the real `claude` through everything claude++ relies on (control
+  protocol, `init`, streaming, `--resume`, the unknown-id failure) and checks the 31k-token headless request above.
+  Passing on Claude Code 2.1.317; claude++ prints a one-time note when it meets a newer minor version than the last
+  one verified.
 - **Not better:** keystroke echo (both under 2 ms: 0.2–0.4 ms for `claude`, 0.8–1.8 ms for claude++) and turn time,
   which the API decides. A tab you are using costs what Claude Code costs, because its backend *is* Claude Code.
 
@@ -532,6 +539,9 @@ timings in the full table, not tokens or memory. Use footprint, not RSS: RSS ove
   Paths with spaces are not completed. The model picker shows every model Claude Code lists, including ones
   you may not have access to.
 - Shift+Enter needs a terminal with the kitty keyboard protocol; alt+enter and ctrl+j always work.
+- A backend that dies before its first message twice in a row (a bad flag, a deleted conversation) is no longer
+  started by typing; sending a message tries again. A conversation `claude` cannot find is forgotten, and the next
+  message starts a new one.
 - Tested on macOS only. macOS tools used where present: `footprint` (memory), `sips` (image conversion), `osascript`
   (clipboard images) and `pbcopy`; elsewhere memory falls back to `ps` RSS and images need `wl-paste`/`xclip`.
 

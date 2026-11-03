@@ -113,6 +113,24 @@ fn a_backend_nobody_sent_to_may_be_stopped_but_not_one_that_was_until_it_has_a_s
     assert!(app.sessions[0].session_id.is_none() && !app.sessions[0].can_suspend(), "a message went to it: stopping would lose the conversation");
 }
 
+#[test]
+fn the_tab_in_front_is_stopped_only_after_you_have_been_away_five_times_the_idle_time() {
+    let (mut app, _d) = fake_app("unused");
+    let (launch, tx) = (app.launch.clone(), app.tx.clone());
+    app.idle_suspend = Duration::from_secs(120);
+    app.sessions[0].warm(&launch, &tx);
+    let old = |s: u64| Instant::now() - Duration::from_secs(s);
+    app.sessions[0].last_active = old(300);
+    app.last_sample = old(60);
+    app.last_input = old(300);
+    app.tick();
+    assert!(app.sessions[0].backend.is_some(), "away 5 min of 10: the tab you are using stays up");
+    app.last_sample = old(60);
+    app.last_input = old(700);
+    app.tick();
+    assert!(app.sessions[0].backend.is_none(), "away 11 min: nothing running, so it gives its memory back");
+}
+
 fn key(c: char) -> KeyEvent {
     KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE)
 }
