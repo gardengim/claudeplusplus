@@ -2580,13 +2580,19 @@ fn hostile_backend_messages_and_keys_never_panic_the_ui() {
             }
             let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 app.sessions[0].handle(&m);
+                if step % 25 == 7 {
+                    // Panels that only read: the rest write settings files, which a random key must never reach.
+                    const PANELS: [&str; 14] = ["/context", "/usage", "/tasks", "/sessions", "/help", "/model", "/effort", "/mode", "/session", "/find a", "/search", "/queue", "/color", "/config"];
+                    run_cmd(&mut app, PANELS[r.below(PANELS.len())]);
+                }
                 if r.below(3) == 0 {
                     let k = keys[r.below(keys.len())];
                     app.on_key(KeyEvent::new(k, KeyModifiers::NONE));
                 }
                 if step % 20 == 0 {
-                    screen(&mut app, 100, 30);
-                    screen(&mut app, 24, 8);
+                    for (w, h) in [(100, 30), (24, 8), (1, 1), (5, 3), (14, 40), (300, 4)] {
+                        screen(&mut app, w, h);
+                    }
                 }
             }));
             if res.is_err() {
