@@ -1,8 +1,7 @@
-//! Vim-style editing for the message box (input mode "vim"; "helix" is helix.rs). Normal and visual mode work on the text and cursor they are
+//! Vim-style editing for the message box (input mode "vim"). Normal and visual mode work on the text and cursor they are
 //! handed, so they need no terminal; the app keeps what is not editing (history, undo, sending).
 //! Not here: `.` repeat, macros, named registers, marks, `:` commands.
 
-mod helix;
 
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
@@ -29,12 +28,8 @@ pub enum Out {
 
 #[derive(Default)]
 pub struct Vim {
-    /// Modal editing is on (input mode vim or helix).
+    /// Modal editing is on (input mode vim).
     pub on: bool,
-    /// ...and it is helix's selection-first kind (see helix.rs).
-    pub helix: bool,
-    /// Where the cursor was left, to notice the app moving it (helix).
-    head: usize,
     pub mode: Mode,
     keys: Vec<char>,
     anchor: usize,
@@ -329,7 +324,6 @@ impl Vim {
         match self.mode {
             Mode::Insert => "INSERT",
             Mode::Normal => "NORMAL",
-            Mode::Visual if self.helix => "SELECT",
             Mode::Visual => "VISUAL",
             Mode::VisualLine => "V-LINE",
         }
@@ -340,10 +334,6 @@ impl Vim {
         if self.mode == Mode::Insert {
             return;
         }
-        if self.helix {
-            *cur = (*cur).min(t.len().saturating_sub(1)); // helix may stand on a line break
-            return;
-        }
         *cur = (*cur).min(t.len());
         if *cur == t.len() && *cur > 0 {
             *cur -= 1;
@@ -351,14 +341,6 @@ impl Vim {
         if t.get(*cur) == Some(&'\n') && *cur > 0 && t[*cur - 1] != '\n' {
             *cur -= 1;
         }
-    }
-
-    /// The app moved the cursor itself (rows as drawn): helix selects from where it was left.
-    pub fn moved(&mut self, cur: usize) {
-        if self.helix && self.mode == Mode::Normal {
-            self.anchor = cur;
-        }
-        self.head = cur;
     }
 
     /// The selection as a span `[a, b)`.
@@ -373,10 +355,6 @@ impl Vim {
 
     /// The selection, for drawing: `[a, b)` in characters, and whether it is whole lines.
     pub fn highlight(&self, t: &[char], cur: usize) -> Option<(usize, usize)> {
-        if self.helix {
-            let (a, b) = (self.anchor.min(cur), self.anchor.max(cur));
-            return (self.mode != Mode::Insert && a != b && cur == self.head).then_some((a, (b + 1).min(t.len())));
-        }
         self.visual().then(|| {
             let (a, b, _) = self.selection(t, cur);
             (a, b)
@@ -394,11 +372,8 @@ impl Vim {
             }
             self.mode = Mode::Normal;
             self.settle(t, cur);
-            (self.anchor, self.head) = (*cur, *cur);
+            self.anchor = *cur;
             return Out::Done;
-        }
-        if self.helix {
-            return self.helix_key(k, t, cur);
         }
         let c = match k.code {
             KeyCode::Esc if self.mode != Mode::Normal || self.pending() => {

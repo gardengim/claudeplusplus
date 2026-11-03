@@ -360,13 +360,10 @@ Release binary: ~1.9 MB.
 - **Search** (ctrl+f, `/search [text]`, `/` in vim normal mode): filters this conversation as you type (messages,
   replies, tool calls, newest first) and scrolls to the highlighted match; enter stays there (and `/find` continues
   from it), esc goes back. Tab switches to the messages you sent before; enter puts one in the box.
-- **Input mode** (`/config` → Input mode: default, vim or helix; remembered; `/vim` and `/helix` toggle). **Vim**: esc leaves insert mode. Normal: `h l j k` (rows as drawn) `0 ^ $ w b e W B E gg G`
+- **Input mode** (`/config` → Input mode: default or vim; remembered; `/vim` toggles). **Vim**: esc leaves insert mode. Normal: `h l j k` (rows as drawn) `0 ^ $ w b e W B E gg G`
   `f F t T ; ,`, counts, `x X D C s S r J ~ p P u ctrl+r`, `i a I A o O`, operators `d c y` with motions, `dd cc yy`
   and `iw aw i" a" i( a( i[ i{ i<` objects, `v`/`V` visual mode. enter still sends (and returns to insert), esc in
   normal mode still interrupts. Not there: `.` repeat, macros, named registers, `:` commands.
-  **Helix** has the same modes but selects first: `h l j k`, `w b e W B E` (select the word), `f t F T`, `x` (select the line; again to
-  extend), `%` (all), `gh gl gs gg ge`, `v` (select mode: motions extend), `;` (collapse), `mi` / `ma` + `w " ' ( [ { <` (object), then `d c y p P r ~` act
-  on the selection, `i a I A o O`, `u` / `U` undo and redo, `/` search. Not there: several selections, `s`, surround, `.`, macros, `:` commands.
 - **Scheduled messages**: `/schedule` lists times (in 5 minutes ... 4 hours, next 9:00 / 18:00) with the cursor on one; ↑↓ and Enter pick, or just type
   your own (`45m`, `2h30m`, `14:30`, 24-hour local). Then type the message in the ordinary message box: the box says it is scheduled, Enter adds it, Esc
   cancels. `/schedule 2h` skips the list and `/schedule 10m check the build` does it all at once. A scheduled message waits in the same list as queued

@@ -2146,7 +2146,7 @@ fn config_turns_vim_keys_and_the_message_queue_on_and_off() {
     let last = settings::ITEMS.len() - 1;
     (0..last - 1).for_each(|_| press(&mut app, KeyCode::Down));
     press(&mut app, KeyCode::Right);
-    assert!(app.vim.on && !app.vim.helix, "the Input mode row: default → vim");
+    assert!(app.vim.on, "the Input mode row: default → vim");
     assert_eq!(config::get_str(&cfg, "input_mode").as_deref(), Some("vim"));
     press(&mut app, KeyCode::Down);
     press(&mut app, KeyCode::Right);
@@ -2160,11 +2160,6 @@ fn config_turns_vim_keys_and_the_message_queue_on_and_off() {
     run_cmd(&mut app, "/vim");
     assert!(!app.vim.on);
     assert_eq!(config::get_str(&cfg, "input_mode").as_deref(), Some("default"), "/vim and /config are the same switch");
-    run_cmd(&mut app, "/helix");
-    assert!(app.vim.on && app.vim.helix);
-    assert_eq!(config::get_str(&cfg, "input_mode").as_deref(), Some("helix"));
-    run_cmd(&mut app, "/vim");
-    assert!(app.vim.on && !app.vim.helix, "/vim switches helix to vim");
 }
 
 #[test]
@@ -2369,28 +2364,6 @@ fn dragging_over_the_conversation_copies_it_on_release_only_when_autocopy_is_on(
     app.apply_setting("autocopy", "on");
     drag(&mut app);
     assert!(app.sent_notices.contains(&"copy:alpha beta\n\n  gamma".to_string()), "{:?}", app.sent_notices);
-}
-
-#[test]
-fn helix_selects_then_acts_and_u_and_capital_u_undo_and_redo() {
-    let (mut app, _d) = fake_app("helix");
-    run_cmd(&mut app, "/helix");
-    typed(&mut app, "one two three");
-    press(&mut app, KeyCode::Esc);
-    typed(&mut app, "ghw");
-    let text = screen(&mut app, 100, 30).join("\n");
-    assert!(text.contains("NORMAL"), "{text}");
-    typed(&mut app, "d");
-    assert_eq!(app.input, "two three", "w selected a word, d deleted it");
-    typed(&mut app, "u");
-    assert_eq!(app.input, "one two three");
-    typed(&mut app, "U");
-    assert_eq!(app.input, "two three");
-    typed(&mut app, "vlld");
-    assert_eq!(app.input, " three", "v extends the selection");
-    typed(&mut app, "ix");
-    press(&mut app, KeyCode::Esc);
-    assert_eq!(app.input, "x three");
 }
 
 #[test]

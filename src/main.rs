@@ -104,7 +104,7 @@ KEYS  enter send · shift+enter, alt+enter or ctrl+j newline · esc/ctrl+c inter
       shift+tab permission mode · ctrl+o expand all tool output · alt+o or a click folds one call · wheel or pgup/pgdn scroll · ctrl+end jump to latest
       ctrl+g edit the message in $VISUAL / $EDITOR · ctrl+b move a running command to the background (/tasks stops it)
       alt+q manage queued messages (reorder, send now, edit) · ctrl+f search the conversation or what you sent
-      /vim, /helix: modal keys in the box (esc normal mode; i a o insert; hjkl w b e f t d c y p u v; / searches); /config → Input mode
+      /vim: modal keys in the box (esc normal mode; i a o insert; hjkl w b e f t d c y p u v; / searches); /config → Input mode
       ctrl+r search the messages you sent · ← at the start of the input: earlier sessions · tab completes a /command or an @file (↑↓ to pick, esc hides)
       ctrl+v paste an image as [Image #N] at the cursor (delete the token to drop it)
 COMMANDS  /usage (/cost /status) /memory [user] /export [file] /tasks /context /queue /schedule /search /vim /find /session /new [profile] /profile [name] [--hard] /close /clear /resume [id] /model [m] /effort [level] /mode <m>
@@ -118,7 +118,7 @@ IMAGES    ctrl+v, drag a file into the window or /img <path> to attach; pictures
           inline in kitty/Ghostty (CLAUDEPP_IMAGES=on|off overrides detection)";
 
 /// Commands claude++ handles itself: (name, argument hint, description).
-const LOCAL_COMMANDS: [(&str, &str, &str); 32] = [
+const LOCAL_COMMANDS: [(&str, &str, &str); 31] = [
     ("new", "[profile]", "open a new tab"),
     ("profile", "[name] [--hard]", "show or change this tab's profile"),
     ("close", "", "close this tab"),
@@ -137,7 +137,6 @@ const LOCAL_COMMANDS: [(&str, &str, &str); 32] = [
     ("schedule", "<when> <message>", "send a message later: 10m, 2h30m or a time like 14:30"),
     ("search", "[text]", "search this conversation or the messages you sent (ctrl+f)"),
     ("vim", "", "turn vim keys in the message box on or off"),
-    ("helix", "", "turn helix keys in the message box on or off"),
     ("copy", "[code]", "copy the last answer, or its last code block, to the clipboard"),
     ("config", "", "settings: claude++'s and Claude Code's, by section, searchable"),
     ("setting", "", "same as /config"),
@@ -564,7 +563,7 @@ fn run(opts: Opts) -> io::Result<()> {
     app.dock_mode = saved("side_panel").as_deref() == Some("on");
     // "vim": "on" is what older configs say.
     let mode = saved("input_mode").unwrap_or_else(|| if saved("vim").as_deref() == Some("on") { "vim".into() } else { "default".into() });
-    (app.vim.on, app.vim.helix) = (mode == "vim" || mode == "helix", mode == "helix");
+    app.vim.on = mode == "vim" || mode == "helix"; // "helix" was an input mode once: its users get vim
     app.autocopy = saved("autocopy").as_deref() == Some("on");
     app.queue_on = saved("queue").as_deref() != Some("off");
     if let Some(n) = saved("notify").filter(|n| ["off", "bell", "desktop"].contains(&n.as_str())) {
@@ -1421,7 +1420,6 @@ impl App {
             KeyCode::Char('_' | '7') if box_is_free && ctrl => Some(false), // Claude Code's undo key
             KeyCode::Char('u') if box_is_free && in_normal && !ctrl => Some(false),
             KeyCode::Char('r') if box_is_free && in_normal && ctrl => Some(true),
-            KeyCode::Char('U') if box_is_free && in_normal && self.vim.helix && !ctrl => Some(true),
             _ => None,
         };
         if let Some(redo) = redo_asked {
@@ -2219,7 +2217,6 @@ impl App {
             vim::Out::Row(d) => {
                 (0..d.unsigned_abs()).for_each(|_| _ = self.move_row(d.signum()));
                 self.vim_settle();
-                self.vim.moved(self.cursor);
             }
             vim::Out::Search => self.open_search(),
             vim::Out::Done | vim::Out::Undo | vim::Out::Redo => {}
@@ -2945,7 +2942,7 @@ impl App {
             "mouse" => if self.mouse { "on" } else { "off" }.to_string(),
             "autocopy" => if self.autocopy { "on" } else { "off" }.to_string(),
             "side_panel" => if self.dock_mode { "on" } else { "off" }.to_string(),
-            "input_mode" => if self.vim.helix { "helix" } else if self.vim.on { "vim" } else { "default" }.to_string(),
+            "input_mode" => if self.vim.on { "vim" } else { "default" }.to_string(),
             "theme" => theme::mode_name().to_string(),
             "queue" => if self.queue_on { "on" } else { "off" }.to_string(),
             _ => String::new(),
@@ -2984,7 +2981,7 @@ impl App {
                 self.restyle();
             }
             "input_mode" => {
-                (self.vim.on, self.vim.helix) = (value != "default", value == "helix");
+                self.vim.on = value != "default";
                 self.vim.mode = vim::Mode::Insert;
                 self.vim_shape();
             }
@@ -3363,10 +3360,9 @@ impl App {
                     self.s().reveal = at;
                 }
             }
-            "/vim" | "/helix" => {
-                let mode = &cmd[1..];
-                self.apply_setting("input_mode", if self.setting_value("input_mode") == mode { "default" } else { mode });
-                self.flash(if self.vim.on { format!("{mode} keys on: esc for normal mode; /{mode} turns them off") } else { format!("{mode} keys off") });
+            "/vim" => {
+                self.apply_setting("input_mode", if self.vim.on { "default" } else { "vim" });
+                self.flash(if self.vim.on { "vim keys on: esc for normal mode; /vim turns them off" } else { "vim keys off" });
             }
             "/close" => self.close_tab_asking(),
             "/clear" => self.s().clear(),

@@ -96,8 +96,8 @@ pub const ITEMS: &[Item] = &[
     Item {
         key: "input_mode",
         label: "Input mode",
-        help: "default: the ordinary keys. vim: the message box has vim's modes; Esc leaves insert mode (hjkl w b e f t, d c y with motions and objects, p u, v selection, / searches). helix: the same modes, selection first: a motion selects (w b e f t x %), then d c y p act on it; v extends, u undoes, U redoes. Enter still sends. /vim and /helix toggle too.",
-        choices: &[("default", "default"), ("vim", "vim"), ("helix", "helix")],
+        help: "default: the ordinary keys. vim: the message box has vim's modes; Esc leaves insert mode (hjkl w b e f t, d c y with motions and objects, p u, v selection, / searches). Enter still sends. /vim toggles too.",
+        choices: &[("default", "default"), ("vim", "vim")],
     },
     Item {
         key: "queue",
