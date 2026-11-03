@@ -13,19 +13,19 @@ claude++ --help
 
 ## Measured against `claude`
 
-Claude Code 2.1.312, model haiku, macOS on Apple Silicon, 2026-10-28. Memory is macOS `footprint` summed over each
+Claude Code 2.1.317, model haiku, macOS on Apple Silicon, 2026-11-03 (machine busy: load 6–14). Memory is macOS `footprint` summed over each
 process tree (RSS overstates it about 2×); tokens are read from the session transcripts both frontends write.
 Medians of 3 interleaved runs, each in a clean environment. Reproduce with `python3 bench/vs_claude.py 3` and
 `python3 bench/tabs.py`; raw results are in `bench/results/`.
 
 | | `claude` | claude++ |
 |---|---|---|
-| Open, nothing sent yet | 268 MB | **4 MB** |
-| After one turn | 295 MB | **252 MB** |
+| Open, nothing sent yet | 270 MB | **4 MB** |
+| After one turn | 282 MB | **239 MB** |
 | Three conversations left open, idle | 787 MB (3 windows, 15 processes) | **225 MB** (3 tabs, 6 processes) |
 | Context tokens per request, same settings | 45.9k | **32.5k** |
-| First paint | 0.28 s | **0.013 s** |
-| `lean` (same flags for `claude`): tokens per request, memory after a turn | 9.8k, 175 MB | **8.7k, 114 MB** |
+| First paint | 0.56 s | **0.024 s** |
+| `lean` (same flags for `claude`): tokens per request, memory after a turn | 9.8k, 179 MB | **8.7k, 120 MB** |
 
 Where it comes from, and what it costs:
 - **4 MB:** a tab starts its `claude` only when you begin typing a message, so its startup overlaps with typing.
@@ -45,8 +45,9 @@ Where it comes from, and what it costs:
   protocol, `init`, streaming, `--resume`, the unknown-id failure) and checks the 31k-token headless request above.
   Passing on Claude Code 2.1.317; claude++ prints a one-time note when it meets a newer minor version than the last
   one verified.
-- **Not better:** keystroke echo (both under 2 ms: 0.2–0.4 ms for `claude`, 0.8–1.8 ms for claude++) and turn time,
-  which the API decides. A tab you are using costs what Claude Code costs, because its backend *is* Claude Code.
+- **Not better:** keystroke echo (`claude` 0.3 ms, claude++ 1.6–6.7 ms: both imperceptible, claude++ slower) and turn
+  time, which the API decides (0.9–4.7 s across all runs here; claude++ in `full` ran about a second slower on the
+  medians, 3.9 s vs 2.9 s, and I cannot tell noise from a real startup cost at this load). A tab you are using costs what Claude Code costs, because its backend *is* Claude Code.
 
 ## Architecture
 
