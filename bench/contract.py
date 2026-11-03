@@ -7,7 +7,7 @@ import json, os, queue, subprocess, sys, tempfile, threading, time, datetime
 MAX_REQUEST_TOKENS = 40_000  # interactive `claude` sends ~46k here; headless ~31k. Above this the saving is gone.
 FLAGS = ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
          "--include-partial-messages", "--permission-prompt-tool", "stdio", "--model", "haiku"]
-CWD = tempfile.mkdtemp(prefix="cpp-contract-", dir="/private/tmp" if os.path.isdir("/private/tmp") else None)
+CWD = tempfile.mkdtemp(prefix="cpp-contract-")  # $TMPDIR, so it also runs inside a sandbox
 results = []
 
 
