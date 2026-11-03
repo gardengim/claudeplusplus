@@ -214,6 +214,10 @@ pub struct Session {
     /// `initialize` replies to ignore first, when the change was queued before the backend started).
     fast_expect: Option<bool>,
     fast_skip: u8,
+    /// Backends in a row that died before saying hello. At 2, typing no longer starts one (`warm`); only an
+    /// explicit send tries again, so a broken start costs one error per message, not one per keystroke.
+    failed_starts: u8,
+    inited: bool,
     /// While replaying a transcript: do not re-send old images to the terminal.
     replaying: bool,
     // ---- what a status line command is told about this session ----
@@ -359,6 +363,8 @@ impl Session {
             fast_pref: None,
             fast_expect: None,
             fast_skip: 0,
+            failed_starts: 0,
+            inited: false,
             replaying: false,
             five_hour: None,
             seven_day: None,
@@ -789,13 +795,14 @@ impl Session {
         self.deferred.clear();
         b.control("get_settings", json!({}))?;
         self.backend = Some(b);
+        self.inited = false;
         self.mcp_wait = (!cfg!(test)).then(Instant::now);
         Ok(())
     }
 
     /// Spawn the backend ahead of the first message. Failures are left for `submit` to report.
     pub fn warm(&mut self, launch: &Launch, tx: &Sender<AppEvent>) {
-        if self.backend.is_none() {
+        if self.backend.is_none() && self.failed_starts < 2 {
             let _ = self.ensure_backend(launch, tx);
         }
     }
@@ -1211,6 +1218,9 @@ impl Session {
             Msg::Line(v) => self.handle(&v),
             Msg::Exited { status, stderr_tail } => {
                 self.backend = None;
+                if !self.inited {
+                    self.failed_starts = self.failed_starts.saturating_add(1);
+                }
                 self.pending.clear();
                 self.hold_waiting();
                 self.end_streams();
@@ -1253,6 +1263,7 @@ impl Session {
         match kind {
             "system" => match v["subtype"].as_str().unwrap_or("") {
                 "init" => {
+                    (self.inited, self.failed_starts) = (true, 0);
                     let first = self.session_id.is_none();
                     self.session_id = v["session_id"].as_str().map(String::from);
                     self.model = v["model"].as_str().unwrap_or_default().into();
@@ -2102,6 +2113,32 @@ mod tests {
             })
             .expect("respawned");
         assert!(args.lines().next().unwrap().contains("--resume x") && !args.lines().nth(1).unwrap().contains("--resume"));
+    }
+
+    #[test]
+    fn typing_stops_restarting_a_backend_that_keeps_dying_at_start() {
+        let dir = std::env::temp_dir().join(format!("claudeplusplus-dies-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = dir.join("claude");
+        std::fs::write(&script, format!("#!/bin/sh\necho x >> {}/n\necho boom >&2\n", dir.display())).unwrap();
+        std::process::Command::new("chmod").arg("+x").arg(&script).status().unwrap();
+        let launch = crate::backend::Launch { bin: script.to_string_lossy().into(), ..Default::default() };
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut s = Session::new(1, String::new());
+        for _ in 0..5 {
+            s.warm(&launch, &tx); // one per keystroke
+            if s.backend.is_some() {
+                while let Ok(AppEvent::Backend(_, pid, m)) = rx.recv_timeout(std::time::Duration::from_secs(5)) {
+                    let done = matches!(m, Msg::Exited { .. });
+                    s.on_backend(pid, m);
+                    if done { break; }
+                }
+            }
+        }
+        assert_eq!(std::fs::read_to_string(dir.join("n")).unwrap().lines().count(), 2, "two tries, then it stops");
+        s.submit("hi".into(), &[], &launch, &tx); // an explicit send still tries
+        assert!(s.backend.is_some());
     }
 
     #[test]
