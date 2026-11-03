@@ -69,14 +69,20 @@ def sc_interrupt():
     return ok2 and marked and dt < 20, f"interrupt marker shown={marked}, follow-up answered={ok2} in {dt:.1f}s after Esc" + ("" if ok2 else " | screen tail: " + screen(t)[-500:].replace("\n", " / "))
 
 def sc_permission():
-    t = Term([CPP, "--model", "haiku", "--permission-mode", "default"]); t.mark = 0; t.drain(2)
-    t.mark = len(t.buf); os.write(t.fd, b"Run this exact shell command with the Bash tool: touch /private/tmp/cppbench/w/perm-probe.txt"); t.drain(0.5); os.write(t.fd, b"\r")
-    prompt = t.drain(60, b"don't ask again") or t.drain(1, b"Yes")
-    if prompt: os.write(t.fd, b"\x1b"); t.drain(3)  # decline with esc
-    up = not reaped(t)
-    t.mark = len(t.buf); ok2 = t.ask(Q, b"Worked for") if up else False
-    t.close()
-    return prompt and up and ok2, f"prompt shown={prompt}, survived decline={up}, next answered={ok2}"
+    """Needs the model to attempt the tool call; it sometimes declines to, so try up to 3 fresh sessions."""
+    for attempt in range(3):
+        t = Term([CPP, "--model", "haiku", "--permission-mode", "default"]); t.mark = 0; t.drain(2)
+        t.mark = len(t.buf); os.write(t.fd, b"Run this exact shell command with the Bash tool: touch /private/tmp/cppbench/perm-probe.txt"); t.drain(0.5); os.write(t.fd, b"\r")
+        prompt = t.drain(60, b"don't ask again") or t.drain(1, b"Yes")  # outside the working folder, so it asks
+        if prompt: os.write(t.fd, b"\x1b"); t.drain(3)  # decline with esc
+        up = not reaped(t)
+        t.mark = len(t.buf); ok2 = t.ask(Q, b"Worked for") if up else False
+        tail = screen(t)[-500:].replace("\n", " / ")
+        t.close()
+        if prompt:
+            denied = not os.path.exists("/private/tmp/cppbench/perm-probe.txt")
+            return up and ok2 and denied, f"prompt shown, survived decline={up}, next answered={ok2}, declined command did not run={denied} (attempt {attempt + 1})"
+    return False, "the model never attempted the tool call in 3 sessions | last screen: " + tail
 
 SC = {"sigterm": sc_signal(signal.SIGTERM, "SIGTERM"), "sighup": sc_signal(signal.SIGHUP, "SIGHUP"), "sigkill": sc_signal(signal.SIGKILL, "SIGKILL"),
       "killed": sc_backend_killed, "interrupt": sc_interrupt, "permission": sc_permission}
