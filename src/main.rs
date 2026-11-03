@@ -13,6 +13,7 @@ mod files;
 mod history;
 mod image;
 mod markdown;
+mod pane;
 mod panel;
 mod prompt;
 mod queue;
@@ -50,6 +51,8 @@ pub enum AppEvent {
     Status(u64, u64, Option<Vec<String>>),
     /// `claude stop` finished: the message to show, and the session to open afterwards if it worked.
     Stopped(Result<String, String>, Option<(String, String, Option<String>)>),
+    /// Output from (or the end of) the editor pane with this id.
+    Pane(u64, pane::Msg),
     /// SIGTERM or SIGHUP: leave through the normal path so the terminal is restored.
     Quit,
     /// The clipboard was read off the UI thread: session id, the PNG if there was one, what to say if not.
@@ -104,6 +107,7 @@ KEYS  enter send · shift+enter, alt+enter or ctrl+j newline · esc/ctrl+c inter
       shift+tab permission mode · ctrl+o expand all tool output · alt+o or a click folds one call · wheel or pgup/pgdn scroll · ctrl+end jump to latest
       ctrl+g edit the message in $VISUAL / $EDITOR · ctrl+b move a running command to the background (/tasks stops it)
       alt+q manage queued messages (reorder, send now, edit) · ctrl+f search the conversation or what you sent
+      /editor: the box is your $EDITOR (quit it to send); ctrl+g: your editor full screen
       /vim: modal keys in the box (esc normal mode; i a o insert; hjkl w b e f t d c y p u v; / searches); /config → Input mode
       ctrl+r search the messages you sent · ← at the start of the input: earlier sessions · tab completes a /command or an @file (↑↓ to pick, esc hides)
       ctrl+v paste an image as [Image #N] at the cursor (delete the token to drop it)
@@ -118,7 +122,7 @@ IMAGES    ctrl+v, drag a file into the window or /img <path> to attach; pictures
           inline in kitty/Ghostty (CLAUDEPP_IMAGES=on|off overrides detection)";
 
 /// Commands claude++ handles itself: (name, argument hint, description).
-const LOCAL_COMMANDS: [(&str, &str, &str); 31] = [
+const LOCAL_COMMANDS: [(&str, &str, &str); 32] = [
     ("new", "[profile]", "open a new tab"),
     ("profile", "[name] [--hard]", "show or change this tab's profile"),
     ("close", "", "close this tab"),
@@ -137,6 +141,7 @@ const LOCAL_COMMANDS: [(&str, &str, &str); 31] = [
     ("schedule", "<when> <message>", "send a message later: 10m, 2h30m or a time like 14:30"),
     ("search", "[text]", "search this conversation or the messages you sent (ctrl+f)"),
     ("vim", "", "turn vim keys in the message box on or off"),
+    ("editor", "", "turn the message box into your $EDITOR on or off (quit the editor to send)"),
     ("copy", "[code]", "copy the last answer, or its last code block, to the clipboard"),
     ("config", "", "settings: claude++'s and Claude Code's, by section, searchable"),
     ("setting", "", "same as /config"),
@@ -262,8 +267,19 @@ pub struct App {
     pub vim: vim::Vim,
     /// Messages sent while Claude works wait in the queue (else they go at once).
     pub queue_on: bool,
-    /// ctrl+g was pressed: the main loop hands the terminal to the editor.
+    /// ctrl+g was pressed: the main loop opens the editor.
     edit_request: bool,
+    /// Input mode "editor": the message box is your editor, running in a pane; quitting it sends the message.
+    pub editor_mode: bool,
+    /// The running editor: in the box's place (input mode editor) or full screen (ctrl+g).
+    pub pane: Option<pane::Pane>,
+    pane_seq: u64,
+    /// Cursor shape last asked of the terminal for the editor (DECSCUSR), so only changes are written.
+    pane_shape: u8,
+    /// ctrl+g: the box as it was, to put back if the editor fails.
+    pane_old: Option<(String, usize)>,
+    /// `editor` in config.json: a command that overrides $VISUAL and $EDITOR.
+    pub editor_cmd: Option<String>,
     /// ctrl+l: clear and repaint the whole screen before the next frame.
     clear_request: bool,
     /// `/memory`: a file to open in the editor before the next frame.
@@ -408,8 +424,13 @@ fn with_terminal_lent<T>(term: &mut ratatui::DefaultTerminal, app: &mut App, f: 
 
 /// ctrl+g: hand the terminal to the editor with the message in it, take the result back into the box.
 fn edit_in_editor(term: &mut ratatui::DefaultTerminal, app: &mut App) {
-    let editor = editor_command();
+    let editor = app.editor();
     let old = (app.input.clone(), app.cursor);
+    // Preferably inside claude++ (the conversation keeps updating); the terminal is only lent when that cannot start.
+    match app.open_pane(pane::Use::Edit, &old.0) {
+        Ok(()) => return app.pane_old = Some(old),
+        Err(e) => app.flash(format!("embedded editor unavailable ({e}): opening it the plain way")),
+    }
     let res = with_terminal_lent(term, app, || edit_text(&editor, &old.0));
     match res {
         Ok(text) if text != old.0 => {
@@ -427,7 +448,7 @@ fn edit_in_editor(term: &mut ratatui::DefaultTerminal, app: &mut App) {
 
 /// `/memory`: edit a CLAUDE.md in place. Claude Code watches it, so the next turn reads the change.
 fn edit_file_in_editor(term: &mut ratatui::DefaultTerminal, app: &mut App, path: &std::path::Path) {
-    let editor = editor_command();
+    let editor = app.editor();
     let status = with_terminal_lent(term, app, || std::process::Command::new("sh").arg("-c").arg(format!("{editor} \"$1\"")).arg("sh").arg(path).status());
     match status {
         Ok(s) if s.success() => app.flash(format!("saved {}", path.display())),
@@ -564,6 +585,8 @@ fn run(opts: Opts) -> io::Result<()> {
     // "vim": "on" is what older configs say.
     let mode = saved("input_mode").unwrap_or_else(|| if saved("vim").as_deref() == Some("on") { "vim".into() } else { "default".into() });
     app.vim.on = mode == "vim" || mode == "helix"; // "helix" was an input mode once: its users get vim
+    app.editor_mode = mode == "editor";
+    app.editor_cmd = saved("editor").filter(|c| !c.trim().is_empty());
     app.autocopy = saved("autocopy").as_deref() == Some("on");
     app.queue_on = saved("queue").as_deref() != Some("off");
     if let Some(n) = saved("notify").filter(|n| ["off", "bell", "desktop"].contains(&n.as_str())) {
@@ -778,6 +801,12 @@ impl App {
             vim: Default::default(),
             queue_on: true,
             edit_request: false,
+            editor_mode: false,
+            pane: None,
+            pane_seq: 0,
+            pane_shape: 0,
+            pane_old: None,
+            editor_cmd: None,
             clear_request: false,
             edit_file: None,
             cursor_mode: None,
@@ -836,6 +865,8 @@ impl App {
             "answer in the panel above…"
         } else if self.overlay_open() {
             "use the panel above…"
+        } else if self.editor_mode {
+            "type to open your editor · quit it to send  (ctrl+g: editor full screen)"
         } else {
             "message Claude…  (/help)"
         }
@@ -1001,6 +1032,7 @@ impl App {
                 }
                 self.drain_queues();
             }
+            AppEvent::Pane(id, msg) => self.on_pane(id, msg),
             AppEvent::Mem(mem, own) => self.on_mem(mem, own),
             AppEvent::Theme(light) => {
                 theme::set_light(light);
@@ -1179,6 +1211,10 @@ impl App {
     }
 
     fn tick(&mut self) {
+        // An editor that exited but left something holding its terminal open never reports the end itself.
+        if self.pane.as_mut().is_some_and(|p| p.exited()) {
+            self.finish_pane();
+        }
         self.drain_queues(); // scheduled messages come due with the clock
         self.pump_statusline();
         for s in &mut self.sessions {
@@ -1277,8 +1313,23 @@ impl App {
     }
 
     fn on_paste(&mut self, p: String) {
+        if self.pane_has_keyboard() {
+            return self.pane.as_mut().map_or((), |e| e.paste(&p));
+        }
         if self.overlay_open() {
             return;
+        }
+        // Input mode editor: the paste is what the editor opens with (keys sent before it is ready could be commands).
+        if self.editor_mode && self.pane.is_none() && self.sessions[self.active].pending.is_empty() {
+            let text = format!("{}{}", std::mem::take(&mut self.input), p.replace("\r\n", "\n").replace('\r', "\n"));
+            match self.open_pane(pane::Use::Send, &text) {
+                Ok(()) => return self.cursor = 0,
+                Err(e) => {
+                    self.input = text;
+                    self.cursor = self.input.chars().count();
+                    return self.flash(format!("could not start the editor ({e}): pasted into the box"));
+                }
+            }
         }
         // A question takes pasted text as its typed answer; a permission prompt only as the reason on its
         // "No" row (a pasted "y" must never approve anything).
@@ -1410,8 +1461,25 @@ impl App {
     }
 
     fn on_key(&mut self, k: KeyEvent) {
+        if self.pane_has_keyboard() {
+            return self.pane_key(k);
+        }
         let box_is_free = !self.overlay_open() && self.sessions[self.active].pending.is_empty();
         let (ctrl, alt, shift) = (k.modifiers.contains(KeyModifiers::CONTROL), k.modifiers.contains(KeyModifiers::ALT), k.modifiers.contains(KeyModifiers::SHIFT));
+        // Input mode editor: typing starts your editor, and the key goes into it.
+        if self.editor_mode && self.pane.is_none() && box_is_free && !ctrl && !alt && matches!(k.code, KeyCode::Char(_)) {
+            let text = std::mem::take(&mut self.input);
+            match self.open_pane(pane::Use::Send, &text) {
+                Ok(()) => {
+                    self.cursor = 0;
+                    return self.pane_key(k);
+                }
+                Err(e) => {
+                    self.input = text;
+                    self.flash(format!("could not start the editor ({e}): typing in the box"));
+                }
+            }
+        }
         // ctrl+z undoes; ctrl+shift+z redoes, and so does alt+z for terminals that cannot tell shift apart.
         // In vim's normal mode `u` and ctrl+r do the same.
         let in_normal = self.vim.on && self.vim.mode == vim::Mode::Normal && !self.vim.pending() && !alt;
@@ -2232,6 +2300,122 @@ impl App {
         }
     }
 
+    /// The editor to run: `editor` in config.json, else `$VISUAL`, `$EDITOR`, `vi`.
+    fn editor(&self) -> String {
+        self.editor_cmd.clone().unwrap_or_else(editor_command)
+    }
+
+    /// The editor owns the keyboard unless a prompt or panel is asking you something (full screen: always).
+    fn pane_has_keyboard(&self) -> bool {
+        self.pane.as_ref().is_some_and(|p| p.kind == pane::Use::Edit || (self.sessions[self.active].pending.is_empty() && !self.overlay_open()))
+    }
+
+    /// Start the editor on `text`. Err when it cannot (no pty): the caller falls back to the box.
+    fn open_pane(&mut self, kind: pane::Use, text: &str) -> io::Result<()> {
+        self.pane_seq += 1;
+        let (w, h) = terminal::size().unwrap_or((80, 24));
+        let rows = if kind == pane::Use::Edit { h.saturating_sub(1) } else { ui::pane_rows(h) };
+        let pane = pane::Pane::spawn(self.pane_seq, kind, &self.editor(), text, (rows, w), self.tx.clone(), AppEvent::Pane)?;
+        self.pane = Some(pane);
+        self.pane_shape = u8::MAX;
+        if kind == pane::Use::Send {
+            // The editor opens as you start typing, which is also the moment to start Claude.
+            let (launch, tx) = (self.launch_for(self.active), self.tx.clone());
+            self.s().warm(&launch, &tx);
+        }
+        Ok(())
+    }
+
+    fn pane_key(&mut self, k: KeyEvent) {
+        // The one key the editor never sees: a way out if it hangs or you change your mind. (A terminal that
+        // cannot tell ctrl+\ apart sends ctrl+4.)
+        if k.modifiers.contains(KeyModifiers::CONTROL) && matches!(k.code, KeyCode::Char('\\' | '4')) {
+            self.pane = None;
+            self.pane_closed();
+            let old = self.pane_old.take();
+            if let Some((text, cursor)) = old {
+                self.set_input(text);
+                self.cursor = cursor;
+            }
+            return self.flash("editor closed: nothing sent");
+        }
+        if let Some(p) = self.pane.as_mut() {
+            p.key(k);
+        }
+    }
+
+    fn on_pane(&mut self, id: u64, msg: pane::Msg) {
+        let Some(p) = self.pane.as_mut().filter(|p| p.id == id) else { return };
+        match msg {
+            pane::Msg::Bytes(b) => {
+                p.feed(&b);
+                self.sync_pane_cursor();
+            }
+            pane::Msg::Ended => self.finish_pane(),
+        }
+    }
+
+    /// Ask the terminal for the cursor shape the editor wants (vim: block in normal mode, bar in insert).
+    fn sync_pane_cursor(&mut self) {
+        let Some(shape) = self.pane.as_ref().map(|p| p.cursor_shape()) else { return };
+        if shape != self.pane_shape {
+            self.pane_shape = shape;
+            if self.tty {
+                let _ = write!(io::stdout(), "\x1b[{shape} q");
+                let _ = io::stdout().flush();
+            }
+        }
+    }
+
+    /// The editor is gone: give the cursor back to the box.
+    fn pane_closed(&mut self) {
+        if self.tty {
+            let _ = write!(io::stdout(), "\x1b[0 q");
+            let _ = io::stdout().flush();
+        }
+        self.cursor_mode = None;
+        self.vim_shape();
+    }
+
+    /// The editor exited: send (input mode editor) or return (ctrl+g) what it left in the file.
+    fn finish_pane(&mut self) {
+        let Some(p) = self.pane.take() else { return };
+        let kind = p.kind;
+        let out = p.finish();
+        self.pane_closed();
+        let old = self.pane_old.take();
+        let text = match out.text {
+            Ok(t) => t,
+            Err(e) => return self.flash(format!("editor: could not read the message back: {e}")),
+        };
+        match kind {
+            pane::Use::Send if !out.ok => {
+                // :cq, a crash, a kill: not a send, but what was written is not thrown away.
+                self.set_input(text);
+                self.flash(format!("editor exited with {}: nothing sent; your text is in the box", out.status));
+            }
+            pane::Use::Send if text.trim().is_empty() => self.flash("empty message: nothing sent"),
+            pane::Use::Send => {
+                self.set_input(text);
+                self.submit();
+            }
+            pane::Use::Edit if !out.ok => self.flash(format!("editor exited with {}; your message is as it was", out.status)),
+            pane::Use::Edit => {
+                let old = old.unwrap_or_default();
+                if text != old.0 {
+                    self.undo.push(old);
+                    self.redo.clear();
+                    self.set_input(text);
+                    self.vim.mode = vim::Mode::Insert;
+                    self.flash("message edited");
+                } else {
+                    self.flash("message unchanged");
+                }
+            }
+        }
+        self.vim_shape();
+    }
+
     /// Ask the terminal for a block cursor in normal mode and a bar in insert mode.
     fn vim_shape(&mut self) {
         let want = self.vim.on.then_some(self.vim.mode);
@@ -2942,7 +3126,7 @@ impl App {
             "mouse" => if self.mouse { "on" } else { "off" }.to_string(),
             "autocopy" => if self.autocopy { "on" } else { "off" }.to_string(),
             "side_panel" => if self.dock_mode { "on" } else { "off" }.to_string(),
-            "input_mode" => if self.vim.on { "vim" } else { "default" }.to_string(),
+            "input_mode" => if self.vim.on { "vim" } else if self.editor_mode { "editor" } else { "default" }.to_string(),
             "theme" => theme::mode_name().to_string(),
             "queue" => if self.queue_on { "on" } else { "off" }.to_string(),
             _ => String::new(),
@@ -2981,7 +3165,8 @@ impl App {
                 self.restyle();
             }
             "input_mode" => {
-                self.vim.on = value != "default";
+                self.vim.on = value == "vim";
+                self.editor_mode = value == "editor";
                 self.vim.mode = vim::Mode::Insert;
                 self.vim_shape();
             }
@@ -3359,6 +3544,10 @@ impl App {
                     let at = ui.reveal();
                     self.s().reveal = at;
                 }
+            }
+            "/editor" => {
+                self.apply_setting("input_mode", if self.editor_mode { "default" } else { "editor" });
+                self.flash(if self.editor_mode { "editor mode on: type to open your editor, quit it to send; ctrl+\\ cancels; /editor turns it off" } else { "editor mode off" });
             }
             "/vim" => {
                 self.apply_setting("input_mode", if self.vim.on { "default" } else { "vim" });

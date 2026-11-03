@@ -96,8 +96,8 @@ pub const ITEMS: &[Item] = &[
     Item {
         key: "input_mode",
         label: "Input mode",
-        help: "default: the ordinary keys. vim: the message box has vim's modes; Esc leaves insert mode (hjkl w b e f t, d c y with motions and objects, p u, v selection, / searches). Enter still sends. /vim toggles too.",
-        choices: &[("default", "default"), ("vim", "vim")],
+        help: "default: the ordinary keys. vim: the message box has vim's modes; Esc leaves insert mode (hjkl w b e f t, d c y with motions and objects, p u, v selection, / searches). Enter still sends. /vim toggles too. editor: the box is your $VISUAL/$EDITOR (or `editor` in config.json) running inside claude++: type to open it, quit it to send; ctrl+\\ cancels; no / or @ completion. /editor toggles too.",
+        choices: &[("default", "default"), ("vim", "vim"), ("editor", "editor")],
     },
     Item {
         key: "queue",

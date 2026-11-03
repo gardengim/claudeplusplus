@@ -38,8 +38,33 @@ pub struct Hits {
     pub body: Rect,
 }
 
+/// Rows the editor gets in the message box's place: a third of the screen, 5 to 14.
+pub fn pane_rows(screen_h: u16) -> u16 {
+    (screen_h / 3).clamp(5, 14).min(screen_h.saturating_sub(6).max(1))
+}
+
+/// ctrl+g: the editor takes the whole screen (a hint row stays at the bottom), the conversation keeps updating behind it.
+fn draw_editor_full(f: &mut Frame, app: &mut App) {
+    let waiting = !app.sessions[app.active].pending.is_empty();
+    let [body, foot] = Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).areas(f.area());
+    let Some(p) = app.pane.as_mut() else { return };
+    p.resize(body.height, body.width);
+    if let Some((x, y)) = p.render(f.buffer_mut(), body) {
+        f.set_cursor_position(Position::new(x, y));
+    }
+    let hint = format!(" {} · quit it to put the text in the box · ctrl+\\ cancels", p.editor);
+    let mut spans = vec![Span::styled(hint, theme::dim())];
+    if waiting {
+        spans.push(Span::styled(" · ◆ Claude is waiting for you", theme::attention()));
+    }
+    f.render_widget(Paragraph::new(Line::from(spans)), foot);
+}
+
 pub fn draw(f: &mut Frame, app: &mut App) {
     app.hits = Hits::default();
+    if app.pane.as_ref().is_some_and(|p| p.kind == crate::pane::Use::Edit) {
+        return draw_editor_full(f, app);
+    }
     // The whole UI wears the colour being picked, or of the conversation being browsed, in real time.
     let accent = app.accent_color();
     theme::set_accent(accent.as_deref());
@@ -101,7 +126,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         Constraint::Length(task_lines.len() as u16),
         Constraint::Length(queue_lines.len() as u16),
         Constraint::Length(panel_h),
-        Constraint::Length(input_rows.len().min((area.height / 2).max(8) as usize) as u16 + 2),
+        Constraint::Length(if app.pane.is_some() { pane_rows(area.height) } else { input_rows.len().min((area.height / 2).max(8) as usize) as u16 } + 2),
         Constraint::Length(ext_h),
         Constraint::Length(1),
     ])
@@ -144,6 +169,23 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         app.hits.list = panel::render(f, panel_area, view);
     }
 
+    // Input mode editor, editing: the box is the editor.
+    if app.pane.is_some() {
+        let title = app.pane.as_ref().map_or(String::new(), |p| format!(" {} · quit it to send · ctrl+\\ cancels ", p.editor));
+        let rule = Block::new().borders(Borders::TOP | Borders::BOTTOM).border_style(theme::accent()).title(Span::styled(title, theme::accent()));
+        let inner = rule.inner(input_area);
+        f.render_widget(rule, input_area);
+        let keeps = input_keeps_focus && app.sessions[app.active].pending.is_empty();
+        if let Some(p) = app.pane.as_mut() {
+            p.resize(inner.height, inner.width);
+            let at = p.render(f.buffer_mut(), inner);
+            if let Some((x, y)) = at.filter(|_| keeps) {
+                f.set_cursor_position(Position::new(x, y));
+            }
+        }
+        f.render_widget(Paragraph::new(status_line(app, area.height)), status);
+        return;
+    }
     // Input box: a rule above and below plus the wrapped text, scrolled to keep the cursor visible.
     let visible = input_area.height.saturating_sub(2) as usize;
     let skip = (cursor_row + 1).saturating_sub(visible);

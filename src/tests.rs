@@ -2574,3 +2574,94 @@ fn hostile_backend_messages_and_keys_never_panic_the_ui() {
         }
     }
 }
+
+// ---- the editor pane (input mode "editor", ctrl+g full screen) ------------------------------------------------
+// These need a pty; where one cannot be opened (a sandbox) they say so and pass.
+
+fn pane_app(editor: &str) -> (App, mpsc::Receiver<AppEvent>) {
+    let (tx, rx) = mpsc::channel();
+    let mut app = App::new(Launch::default(), "/".into(), tx, Duration::ZERO);
+    app.new_tab();
+    app.editor_cmd = Some(editor.into());
+    (app, rx)
+}
+
+/// Deliver the editor's output and its end, as the main loop would, until the pane is gone.
+fn run_pane_to_the_end(app: &mut App, rx: &mpsc::Receiver<AppEvent>) -> bool {
+    let end = Instant::now() + Duration::from_secs(10);
+    while app.pane.is_some() && Instant::now() < end {
+        if let Ok(ev) = rx.recv_timeout(Duration::from_millis(50)) {
+            app.on_event(ev);
+        }
+        app.tick();
+    }
+    app.pane.is_none()
+}
+
+#[test]
+fn input_mode_editor_opens_on_typing_and_sends_what_the_editor_leaves() {
+    let (mut app, rx) = pane_app("printf 'hello from the editor' >");
+    app.apply_setting("input_mode", "editor");
+    assert_eq!(app.setting_value("input_mode"), "editor");
+    typed(&mut app, "h");
+    if app.pane.is_none() {
+        return eprintln!("skipped: no pty here");
+    }
+    assert!(run_pane_to_the_end(&mut app, &rx), "the editor ended");
+    assert_eq!(sent(&mut app), ["hello from the editor"]);
+    assert!(app.input.is_empty());
+}
+
+#[test]
+fn a_failing_editor_sends_nothing_and_keeps_the_text_and_ctrl_backslash_cancels() {
+    let (mut app, rx) = pane_app("printf 'draft' > \"$1\"; exit 3 #");
+    app.apply_setting("input_mode", "editor");
+    typed(&mut app, "x");
+    if app.pane.is_none() {
+        return eprintln!("skipped: no pty here");
+    }
+    assert!(run_pane_to_the_end(&mut app, &rx));
+    assert!(sent(&mut app).is_empty(), "exit status 3 (:cq) is not a send");
+    assert_eq!(app.input, "draft", "what was written is not thrown away");
+
+    let (mut app, _rx) = pane_app("sleep 30 #");
+    app.apply_setting("input_mode", "editor");
+    typed(&mut app, "x");
+    assert!(app.pane.is_some());
+    app.on_key(KeyEvent::new(KeyCode::Char('\\'), KeyModifiers::CONTROL));
+    assert!(app.pane.is_none() && sent(&mut app).is_empty(), "ctrl+\\ closes it without sending");
+}
+
+#[test]
+fn ctrl_g_edits_the_box_in_a_full_screen_editor_and_puts_the_text_back() {
+    let (mut app, rx) = pane_app("printf 'edited text' >");
+    app.set_input("old text".into());
+    if app.open_pane(pane::Use::Edit, "old text").is_err() {
+        return eprintln!("skipped: no pty here");
+    }
+    app.pane_old = Some(("old text".into(), 8));
+    assert!(run_pane_to_the_end(&mut app, &rx));
+    assert_eq!(app.input, "edited text");
+    assert!(sent(&mut app).is_empty(), "ctrl+g edits; it does not send");
+    app.on_key(KeyEvent::new(KeyCode::Char('z'), KeyModifiers::CONTROL));
+    assert_eq!(app.input, "old text", "and it is one undo away");
+}
+
+#[test]
+fn the_editor_pane_draws_at_any_terminal_size() {
+    for kind in [pane::Use::Send, pane::Use::Edit] {
+        let (mut app, _rx) = pane_app("sleep 30 #");
+        if app.open_pane(kind, "some text").is_err() {
+            return eprintln!("skipped: no pty here");
+        }
+        for (w, h) in [(100, 30), (20, 6), (1, 1), (7, 40), (200, 3)] {
+            screen(&mut app, w, h);
+        }
+        let rows = screen(&mut app, 100, 30);
+        if kind == pane::Use::Send {
+            assert!(rows.iter().any(|r| r.contains("quit it to send")), "{rows:?}");
+        } else {
+            assert!(rows.last().is_some_and(|r| r.contains("ctrl+\\ cancels")), "{rows:?}");
+        }
+    }
+}
