@@ -1268,6 +1268,9 @@ impl Session {
                     self.session_id = v["session_id"].as_str().map(String::from);
                     self.model = v["model"].as_str().unwrap_or_default().into();
                     self.version = v["claude_code_version"].as_str().unwrap_or_default().into();
+                    if newer_than_verified(&self.version) && !WARNED_VERSION.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                        self.note(format!("Claude Code {} is newer than the {VERIFIED_LINE}.x line claude++ was verified on; if something looks off, run `python3 bench/contract.py`", self.version));
+                    }
                     self.fast_mode = v["fast_mode_state"] == "on";
                     if let Some(t) = v["tools"].as_array() {
                         self.tools = t.iter().filter_map(|x| x.as_str().map(String::from)).collect();
@@ -1689,6 +1692,18 @@ impl Session {
 }
 
 /// How a foreground agent's tool result starts when its report went to Claude separately.
+/// The Claude Code line `bench/contract.py` last passed on. A newer major.minor gets one note, not a block.
+const VERIFIED_LINE: &str = "2.1";
+static WARNED_VERSION: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+fn newer_than_verified(version: &str) -> bool {
+    let mm = |v: &str| {
+        let mut p = v.split('.').map(|x| x.parse::<u32>().ok());
+        Some((p.next()??, p.next()??))
+    };
+    matches!((mm(version), mm(VERIFIED_LINE)), (Some(v), Some(k)) if v > k)
+}
+
 const AGENT_RECEIPT: &str = "This agent's report was delivered to you";
 
 /// `7s`, `2m 5s`, `1h 3m`.
@@ -2113,6 +2128,13 @@ mod tests {
             })
             .expect("respawned");
         assert!(args.lines().next().unwrap().contains("--resume x") && !args.lines().nth(1).unwrap().contains("--resume"));
+    }
+
+    #[test]
+    fn only_a_newer_major_minor_than_verified_is_flagged() {
+        assert!(!newer_than_verified("2.1.317") && !newer_than_verified("2.1.0") && !newer_than_verified("2.0.9"));
+        assert!(newer_than_verified("2.2.0") && newer_than_verified("3.0.1"));
+        assert!(!newer_than_verified("") && !newer_than_verified("garbage"));
     }
 
     #[test]
