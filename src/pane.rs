@@ -406,6 +406,19 @@ mod tests {
         assert_eq!(String::from_utf8_lossy(&encode(key(KeyCode::Up, n), true)), "\x1bOA", "application cursor mode");
     }
 
+    #[test]
+    fn no_key_combination_panics_the_encoder() {
+        let codes = [KeyCode::Char('a'), KeyCode::Char('Z'), KeyCode::Char('\u{0}'), KeyCode::Char('日'), KeyCode::Char('\u{10ffff}'), KeyCode::Enter, KeyCode::Tab, KeyCode::BackTab, KeyCode::Backspace, KeyCode::Esc, KeyCode::Up, KeyCode::Down, KeyCode::Left, KeyCode::Right, KeyCode::Home, KeyCode::End, KeyCode::Insert, KeyCode::Delete, KeyCode::PageUp, KeyCode::PageDown, KeyCode::Null, KeyCode::CapsLock, KeyCode::F(0), KeyCode::F(1), KeyCode::F(4), KeyCode::F(5), KeyCode::F(12), KeyCode::F(13), KeyCode::F(255)];
+        for code in codes {
+            for bits in 0..8u8 {
+                let mods = KeyModifiers::from_bits_truncate(bits);
+                for app_cursor in [false, true] {
+                    let _ = encode(key(code, mods), app_cursor);
+                }
+            }
+        }
+    }
+
     fn parsed(rows: u16, cols: u16, bytes: &[u8]) -> vt100::Parser<Replies> {
         let mut p = vt100::Parser::new_with_callbacks(nz(rows), nz(cols), 0, Replies::default());
         p.process(bytes);

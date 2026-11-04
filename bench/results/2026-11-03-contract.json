@@ -30,7 +30,7 @@
   {
    "check": "THESIS: headless request stays under 40000 tokens",
    "ok": true,
-   "detail": "33336"
+   "detail": "33603"
   },
   {
    "check": "--resume <id> continues the conversation",

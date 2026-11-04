@@ -84,7 +84,23 @@ def sc_permission():
             return up and ok2 and denied, f"prompt shown, survived decline={up}, next answered={ok2}, declined command did not run={denied} (attempt {attempt + 1})"
     return False, "the model never attempted the tool call in 3 sessions | last screen: " + tail
 
-SC = {"sigterm": sc_signal(signal.SIGTERM, "SIGTERM"), "sighup": sc_signal(signal.SIGHUP, "SIGHUP"), "sigkill": sc_signal(signal.SIGKILL, "SIGKILL"),
+def sc_editor_orphans(sig):
+    """An editor open in the box must not outlive claude++, however it dies."""
+    def run():
+        import json
+        cfg = tempfile.mkdtemp(prefix="cpp-hostile-ed-"); os.makedirs(cfg + "/claude++")
+        json.dump({"editor": "sleep 300 #", "input_mode": "editor"}, open(cfg + "/claude++/config.json", "w"))
+        old = os.environ["XDG_CONFIG_HOME"]; os.environ["XDG_CONFIG_HOME"] = cfg
+        try: t = Term([CPP, "--model", "haiku"])
+        finally: os.environ["XDG_CONFIG_HOME"] = old
+        t.mark = 0; t.drain(1.5); os.write(t.fd, b"x"); t.drain(2.0)
+        editor = [p for p in tree(t.pid)[1:] if "sleep" in subprocess.run(["ps", "-o", "command=", "-p", str(p)], capture_output=True, text=True).stdout]
+        if not editor: return False, "the editor never started"
+        os.kill(t.pid, sig); t.drain(2)
+        return gone(editor, 8), f"editor processes {editor} gone after the signal: {gone(editor, 0.1)}"
+    return run
+
+SC = {"editor-term": sc_editor_orphans(signal.SIGTERM), "editor-hup": sc_editor_orphans(signal.SIGHUP), "editor-kill": sc_editor_orphans(signal.SIGKILL), "sigterm": sc_signal(signal.SIGTERM, "SIGTERM"), "sighup": sc_signal(signal.SIGHUP, "SIGHUP"), "sigkill": sc_signal(signal.SIGKILL, "SIGKILL"),
       "killed": sc_backend_killed, "interrupt": sc_interrupt, "permission": sc_permission}
 bad = 0
 for name, fn in SC.items():

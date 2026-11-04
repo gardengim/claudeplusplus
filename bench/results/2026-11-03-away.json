@@ -7,13 +7,13 @@
    "caveman-mcp": 1,
    "node": 3
   },
-  "mb": 240.8
+  "mb": 231.0
  },
  "away": {
   "procs": {
    "claudeplusplus": 1
   },
-  "mb": 4.8
+  "mb": 5.0
  },
  "recalled 42 after the stop": true
 }

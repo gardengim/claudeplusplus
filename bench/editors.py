@@ -55,7 +55,7 @@ def received(log, n, secs=15):
 
 def send_keys(t, keys, gap=0.03):
     for ch in keys:
-        os.write(t.fd, ch.encode()); t.drain(gap)
+        os.write(t.fd, ch.encode()); t.drain(0.15 if ch == "\x1b" else gap)  # Esc then a key within the editor's escape timeout (50 ms) reads as Alt+key, as in any terminal
 
 def alive(t):
     try: return os.waitpid(t.pid, os.WNOHANG)[0] == 0
