@@ -64,7 +64,7 @@ def alive(t):
 def scenario_a(name):
     cmd, write, _ = EDITORS[name]
     t, log = start(cmd, "editor")
-    # the first keystroke opens the editor and is held until it has painted; nano takes text, vim needs `i` first
+    # the editor is already open in the message area; nano takes text, vim needs `i` first
     first, rest = (write("hello from " + name)[0], write("hello from " + name)[1:])
     os.write(t.fd, first.encode()); t.drain(2.0)
     send_keys(t, rest)

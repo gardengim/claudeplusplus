@@ -359,8 +359,9 @@ Release binary: ~2.3 MB.
   private temp file. Two uses, one component. **ctrl+g** opens it full screen on the message in the box: save and quit
   and the text replaces the box (ctrl+z undoes it); a failing editor leaves the message as it was. While it is open the
   conversation keeps updating behind it, and a hint row says if Claude is waiting for you. **Input mode `editor`**
-  (`/config`, or `/editor`): the box *is* your editor. The first key you type opens it (and starts Claude's process, as
-  typing does), sized to a third of the screen above the status line; a paste opens it with the paste loaded. Quit the
+  (`/config`, or `/editor`): the message area *is* your editor: it is open as soon as the mode is on (no `/` or key to start it), sized to a
+  third of the screen above the status line, and a fresh one replaces it after each send. Claude's process still starts
+  only when you type, as before. Quit the
   editor (`:wq`, `ctrl+x`...) and its text is sent as the message; quit with an error (`:cq`) and nothing is sent but
   your text goes into the box. **ctrl+\ always cancels** (nothing is sent), and is the only key the editor never sees.
   A permission prompt or question takes the keyboard from the pane until you answer it. Not available in that mode:

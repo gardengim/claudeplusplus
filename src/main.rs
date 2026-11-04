@@ -107,7 +107,7 @@ KEYS  enter send · shift+enter, alt+enter or ctrl+j newline · esc/ctrl+c inter
       shift+tab permission mode · ctrl+o expand all tool output · alt+o or a click folds one call · wheel or pgup/pgdn scroll · ctrl+end jump to latest
       ctrl+g edit the message in your editor, full screen inside claude++ (ctrl+\\ cancels) · ctrl+b move a running command to the background (/tasks stops it)
       alt+q manage queued messages (reorder, send now, edit) · ctrl+f search the conversation or what you sent
-      /editor: the box is your editor (quit it to send; ctrl+\\ cancels; no / or @ completion)
+      /editor: the message area is your editor, always open (quit it to send; ctrl+\\ cancels; no / or @ completion)
       /vim: modal keys in the box (esc normal mode; i a o insert; hjkl w b e f t d c y p u v; / searches); /config → Input mode
       ctrl+r search the messages you sent · ← at the start of the input: earlier sessions · tab completes a /command or an @file (↑↓ to pick, esc hides)
       ctrl+v paste an image as [Image #N] at the cursor (delete the token to drop it)
@@ -278,6 +278,8 @@ pub struct App {
     pane_shape: u8,
     /// ctrl+g: the box as it was, to put back if the editor fails.
     pane_old: Option<(String, usize)>,
+    /// Opening the editor failed (no pty): stop trying and use the plain box.
+    pane_failed: bool,
     /// `editor` in config.json: a command that overrides $VISUAL and $EDITOR.
     pub editor_cmd: Option<String>,
     /// ctrl+l: clear and repaint the whole screen before the next frame.
@@ -806,6 +808,7 @@ impl App {
             pane_seq: 0,
             pane_shape: 0,
             pane_old: None,
+            pane_failed: false,
             editor_cmd: None,
             clear_request: false,
             edit_file: None,
@@ -865,8 +868,8 @@ impl App {
             "answer in the panel above…"
         } else if self.overlay_open() {
             "use the panel above…"
-        } else if self.editor_mode {
-            "type to open your editor · quit it to send  (ctrl+g: editor full screen)"
+        } else if self.editor_mode && !self.pane_failed {
+            "starting your editor…"
         } else {
             "message Claude…  (/help)"
         }
@@ -1215,6 +1218,7 @@ impl App {
         if self.pane.as_mut().is_some_and(|p| p.exited()) {
             self.finish_pane();
         }
+        self.keep_editor_open();
         self.drain_queues(); // scheduled messages come due with the clock
         self.pump_statusline();
         for s in &mut self.sessions {
@@ -1314,13 +1318,16 @@ impl App {
 
     fn on_paste(&mut self, p: String) {
         if self.pane_has_keyboard() {
+            if self.pane.as_ref().is_some_and(|p| p.kind == pane::Use::Send) {
+                self.warm_active();
+            }
             return self.pane.as_mut().map_or((), |e| e.paste(&p));
         }
         if self.overlay_open() {
             return;
         }
         // Input mode editor: the paste is what the editor opens with (keys sent before it is ready could be commands).
-        if self.editor_mode && self.pane.is_none() && self.sessions[self.active].pending.is_empty() {
+        if self.editor_mode && !self.pane_failed && self.pane.is_none() && self.sessions[self.active].pending.is_empty() {
             let text = format!("{}{}", std::mem::take(&mut self.input), p.replace("\r\n", "\n").replace('\r', "\n"));
             match self.open_pane(pane::Use::Send, &text) {
                 Ok(()) => return self.cursor = 0,
@@ -1466,8 +1473,8 @@ impl App {
         }
         let box_is_free = !self.overlay_open() && self.sessions[self.active].pending.is_empty();
         let (ctrl, alt, shift) = (k.modifiers.contains(KeyModifiers::CONTROL), k.modifiers.contains(KeyModifiers::ALT), k.modifiers.contains(KeyModifiers::SHIFT));
-        // Input mode editor: typing starts your editor, and the key goes into it.
-        if self.editor_mode && self.pane.is_none() && box_is_free && !ctrl && !alt && matches!(k.code, KeyCode::Char(_)) {
+        // Input mode editor, when the editor could not be opened up front: typing retries it.
+        if self.editor_mode && !self.pane_failed && self.pane.is_none() && box_is_free && !ctrl && !alt && matches!(k.code, KeyCode::Char(_)) {
             let text = std::mem::take(&mut self.input);
             match self.open_pane(pane::Use::Send, &text) {
                 Ok(()) => {
@@ -2318,12 +2325,38 @@ impl App {
         let pane = pane::Pane::spawn(self.pane_seq, kind, &self.editor(), text, (rows, w), self.tx.clone(), AppEvent::Pane)?;
         self.pane = Some(pane);
         self.pane_shape = u8::MAX;
-        if kind == pane::Use::Send {
-            // The editor opens as you start typing, which is also the moment to start Claude.
-            let (launch, tx) = (self.launch_for(self.active), self.tx.clone());
-            self.s().warm(&launch, &tx);
-        }
         Ok(())
+    }
+
+    /// Input mode editor: the message area IS the editor. It is open whenever the box is free, and a fresh one
+    /// replaces it after each send. (Claude itself still starts only when you type.)
+    fn keep_editor_open(&mut self) {
+        if !self.editor_mode {
+            // Turned off: close an idle send editor (anything typed in it is lost, as with ctrl+\).
+            if self.pane.as_ref().is_some_and(|p| p.kind == pane::Use::Send) {
+                self.pane = None;
+                self.pane_closed();
+            }
+            self.pane_failed = false;
+            return;
+        }
+        if self.pane.is_some() || self.pane_failed || self.overlay_open() || !self.sessions[self.active].pending.is_empty() {
+            return;
+        }
+        let text = std::mem::take(&mut self.input);
+        if let Err(e) = self.open_pane(pane::Use::Send, &text) {
+            self.input = text;
+            self.pane_failed = true;
+            self.flash(format!("could not start the editor ({e}): using the plain box"));
+        } else {
+            self.cursor = 0;
+        }
+    }
+
+    /// The editor is for typing, which is the moment to start Claude.
+    fn warm_active(&mut self) {
+        let (launch, tx) = (self.launch_for(self.active), self.tx.clone());
+        self.s().warm(&launch, &tx);
     }
 
     fn pane_key(&mut self, k: KeyEvent) {
@@ -2338,6 +2371,9 @@ impl App {
                 self.cursor = cursor;
             }
             return self.flash("editor closed: nothing sent");
+        }
+        if self.pane.as_ref().is_some_and(|p| p.kind == pane::Use::Send) {
+            self.warm_active();
         }
         if let Some(p) = self.pane.as_mut() {
             p.key(k);
@@ -3547,7 +3583,7 @@ impl App {
             }
             "/editor" => {
                 self.apply_setting("input_mode", if self.editor_mode { "default" } else { "editor" });
-                self.flash(if self.editor_mode { "editor mode on: type to open your editor, quit it to send; ctrl+\\ cancels; /editor turns it off" } else { "editor mode off" });
+                self.flash(if self.editor_mode { "editor mode on: the message area is your editor, quit it to send; ctrl+\\ cancels; /editor turns it off" } else { "editor mode off" });
             }
             "/vim" => {
                 self.apply_setting("input_mode", if self.vim.on { "default" } else { "vim" });

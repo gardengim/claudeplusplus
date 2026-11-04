@@ -2586,37 +2586,45 @@ fn pane_app(editor: &str) -> (App, mpsc::Receiver<AppEvent>) {
     (app, rx)
 }
 
-/// Deliver the editor's output and its end, as the main loop would, until the pane is gone.
+/// Deliver the editor's output and its end, as the main loop would, until the pane is gone
+/// (without `tick`, which in input mode editor would open the next one).
 fn run_pane_to_the_end(app: &mut App, rx: &mpsc::Receiver<AppEvent>) -> bool {
     let end = Instant::now() + Duration::from_secs(10);
     while app.pane.is_some() && Instant::now() < end {
         if let Ok(ev) = rx.recv_timeout(Duration::from_millis(50)) {
             app.on_event(ev);
         }
-        app.tick();
+        if app.pane.as_mut().is_some_and(|p| p.exited()) {
+            app.finish_pane();
+        }
     }
     app.pane.is_none()
 }
 
 #[test]
-fn input_mode_editor_opens_on_typing_and_sends_what_the_editor_leaves() {
+fn input_mode_editor_is_open_without_a_key_sends_what_the_editor_leaves_and_comes_back() {
     let (mut app, rx) = pane_app("printf 'hello from the editor' >");
     app.apply_setting("input_mode", "editor");
     assert_eq!(app.setting_value("input_mode"), "editor");
-    typed(&mut app, "h");
+    app.tick();
     if app.pane.is_none() {
         return eprintln!("skipped: no pty here");
     }
     assert!(run_pane_to_the_end(&mut app, &rx), "the editor ended");
     assert_eq!(sent(&mut app), ["hello from the editor"]);
     assert!(app.input.is_empty());
+    app.tick();
+    assert!(app.pane.is_some(), "a fresh editor replaces it after a send");
+    app.apply_setting("input_mode", "default");
+    app.tick();
+    assert!(app.pane.is_none(), "turning the mode off closes it");
 }
 
 #[test]
 fn a_failing_editor_sends_nothing_and_keeps_the_text_and_ctrl_backslash_cancels() {
     let (mut app, rx) = pane_app("printf 'draft' > \"$1\"; exit 3 #");
     app.apply_setting("input_mode", "editor");
-    typed(&mut app, "x");
+    app.tick();
     if app.pane.is_none() {
         return eprintln!("skipped: no pty here");
     }
@@ -2626,7 +2634,7 @@ fn a_failing_editor_sends_nothing_and_keeps_the_text_and_ctrl_backslash_cancels(
 
     let (mut app, _rx) = pane_app("sleep 30 #");
     app.apply_setting("input_mode", "editor");
-    typed(&mut app, "x");
+    app.tick();
     assert!(app.pane.is_some());
     app.on_key(KeyEvent::new(KeyCode::Char('\\'), KeyModifiers::CONTROL));
     assert!(app.pane.is_none() && sent(&mut app).is_empty(), "ctrl+\\ closes it without sending");
