@@ -2650,6 +2650,25 @@ fn a_new_session_asks_for_the_cache_friendly_prompt_unless_switched_off() {
 }
 
 #[test]
+fn compaction_size_is_passed_on_and_a_very_long_conversation_is_told_about_it_once() {
+    let (mut app, _rx) = pane_app("sleep 1 #");
+    assert!(!app.launch_for(0).args.contains(&"--autocompact".to_string()), "off by default: Claude Code's own size");
+    app.apply_setting("autocompact_k", "200");
+    assert_eq!(app.setting_value("autocompact_k"), "200");
+    assert!(app.launch_for(0).args.windows(2).any(|w| w == ["--autocompact", "200k"]));
+    app.apply_setting("autocompact_k", "0");
+    app.sessions[0].ctx_tokens = 450_000;
+    app.on_mem(vec![], 0);
+    app.on_mem(vec![], 0);
+    let notes = |a: &App| a.sessions[0].items.iter().filter(|i| matches!(&i.entry, session::Entry::Note(t) if t.contains("450k tokens"))).count();
+    assert_eq!(notes(&app), 1, "said once");
+    app.sessions[0].long_hinted = false;
+    app.apply_setting("autocompact_k", "300");
+    app.on_mem(vec![], 0);
+    assert_eq!(notes(&app), 1, "not at all once a size is chosen");
+}
+
+#[test]
 fn claude_plus_plus_keys_still_work_with_the_editor_open() {
     let (mut app, _rx) = pane_app("sleep 30 #");
     app.history = vec!["old one".into(), "old two".into()];

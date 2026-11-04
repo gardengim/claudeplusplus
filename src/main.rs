@@ -285,6 +285,8 @@ pub struct App {
     /// Pass `--exclude-dynamic-system-prompt-sections`: cwd, OS and git status go in the first message instead of
     /// the system prompt, so a new session reuses more of the cached prompt. `"stable_prompt": "off"` in config.json.
     stable_prompt: bool,
+    /// `--autocompact <n>k` for backends started from now (0: Claude Code's own, about 967k).
+    autocompact_k: u64,
     /// Nothing has been sent to the editor since it opened: ↑ ↓ ← and Esc are still claude++'s.
     pane_typed: bool,
     /// `editor` in config.json: a command that overrides $VISUAL and $EDITOR.
@@ -371,6 +373,8 @@ fn project_profile(dir: &str) -> Option<String> {
 
 /// A full-profile tab above this is worth suggesting the lean profile for.
 const HEAVY_TAB_KB: u64 = 400 * 1024;
+/// Tokens of context after which a conversation is said to be expensive to keep (once per tab).
+const LONG_CONTEXT: u64 = 400_000;
 
 static ENHANCED: AtomicBool = AtomicBool::new(false);
 /// Set while an external editor owns the terminal: the reader thread must leave its keys alone.
@@ -583,6 +587,7 @@ fn run(opts: Opts) -> io::Result<()> {
         app.default_profile = p;
     }
     app.cache_ttl = Duration::from_secs(opts.cache_ttl_min.or(saved_num("cache_ttl_min")).unwrap_or(60) * 60);
+    app.autocompact_k = saved_num("autocompact_k").filter(|k| (100..=1000).contains(k)).unwrap_or(0);
     app.stable_prompt = saved("stable_prompt").as_deref() != Some("off");
     image::set_mode(&saved("images").unwrap_or_default());
     if let Some(p) = config_path.as_deref() {
@@ -818,6 +823,7 @@ impl App {
             pane_old: None,
             pane_failed: false,
             stable_prompt: true,
+            autocompact_k: 0,
             pane_typed: false,
             editor_cmd: None,
             clear_request: false,
@@ -893,6 +899,9 @@ impl App {
         let mut args = spec.args;
         if self.stable_prompt {
             args.push("--exclude-dynamic-system-prompt-sections".to_string());
+        }
+        if self.autocompact_k > 0 {
+            args.extend(["--autocompact".to_string(), format!("{}k", self.autocompact_k)]);
         }
         if self.sessions[i].unpinned {
             args.extend(["--system-prompt-snapshot".to_string(), "off".to_string()]);
@@ -1295,6 +1304,12 @@ impl App {
             s.mem_kb = s.backend.as_ref().and_then(|b| mem.iter().find(|r| r.0 == b.pid)).map_or(0, |r| r.1);
         }
         self.ui_mem_kb = own;
+        // A very long conversation: say once what it costs and what Claude Code can do about it.
+        for s in &mut self.sessions {
+            if s.ctx_tokens > LONG_CONTEXT && self.autocompact_k == 0 && !std::mem::replace(&mut s.long_hinted, true) {
+                s.note(format!("this conversation is {}k tokens, and every turn re-reads all of it from the prompt cache. `/compact` summarizes it now; `/config` → \"Compact the conversation at\" has Claude Code do that earlier (it is 967k by default).", s.ctx_tokens / 1000));
+            }
+        }
         // A full-profile tab carries MCP servers and hooks: say once what `lean` would save.
         for s in &mut self.sessions {
             if s.profile == "full" && s.mem_kb > HEAVY_TAB_KB && !std::mem::replace(&mut s.lean_hinted, true) {
@@ -3213,6 +3228,7 @@ impl App {
             "images" => image::mode().to_string(),
             "cache_ttl_min" => (self.cache_ttl.as_secs() / 60).to_string(),
             "idle_suspend_s" => self.idle_suspend.as_secs().to_string(),
+            "autocompact_k" => self.autocompact_k.to_string(),
             "mem_budget_mb" => (self.mem_budget_kb / 1024).to_string(),
             "notify" => self.notify.clone(),
             "mouse" => if self.mouse { "on" } else { "off" }.to_string(),
@@ -3248,6 +3264,7 @@ impl App {
                 self.sessions.iter_mut().for_each(|s| s.cache_ttl = ttl);
             }
             "idle_suspend_s" => self.idle_suspend = Duration::from_secs(num),
+            "autocompact_k" => self.autocompact_k = num,
             "mem_budget_mb" => self.mem_budget_kb = num * 1024,
             "mouse" => self.set_mouse(value != "off"),
             "autocopy" => self.autocopy = value == "on",

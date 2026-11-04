@@ -503,6 +503,18 @@ with no order to it, so they are noise at this size and untested on long tasks; 
 child processes) and `--setting-sources project,local` alone −14k tokens and −58 MB. That run cost about $2.30 in
 API fees: a 25-turn session re-reads its whole growing context every turn.
 
+**The biggest lever is how long a conversation may grow** (`python3 bench/context_tax.py`, which reads only the token
+counts in your own transcripts). Every request re-reads the whole conversation from the prompt cache, so in a long
+session that read is most of the bill. On the author's 26k requests in 374 conversations: cache reads were **68% of
+the spend** (writes 19%, output 13%, at the usual price ratios), **85% of those reads happened at a context over 200k**
+and a third over 400k. Claude Code compacts on its own only near the model's full window (**967k** tokens by default, on
+every model; `--autocompact` accepts 100k to 1M). Rough estimate for those transcripts if it had compacted at 200k /
+300k / 400k instead: **38% / 24% / 14%** less spend, the compactions' own cost included (about 127 / 65 / 30 of them).
+The price is working from a summary sooner, which no benchmark here can price for you, so it is a setting and not a
+default: `/config` → "Compact the conversation at" (`autocompact_k` in `config.json`: 150, 200, 300, 400 or 600; 0 is
+Claude Code's own), passed as `--autocompact <n>k` to conversations started or resumed from then on. A conversation past
+400k tokens gets a one-time note saying what each turn now re-reads and how to change it (none once a size is chosen).
+
 **MCP servers cost very different amounts** (`python3 bench/levers.py mcp`, the process tree of one backend on `full`, each server alone against none):
 
 | server (stdio, defined by you) | memory | prompt tokens |

@@ -64,6 +64,12 @@ pub const ITEMS: &[Item] = &[
         choices: &[("0", "off"), ("500", "500 MB"), ("1000", "1 GB"), ("2000", "2 GB"), ("4000", "4 GB")],
     },
     Item {
+        key: "autocompact_k",
+        label: "Compact the conversation at",
+        help: "Every turn re-reads the whole conversation from the prompt cache, at a tenth of the price but still the largest cost of a long session. Claude Code compacts (summarizes) it by itself only near the model's full window, about 967k tokens. Choose a lower size to have it done earlier and bound that cost, at the price of working from a summary sooner. Applies to conversations started or resumed from now on.",
+        choices: &[("0", "Claude Code's own (~967k)"), ("150", "150k"), ("200", "200k"), ("300", "300k"), ("400", "400k"), ("600", "600k")],
+    },
+    Item {
         key: "notify",
         label: "Background tabs",
         help: "How a tab you are not looking at gets your attention when it finishes a turn or needs an answer. bell: the terminal bell. desktop: a desktop notification (terminals that support OSC 9, such as iTerm2, Ghostty and WezTerm). off: tab marker only.",
@@ -517,7 +523,7 @@ mod tests {
         ui.switch_tab(-1);
         assert_eq!(ui.tab, TABS.len(), "wraps to the last section");
         ui.switch_tab(1);
-        ui.query = "compact".into();
+        ui.query = "autocompacten".into();
         let rows = ui.rows();
         assert!(rows.contains(&Row::Cc(KEYS.iter().position(|k| k.key == "autoCompactEnabled").unwrap())), "search spans every tab");
         assert!(matches!(rows[0], Row::Cc(i) if KEYS[i].key.to_lowercase().contains("compact")), "name matches come first");

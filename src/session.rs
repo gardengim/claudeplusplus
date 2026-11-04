@@ -150,6 +150,7 @@ pub struct Session {
     /// Last `/usage` data: the context breakdown and plan limits Claude Code reported.
     pub usage: crate::usage::Usage,
     pub lean_hinted: bool,
+    pub long_hinted: bool,
     /// The message box while another tab is in front: (text, cursor).
     pub draft: (String, usize),
     /// This tab's own tool rules, (rule, allow?), sent as `permissions` and re-sent when the process restarts.
@@ -320,6 +321,7 @@ impl Session {
             reveal: None,
             usage: Default::default(),
             lean_hinted: false,
+            long_hinted: false,
             draft: Default::default(),
             rules: vec![],
             tools: vec![],
