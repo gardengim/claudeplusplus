@@ -478,15 +478,36 @@ request of a trivial turn on haiku, deterministic unless noted; "lean" means the
 | `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1` | −205 to −413 tokens | background Bash |
 | `"tools": "Bash,Read,Edit"` | −1,220 tokens (lean) | Write, WebFetch, WebSearch, AskUserQuestion |
 | `--append-system-prompt "Be concise: answer in at most 3 short sentences, no preamble."` | about −30% output tokens on explanation prompts, none on tool-heavy work (1 task per type, haiku) | detail; a softer "Be concise." gave only −8% |
-| `BUN_JSC_gcMaxHeapSize=64000000` (16–64 MB) | −19 to −29 MB; no effect at 128 MB+; does not stack with the traffic variable | long contexts untested |
+| `BUN_JSC_gcMaxHeapSize=64000000` (16–64 MB) | −19 to −29 MB; no effect at 128 MB+; does not stack with the traffic variable | a 25-turn session (context past 100k tokens, `bench/levers.py grow`): **no effect**, 159 MB with and without; it only trims the first minutes |
+| `CLAUDE_CODE_DISABLE_WORKFLOWS=1` | −2.0k tokens on `full` (the Workflow tool; `lean` has no such tool) | the Workflow tool |
+| `--disable-slash-commands` (as `args`) | −4.8k tokens on `full` (the skill list); nothing on `lean` | every skill and custom command |
 | `CLAUDE_CODE_DISABLE_ATTACHMENTS=1` | **−11k tokens on `full`** | the model stops seeing the skill list, deferred tools (WebFetch, SendMessage, …), MCP tools and their instructions |
 
-Measured and not worth it: `--disable-slash-commands` and `--agents '{}'` on lean (no change), `--no-session-persistence`,
+Measured and not worth it: `--agents '{}'` on lean (no change), `CLAUDE_CODE_DISABLE_BUNDLED_SKILLS` (**+4.6k** tokens on `full`: the skills come back in a longer form), `--no-session-persistence`,
 `BUN_JSC_forceRAMSize` / `useConcurrentGC` / `maxPerThreadStackUsage` (no change), `BUN_JSC_useJIT=0` (**crashes claude**),
 `MAX_THINKING_TOKENS` / `--effort` on haiku (no output change; thinking models untested). `--bare` and
 `CLAUDE_CODE_SIMPLE=1` ignore OAuth and need `ANTHROPIC_API_KEY`. `full`-profile numbers swing by thousands of tokens
 whenever MCP servers or plugins load. The only RAM lever above ~20 MB is leaving user-level MCP/plugins/hooks out
 (`sources`/`lean`: about 237 → 135 MB).
+
+**Swept, found nothing** (`python3 bench/levers.py envs`, `full`, `think`, `hidden`, `grow`; Claude Code 2.1.318, 2026-11-03).
+Every boolean variable the binary reads that could plausibly matter (about 50: telemetry, checkpointing, cron, memory sync,
+file watchers, growthbook, agent summaries, thinking switches, ...) was set one at a time on `lean`: beyond the four in
+the table above, **none changes the prompt by more than 5 tokens, the footprint (it jumps between 126 and 138 MB from
+run to run with no variable behind it) or the idle CPU (about 1% of one core, 0.1 s per 10 s)**. Other results:
+a Bash turn on a larger model shows **no side calls to another model** in the result's `modelUsage` (titles, command
+checks and agent summaries do not run under `-p`), so nothing hides in the bill; thinking and effort switches (`--effort`,
+`MAX_THINKING_TOKENS`, `CLAUDE_CODE_DISABLE_THINKING`) moved output between 179 and 644 tokens on one reasoning prompt
+with no order to it, so they are noise at this size and untested on long tasks; the backend grows about 1.3 MB per turn
+(126 → 159 MB over 25 tool turns); on `full`, `--strict-mcp-config` alone is worth **−90 MB** (the servers are
+child processes) and `--setting-sources project,local` alone −14k tokens and −58 MB. That run cost about $2.30 in
+API fees: a 25-turn session re-reads its whole growing context every turn.
+
+**On by default: `--exclude-dynamic-system-prompt-sections`.** It moves the working directory, OS and git status from
+the system prompt into the first message; the model still reports all three, and `--resume` still works. Two new
+sessions in different folders then share the whole system prompt in the prompt cache: a new session's cache *writes* fall from
+3.2k to 1.8k tokens (−45%; cost of a trivial haiku turn $0.0007 → $0.0004, `python3 bench/levers.py xcache`),
+and a repository whose git status changed no longer invalidates it. `"stable_prompt": "off"` in `config.json` turns it off.
 
 The Claude daemon and `bg-spare` workers seen in `ps` come from interactive `claude` (`←`, `/bg`, `claude agents`), not
 from `claude -p`; a headless run does not start or need them (checked by diffing `ps` around one run).

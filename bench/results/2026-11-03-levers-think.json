@@ -1,0 +1,299 @@
+{
+ "claude": "2.1.318 (Claude Code)",
+ "rows": [
+  {
+   "name": "sonnet default",
+   "ok": true,
+   "first_request_tokens": 7962,
+   "results": [
+    {
+     "is_error": false,
+     "text": "**292** ways: using 0, 1, or 2 half-dollars leaves 242, 49, ",
+     "cost": 0.012801900000000001,
+     "turns": 1,
+     "usage": {
+      "input_tokens": 2,
+      "cache_creation_input_tokens": 2321,
+      "cache_read_input_tokens": 5639,
+      "output_tokens": 295,
+      "output_tokens_details": {
+       "thinking_tokens": 228
+      },
+      "server_tool_use": {
+       "web_search_requests": 0,
+       "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+       "ephemeral_1h_input_tokens": 2321,
+       "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "global",
+      "iterations": [],
+      "speed": "standard",
+      "fallback_credit": null
+     },
+     "models": {
+      "claude-sonnet-5-5": {
+       "in": 2,
+       "out": 295,
+       "cache_read": 5639,
+       "cache_write": 2321,
+       "cost": 0.012801900000000001
+      }
+     }
+    }
+   ],
+   "footprint_mb": 125.0,
+   "procs": 1,
+   "startup_s": 0.5,
+   "idle_cpu_s": 0.01,
+   "idle_window_s": 1
+  },
+  {
+   "name": "--effort low",
+   "ok": true,
+   "first_request_tokens": 7960,
+   "results": [
+    {
+     "is_error": false,
+     "text": "There are **292** ways, found by counting by the number of h",
+     "cost": 0.013123899999999999,
+     "turns": 1,
+     "usage": {
+      "input_tokens": 2,
+      "cache_creation_input_tokens": 2319,
+      "cache_read_input_tokens": 5639,
+      "output_tokens": 328,
+      "output_tokens_details": {
+       "thinking_tokens": 253
+      },
+      "server_tool_use": {
+       "web_search_requests": 0,
+       "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+       "ephemeral_1h_input_tokens": 2319,
+       "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "global",
+      "iterations": [],
+      "speed": "standard",
+      "fallback_credit": null
+     },
+     "models": {
+      "claude-sonnet-5-5": {
+       "in": 2,
+       "out": 328,
+       "cache_read": 5639,
+       "cache_write": 2319,
+       "cost": 0.013123899999999999
+      }
+     }
+    }
+   ],
+   "footprint_mb": 126.0,
+   "procs": 1,
+   "startup_s": 0.45,
+   "idle_cpu_s": 0.01,
+   "idle_window_s": 1
+  },
+  {
+   "name": "--effort medium",
+   "ok": true,
+   "first_request_tokens": 7958,
+   "results": [
+    {
+     "is_error": false,
+     "text": "There are **292** ways, which counts using 100 pennies and a",
+     "cost": 0.0116259,
+     "turns": 1,
+     "usage": {
+      "input_tokens": 2,
+      "cache_creation_input_tokens": 2317,
+      "cache_read_input_tokens": 5639,
+      "output_tokens": 179,
+      "output_tokens_details": {
+       "thinking_tokens": 112
+      },
+      "server_tool_use": {
+       "web_search_requests": 0,
+       "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+       "ephemeral_1h_input_tokens": 2317,
+       "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "global",
+      "iterations": [],
+      "speed": "standard",
+      "fallback_credit": null
+     },
+     "models": {
+      "claude-sonnet-5-5": {
+       "in": 2,
+       "out": 179,
+       "cache_read": 5639,
+       "cache_write": 2317,
+       "cost": 0.0116259
+      }
+     }
+    }
+   ],
+   "footprint_mb": 126.0,
+   "procs": 1,
+   "startup_s": 0.69,
+   "idle_cpu_s": 0.01,
+   "idle_window_s": 1
+  },
+  {
+   "name": "DISABLE_ADAPTIVE_THINKING",
+   "ok": true,
+   "first_request_tokens": 7960,
+   "results": [
+    {
+     "is_error": false,
+     "text": "**292** ways: 242 use no half-dollars, 49 use one (making 50",
+     "cost": 0.0122239,
+     "turns": 1,
+     "usage": {
+      "input_tokens": 2,
+      "cache_creation_input_tokens": 2319,
+      "cache_read_input_tokens": 5639,
+      "output_tokens": 238,
+      "output_tokens_details": {
+       "thinking_tokens": 188
+      },
+      "server_tool_use": {
+       "web_search_requests": 0,
+       "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+       "ephemeral_1h_input_tokens": 2319,
+       "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "global",
+      "iterations": [],
+      "speed": "standard",
+      "fallback_credit": null
+     },
+     "models": {
+      "claude-sonnet-5-5": {
+       "in": 2,
+       "out": 238,
+       "cache_read": 5639,
+       "cache_write": 2319,
+       "cost": 0.0122239
+      }
+     }
+    }
+   ],
+   "footprint_mb": 125.0,
+   "procs": 1,
+   "startup_s": 0.36,
+   "idle_cpu_s": 0.01,
+   "idle_window_s": 1
+  },
+  {
+   "name": "MAX_THINKING_TOKENS=1024",
+   "ok": true,
+   "first_request_tokens": 7960,
+   "results": [
+    {
+     "is_error": false,
+     "text": "**292** ways: counting by the number of half-dollars used gi",
+     "cost": 0.0162839,
+     "turns": 1,
+     "usage": {
+      "input_tokens": 2,
+      "cache_creation_input_tokens": 2319,
+      "cache_read_input_tokens": 5639,
+      "output_tokens": 644,
+      "output_tokens_details": {
+       "thinking_tokens": 551
+      },
+      "server_tool_use": {
+       "web_search_requests": 0,
+       "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+       "ephemeral_1h_input_tokens": 2319,
+       "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "global",
+      "iterations": [],
+      "speed": "standard",
+      "fallback_credit": null
+     },
+     "models": {
+      "claude-sonnet-5-5": {
+       "in": 2,
+       "out": 644,
+       "cache_read": 5639,
+       "cache_write": 2319,
+       "cost": 0.0162839
+      }
+     }
+    }
+   ],
+   "footprint_mb": 125.0,
+   "procs": 1,
+   "startup_s": 0.54,
+   "idle_cpu_s": 0.01,
+   "idle_window_s": 1
+  },
+  {
+   "name": "CLAUDE_CODE_DISABLE_THINKING",
+   "ok": true,
+   "first_request_tokens": 7958,
+   "results": [
+    {
+     "is_error": false,
+     "text": "**292** ways.\n\nI counted by the number of half-dollars used:",
+     "cost": 0.0157759,
+     "turns": 1,
+     "usage": {
+      "input_tokens": 2,
+      "cache_creation_input_tokens": 2317,
+      "cache_read_input_tokens": 5639,
+      "output_tokens": 594,
+      "output_tokens_details": {
+       "thinking_tokens": 516
+      },
+      "server_tool_use": {
+       "web_search_requests": 0,
+       "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+       "ephemeral_1h_input_tokens": 2317,
+       "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "global",
+      "iterations": [],
+      "speed": "standard",
+      "fallback_credit": null
+     },
+     "models": {
+      "claude-sonnet-5-5": {
+       "in": 2,
+       "out": 594,
+       "cache_read": 5639,
+       "cache_write": 2317,
+       "cost": 0.0157759
+      }
+     }
+    }
+   ],
+   "footprint_mb": 125.0,
+   "procs": 1,
+   "startup_s": 0.37,
+   "idle_cpu_s": 0.01,
+   "idle_window_s": 1
+  }
+ ]
+}

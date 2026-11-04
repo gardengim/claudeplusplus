@@ -1,0 +1,152 @@
+{
+ "claude": "2.1.318 (Claude Code)",
+ "rows": [
+  {
+   "name": "sonnet tool turn",
+   "ok": true,
+   "first_request_tokens": 7928,
+   "results": [
+    {
+     "is_error": false,
+     "text": "done",
+     "cost": 0.033598600000000006,
+     "turns": 2,
+     "usage": {
+      "input_tokens": 4,
+      "cache_creation_input_tokens": 8007,
+      "cache_read_input_tokens": 7926,
+      "output_tokens": 77,
+      "output_tokens_details": {
+       "thinking_tokens": 0
+      },
+      "server_tool_use": {
+       "web_search_requests": 0,
+       "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+       "ephemeral_1h_input_tokens": 8007,
+       "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "global",
+      "iterations": [],
+      "speed": "standard",
+      "fallback_credit": null
+     },
+     "models": {
+      "claude-sonnet-5-5": {
+       "in": 4,
+       "out": 77,
+       "cache_read": 7926,
+       "cache_write": 8007,
+       "cost": 0.033598600000000006
+      }
+     }
+    }
+   ],
+   "footprint_mb": 127.0,
+   "procs": 1,
+   "startup_s": 0.37,
+   "idle_cpu_s": 0.03,
+   "idle_window_s": 10
+  },
+  {
+   "name": "+DISABLE_NON_ESSENTIAL_MODEL_CALLS",
+   "ok": true,
+   "first_request_tokens": 7928,
+   "results": [
+    {
+     "is_error": false,
+     "text": "done",
+     "cost": 0.0116065,
+     "turns": 2,
+     "usage": {
+      "input_tokens": 4,
+      "cache_creation_input_tokens": 2368,
+      "cache_read_input_tokens": 13565,
+      "output_tokens": 77,
+      "output_tokens_details": {
+       "thinking_tokens": 0
+      },
+      "server_tool_use": {
+       "web_search_requests": 0,
+       "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+       "ephemeral_1h_input_tokens": 2368,
+       "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "global",
+      "iterations": [],
+      "speed": "standard",
+      "fallback_credit": null
+     },
+     "models": {
+      "claude-sonnet-5-5": {
+       "in": 4,
+       "out": 77,
+       "cache_read": 13565,
+       "cache_write": 2368,
+       "cost": 0.0116065
+      }
+     }
+    }
+   ],
+   "footprint_mb": 126.0,
+   "procs": 1,
+   "startup_s": 0.36,
+   "idle_cpu_s": 0.07,
+   "idle_window_s": 10
+  },
+  {
+   "name": "+DISABLE_AGENT_PROGRESS_SUMMARIES",
+   "ok": true,
+   "first_request_tokens": 7928,
+   "results": [
+    {
+     "is_error": false,
+     "text": "done",
+     "cost": 0.0116065,
+     "turns": 2,
+     "usage": {
+      "input_tokens": 4,
+      "cache_creation_input_tokens": 2368,
+      "cache_read_input_tokens": 13565,
+      "output_tokens": 77,
+      "output_tokens_details": {
+       "thinking_tokens": 0
+      },
+      "server_tool_use": {
+       "web_search_requests": 0,
+       "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+       "ephemeral_1h_input_tokens": 2368,
+       "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "global",
+      "iterations": [],
+      "speed": "standard",
+      "fallback_credit": null
+     },
+     "models": {
+      "claude-sonnet-5-5": {
+       "in": 4,
+       "out": 77,
+       "cache_read": 13565,
+       "cache_write": 2368,
+       "cost": 0.0116065
+      }
+     }
+    }
+   ],
+   "footprint_mb": 130.0,
+   "procs": 1,
+   "startup_s": 0.46,
+   "idle_cpu_s": 0.07,
+   "idle_window_s": 10
+  }
+ ]
+}

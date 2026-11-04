@@ -2641,6 +2641,15 @@ fn a_failing_editor_sends_nothing_and_keeps_the_text_and_ctrl_backslash_cancels(
 }
 
 #[test]
+fn a_new_session_asks_for_the_cache_friendly_prompt_unless_switched_off() {
+    let flag = "--exclude-dynamic-system-prompt-sections".to_string();
+    let (mut app, _rx) = pane_app("sleep 1 #");
+    assert!(app.launch_for(0).args.contains(&flag), "on by default: cwd and git status move out of the cached system prompt");
+    app.stable_prompt = false;
+    assert!(!app.launch_for(0).args.contains(&flag), "\"stable_prompt\": \"off\" in config.json turns it off");
+}
+
+#[test]
 fn claude_plus_plus_keys_still_work_with_the_editor_open() {
     let (mut app, _rx) = pane_app("sleep 30 #");
     app.history = vec!["old one".into(), "old two".into()];

@@ -1,5 +1,5 @@
 {
- "claude": "2.1.317 (Claude Code)",
+ "claude": "2.1.318 (Claude Code)",
  "ok": true,
  "checks": [
   {
@@ -15,7 +15,7 @@
   {
    "check": "system/init carries session_id, model, claude_code_version",
    "ok": true,
-   "detail": "2.1.317"
+   "detail": "2.1.318"
   },
   {
    "check": "partial messages stream (message_start)",
@@ -30,7 +30,12 @@
   {
    "check": "THESIS: headless request stays under 40000 tokens",
    "ok": true,
-   "detail": "33603"
+   "detail": "33335"
+  },
+  {
+   "check": "--exclude-dynamic-system-prompt-sections still exists",
+   "ok": true,
+   "detail": ""
   },
   {
    "check": "--resume <id> continues the conversation",

@@ -90,6 +90,10 @@ def main():
     sid = init.get("session_id")
     a.close()
 
+    # The flag claude++ passes to every backend (cwd, OS and git status move into the first message: better cache reuse).
+    helptext = subprocess.run(["claude", "--help"], capture_output=True, text=True).stdout
+    check("--exclude-dynamic-system-prompt-sections still exists", "--exclude-dynamic-system-prompt-sections" in helptext)
+
     # 3. Resume a real conversation.
     b = Proc("--resume", sid or "x")
     b.user("Reply with only the word OK.")

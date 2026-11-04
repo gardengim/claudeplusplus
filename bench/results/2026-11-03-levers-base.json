@@ -1,0 +1,103 @@
+{
+ "claude": "2.1.318 (Claude Code)",
+ "rows": [
+  {
+   "name": "base #1",
+   "ok": true,
+   "first_request_tokens": 8754,
+   "results": [
+    {
+     "is_error": false,
+     "text": "42Z",
+     "cost": 0.0017531,
+     "turns": 1,
+     "usage": {
+      "input_tokens": 2,
+      "cache_creation_input_tokens": 8752,
+      "cache_read_input_tokens": 0,
+      "output_tokens": 5,
+      "output_tokens_details": {
+       "thinking_tokens": 0
+      },
+      "server_tool_use": {
+       "web_search_requests": 0,
+       "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+       "ephemeral_1h_input_tokens": 8752,
+       "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "global",
+      "iterations": [],
+      "speed": "standard",
+      "fallback_credit": null
+     },
+     "models": {
+      "claude-haiku-5-5": {
+       "in": 2,
+       "out": 5,
+       "cache_read": 0,
+       "cache_write": 8752,
+       "cost": 0.0017531
+      }
+     }
+    }
+   ],
+   "footprint_mb": 127.0,
+   "procs": 1,
+   "startup_s": 0.2,
+   "idle_cpu_s": 0.1,
+   "idle_window_s": 10
+  },
+  {
+   "name": "base #2",
+   "ok": true,
+   "first_request_tokens": 8756,
+   "results": [
+    {
+     "is_error": false,
+     "text": "42Z",
+     "cost": 0.0006820900000000001,
+     "turns": 1,
+     "usage": {
+      "input_tokens": 2,
+      "cache_creation_input_tokens": 3115,
+      "cache_read_input_tokens": 5639,
+      "output_tokens": 5,
+      "output_tokens_details": {
+       "thinking_tokens": 0
+      },
+      "server_tool_use": {
+       "web_search_requests": 0,
+       "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+       "ephemeral_1h_input_tokens": 3115,
+       "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "global",
+      "iterations": [],
+      "speed": "standard",
+      "fallback_credit": null
+     },
+     "models": {
+      "claude-haiku-5-5": {
+       "in": 2,
+       "out": 5,
+       "cache_read": 5639,
+       "cache_write": 3115,
+       "cost": 0.0006820900000000001
+      }
+     }
+    }
+   ],
+   "footprint_mb": 127.0,
+   "procs": 1,
+   "startup_s": 0.19,
+   "idle_cpu_s": 0.1,
+   "idle_window_s": 10
+  }
+ ]
+}

@@ -281,6 +281,9 @@ pub struct App {
     pane_old: Option<(String, usize)>,
     /// Opening the editor failed (no pty): stop trying and use the plain box.
     pane_failed: bool,
+    /// Pass `--exclude-dynamic-system-prompt-sections`: cwd, OS and git status go in the first message instead of
+    /// the system prompt, so a new session reuses more of the cached prompt. `"stable_prompt": "off"` in config.json.
+    stable_prompt: bool,
     /// Nothing has been sent to the editor since it opened: ↑ ↓ ← and Esc are still claude++'s.
     pane_typed: bool,
     /// `editor` in config.json: a command that overrides $VISUAL and $EDITOR.
@@ -579,6 +582,7 @@ fn run(opts: Opts) -> io::Result<()> {
         app.default_profile = p;
     }
     app.cache_ttl = Duration::from_secs(opts.cache_ttl_min.or(saved_num("cache_ttl_min")).unwrap_or(60) * 60);
+    app.stable_prompt = saved("stable_prompt").as_deref() != Some("off");
     image::set_mode(&saved("images").unwrap_or_default());
     if let Some(p) = config_path.as_deref() {
         let folds = config::get_value(p, "session_folds").and_then(|v| v.as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect()));
@@ -812,6 +816,7 @@ impl App {
             pane_shape: 0,
             pane_old: None,
             pane_failed: false,
+            stable_prompt: true,
             pane_typed: false,
             editor_cmd: None,
             clear_request: false,
@@ -885,6 +890,9 @@ impl App {
         let spec = profile::spec(&self.sessions[i].profile).unwrap_or_default();
         l.env.extend(spec.env);
         let mut args = spec.args;
+        if self.stable_prompt {
+            args.push("--exclude-dynamic-system-prompt-sections".to_string());
+        }
         if self.sessions[i].unpinned {
             args.extend(["--system-prompt-snapshot".to_string(), "off".to_string()]);
         }
