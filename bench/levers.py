@@ -47,7 +47,7 @@ def footprint(pids):
     return round(sum(float(n) * mul[u] for n, u in re.findall(r"\]: .*?Footprint: ([\d.]+) (KB|MB|GB)", out)), 1)
 
 
-def run(name, args=(), env=None, prompts=(TRIVIAL,), model="haiku", idle=10, cwd=None, peak=False, setup=None, sample=False):
+def run(name, args=(), env=None, prompts=(TRIVIAL,), model="haiku", idle=10, cwd=None, peak=False, setup=None, sample=False, settle=False, detail=False):
     cwd = cwd or tempfile.mkdtemp(prefix="cpp-lev-")
     if setup: setup(cwd)
     e = {k: v for k, v in os.environ.items() if not k.startswith("CLAUDE") and not k.startswith("ANTHROPIC_")}
@@ -68,6 +68,22 @@ def run(name, args=(), env=None, prompts=(TRIVIAL,), model="haiku", idle=10, cwd
     r = {"name": name, "ok": False, "first_request_tokens": None, "results": []}
     ready = None
     peak_mb = 0
+    if settle:  # wait for every MCP server to finish connecting, so the first request lists all their tools
+        end, n = time.time() + 30, 0
+        while time.time() < end:
+            n += 1
+            p.stdin.write(json.dumps({"type": "control_request", "request_id": f"lev-{n}", "request": {"subtype": "mcp_status"}}) + "\n"); p.stdin.flush()
+            servers, until = None, time.time() + 6
+            while time.time() < until:
+                try: m = q.get(timeout=0.5)
+                except queue.Empty: continue
+                if m is None: break
+                if m.get("type") == "system" and m.get("subtype") == "init" and ready is None: ready = time.time() - t0
+                if m.get("type") == "control_response" and m["response"].get("request_id") == f"lev-{n}":
+                    servers = (m["response"].get("response") or {}).get("mcpServers", []); break
+            if servers is not None and not any(x.get("status") == "pending" for x in servers):
+                r["mcp"] = [(x.get("name"), x.get("status")) for x in servers]; break
+            time.sleep(0.5)
     for text in prompts:
         p.stdin.write(json.dumps({"type": "user", "session_id": "", "parent_tool_use_id": None, "message": {"role": "user", "content": text}}) + "\n"); p.stdin.flush()
         end = time.time() + 240
@@ -89,6 +105,9 @@ def run(name, args=(), env=None, prompts=(TRIVIAL,), model="haiku", idle=10, cwd
                 if sample: r.setdefault("fp", []).append(footprint(tree(p.pid)[0]))
                 break
     pids, cpu0 = tree(p.pid)
+    if detail:
+        names = dict(l.split(None, 1) for l in subprocess.run(["ps", "-o", "pid=,comm="] + [a for x in pids for a in ("-p", str(x))], capture_output=True, text=True).stdout.splitlines())
+        r["children"] = sorted(((os.path.basename(names.get(str(x), "?").strip()), footprint([x])) for x in pids), key=lambda t: -t[1])
     r["footprint_mb"] = footprint(pids); r["procs"] = len(pids); r["startup_s"] = round(ready or 0, 2)
     time.sleep(idle)
     pids, cpu1 = tree(p.pid)
@@ -196,6 +215,34 @@ def main():
         for name, env in envs:
             r = run(name, env=env, prompts=(turn,) * 25, args=["--allowedTools", "Bash"], idle=5, sample=True); rows.append(r); show(r)
             print("   footprint per turn:", r.get("fp"), flush=True)
+    elif stage == "mcp":
+        # What does each MCP server cost? (stdio ones defined in ~/.claude.json or the project's .mcp.json; plugin and
+        # claude.ai servers cannot be picked one by one, so they are measured as part of "everything".)
+        c = json.load(open(os.path.expanduser("~/.claude.json")))
+        defs = dict(c.get("mcpServers", {}))
+        for v in c.get("projects", {}).values(): defs.update({k: d for k, d in v.get("mcpServers", {}).items() if k not in defs})
+        b = run("everything (full)", settle=True, detail=True, idle=3); show(b); rows.append(b)
+        print("   servers:", b.get("mcp")); print("   biggest processes:", b.get("children", [])[:8], flush=True)
+        n = run("--strict-mcp-config, none", args=["--strict-mcp-config"], settle=True, detail=True, idle=3); show(n, b); rows.append(n)
+        for name, d in defs.items():
+            f = tempfile.mktemp(suffix=".json"); json.dump({"mcpServers": {name: d}}, open(f, "w"))
+            r = run(f"only {name}", args=["--strict-mcp-config", "--mcp-config", f], settle=True, detail=True, idle=3); show(r, n); rows.append(r)
+            print("   ", r.get("mcp"), r.get("children", [])[:4], flush=True)
+    elif stage == "caps":
+        # A big tool result is re-sent on every later request of the session. How much do the output caps save, and does
+        # the model still answer right? Bash prints 108 KB; Read opens a 400 KB file whose last line is known.
+        def files(cwd):
+            open(cwd + "/big.txt", "w").write("".join(f"line {i} " + "x" * 30 + "\n" for i in range(1, 9001)))
+        bash = "Use the Bash tool to run `seq 1 20000`. Then reply with only: the last number you can see in the output, and the word TRUNCATED if the output looks cut."
+        read = "Use the Read tool on big.txt. Then reply with only: the number of the last line you can see, and the word TRUNCATED if it looks cut."
+        arms = [("default", {}), ("BASH_MAX_OUTPUT_LENGTH=8000", {"BASH_MAX_OUTPUT_LENGTH": "8000"}), ("BASH_MAX_OUTPUT_LENGTH=2000", {"BASH_MAX_OUTPUT_LENGTH": "2000"}),
+                ("FILE_READ_MAX_OUTPUT_TOKENS=4000", {"CLAUDE_CODE_FILE_READ_MAX_OUTPUT_TOKENS": "4000"}), ("FILE_READ_MAX_OUTPUT_TOKENS=1000", {"CLAUDE_CODE_FILE_READ_MAX_OUTPUT_TOKENS": "1000"})]
+        for what, text in (("bash", bash), ("read", read)):
+            for name, env in arms:
+                r = run(f"{what}: {name}", env=env, prompts=(text,), args=["--allowedTools", "Bash,Read"], setup=files, idle=0); rows.append(r)
+                u = (r["results"][-1]["usage"] or {}) if r["results"] else {}
+                tot = sum(u.get(k, 0) or 0 for k in ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"))
+                print(f"   {r['name']:44} request tokens in total {tot:7}  out {u.get('output_tokens')}  ${r['results'][-1]['cost'] if r['results'] else 0:.4f}  answer: {r['results'][-1]['text'][:90] if r['results'] else r.get('stderr')!r}", flush=True)
     elif stage == "hidden":
         # Does Claude Code call OTHER models behind our back (titles, command classification, summaries)? Main model is
         # sonnet, so any haiku entry in modelUsage is a side call. A tool turn is where those calls happen.

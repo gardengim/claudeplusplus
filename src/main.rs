@@ -3,6 +3,7 @@ mod config;
 mod explorer;
 mod jobs;
 mod lanes;
+mod mcp;
 mod profile;
 mod instructions;
 mod optimize;
@@ -901,7 +902,7 @@ impl App {
         let cwd = self.sessions[i].cwd.clone().unwrap_or_else(|| self.cwd.clone());
         let saved = optimize::load(&cwd);
         if let Some(o) = &saved {
-            o.apply(&mut settings, &mut args);
+            o.apply(&mut settings, &mut args, &cwd);
         }
         if let (Some(f), Some(cache)) = (instructions::rules_path(), config::cache_dir()) {
             let rules = instructions::merge(&instructions::load_rules(&f), &saved.map(|o| o.instructions).unwrap_or_default());

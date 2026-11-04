@@ -306,7 +306,7 @@ Release binary: ~2.3 MB.
   heading and first line plus a pointer to the file (the model reads the rest when it needs it; `[~]` in
   `/instructions`, `b` toggles it there); **aggressive** shortens more, replaces sections strongly unrelated to the
   project with a one-line pointer to their lines, and narrows `--tools` to the core set plus what the project used
-  (MCP servers left out when none was ever called). Nothing is hidden where the model cannot find it: a skill is at
+  (MCP servers you defined are kept one by one: the ones the project called stay, the others are left out; all go when none was ever called; a project that called a plugin's or a connector's server keeps everything, since those cannot be listed in a config file). Nothing is hidden where the model cannot find it: a skill is at
   least listed by name (the Skill tool loads it when it turns out to matter), and every shortened or hidden section
   or file leaves a line saying where it is, so the model can read it. Checked with haiku, asking for a fact that only
   a hidden `CLAUDE.md` in the parent folder holds: with the pointer line, 3 of 3 runs answered right in 3 turns; with
@@ -502,6 +502,30 @@ with no order to it, so they are noise at this size and untested on long tasks; 
 (126 → 159 MB over 25 tool turns); on `full`, `--strict-mcp-config` alone is worth **−90 MB** (the servers are
 child processes) and `--setting-sources project,local` alone −14k tokens and −58 MB. That run cost about $2.30 in
 API fees: a 25-turn session re-reads its whole growing context every turn.
+
+**MCP servers cost very different amounts** (`python3 bench/levers.py mcp`, the process tree of one backend on `full`, each server alone against none):
+
+| server (stdio, defined by you) | memory | prompt tokens |
+|---|---|---|
+| `entropy` | +13 MB | +963 |
+| `caveman` | +24 MB | +137 |
+| `comfy-mcp` | +73 MB | +2,354 |
+| `codegraph` (spawns node helpers) | +75 MB | +603 |
+| `blender` (python + uv) | +92 MB | +767 |
+| all connected at once (plus a failed plugin one and four claude.ai connectors, which are remote and cost no process) | +98 MB, +2.8k tokens | |
+
+Hence `/optimize` aggressive keeps the servers a project called and leaves the others out (`mcp_keep` in
+`.claude++/optimize.json`), instead of all or none; a new tab in a folder that never used `blender` no longer starts it.
+
+**Tool output caps, measured and left alone** (`BASH_MAX_OUTPUT_LENGTH`, `CLAUDE_CODE_FILE_READ_MAX_OUTPUT_TOKENS`; haiku,
+an exact command so the runs are comparable). A result under the cap goes into the conversation whole and is re-read by
+every later request: `seq 1 4000` (19 KB) added **9.8k tokens** to the next request (28.7k vs 18.9k). A result over the
+cap, or any result over ~30k characters whatever the setting, is saved to a file and the model gets only the *head*
+(about 2 KB, here ending at 527) with the path, and is told so: the same turn costs the baseline 18.9k, and
+`BASH_MAX_OUTPUT_LENGTH=8000` or `2000` turned the 19 KB result into that preview (7 KB at 2000, not at 8000). The head is the
+wrong part for a build or test log, whose failure is at the end, and the model has to read the file to see more (one more
+turn). So the cap is a trade, not a saving: it is worth it for workflows that dump data and not for ones that run tests.
+Not on by default; put it in a profile's `env` if your sessions are like the first kind.
 
 **On by default: `--exclude-dynamic-system-prompt-sections`.** It moves the working directory, OS and git status from
 the system prompt into the first message; the model still reports all three, and `--resume` still works. Two new

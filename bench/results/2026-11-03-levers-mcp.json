@@ -1,0 +1,587 @@
+{
+ "claude": "2.1.318 (Claude Code)",
+ "rows": [
+  {
+   "name": "everything (full)",
+   "ok": true,
+   "first_request_tokens": 35667,
+   "results": [
+    {
+     "is_error": false,
+     "text": "42Z",
+     "cost": 0.00470618,
+     "turns": 1,
+     "usage": {
+      "input_tokens": 2,
+      "cache_creation_input_tokens": 22707,
+      "cache_read_input_tokens": 12958,
+      "output_tokens": 70,
+      "output_tokens_details": {
+       "thinking_tokens": 65
+      },
+      "server_tool_use": {
+       "web_search_requests": 0,
+       "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+       "ephemeral_1h_input_tokens": 22707,
+       "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "global",
+      "iterations": [
+       {
+        "input_tokens": 2,
+        "output_tokens": 70,
+        "cache_read_input_tokens": 12958,
+        "cache_creation_input_tokens": 22707,
+        "cache_creation": {
+         "ephemeral_5m_input_tokens": 0,
+         "ephemeral_1h_input_tokens": 22707
+        },
+        "type": "message"
+       }
+      ],
+      "speed": "standard",
+      "fallback_credit": null
+     },
+     "models": {
+      "claude-haiku-5-5": {
+       "in": 2,
+       "out": 70,
+       "cache_read": 12958,
+       "cache_write": 22707,
+       "cost": 0.00470618
+      }
+     }
+    }
+   ],
+   "mcp": [
+    [
+     "plugin:openviking-memory:openviking",
+     "failed"
+    ],
+    [
+     "caveman",
+     "connected"
+    ],
+    [
+     "codegraph",
+     "connected"
+    ],
+    [
+     "claude.ai Claude Docs",
+     "connected"
+    ],
+    [
+     "claude.ai Otto Travel",
+     "needs-auth"
+    ],
+    [
+     "claude.ai lastminute.com",
+     "needs-auth"
+    ],
+    [
+     "claude.ai Kiwi.com",
+     "needs-auth"
+    ],
+    [
+     "claude.ai Expedia",
+     "needs-auth"
+    ]
+   ],
+   "children": [
+    [
+     "claude",
+     147.0
+    ],
+    [
+     "node",
+     39.0
+    ],
+    [
+     "caveman-mcp",
+     22.0
+    ],
+    [
+     "node",
+     13.0
+    ],
+    [
+     "node",
+     12.0
+    ]
+   ],
+   "footprint_mb": 233.0,
+   "procs": 5,
+   "startup_s": 2.4,
+   "idle_cpu_s": 0.03,
+   "idle_window_s": 3
+  },
+  {
+   "name": "--strict-mcp-config, none",
+   "ok": true,
+   "first_request_tokens": 32906,
+   "results": [
+    {
+     "is_error": false,
+     "text": "42Z",
+     "cost": 0.00412148,
+     "turns": 1,
+     "usage": {
+      "input_tokens": 2,
+      "cache_creation_input_tokens": 19946,
+      "cache_read_input_tokens": 12958,
+      "output_tokens": 5,
+      "output_tokens_details": {
+       "thinking_tokens": 0
+      },
+      "server_tool_use": {
+       "web_search_requests": 0,
+       "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+       "ephemeral_1h_input_tokens": 19946,
+       "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "global",
+      "iterations": [
+       {
+        "input_tokens": 2,
+        "output_tokens": 5,
+        "cache_read_input_tokens": 12958,
+        "cache_creation_input_tokens": 19946,
+        "cache_creation": {
+         "ephemeral_5m_input_tokens": 0,
+         "ephemeral_1h_input_tokens": 19946
+        },
+        "type": "message"
+       }
+      ],
+      "speed": "standard",
+      "fallback_credit": null
+     },
+     "models": {
+      "claude-haiku-5-5": {
+       "in": 2,
+       "out": 5,
+       "cache_read": 12958,
+       "cache_write": 19946,
+       "cost": 0.00412148
+      }
+     }
+    }
+   ],
+   "mcp": [],
+   "children": [
+    [
+     "claude",
+     135.0
+    ]
+   ],
+   "footprint_mb": 135.0,
+   "procs": 1,
+   "startup_s": 1.9,
+   "idle_cpu_s": 0.03,
+   "idle_window_s": 3
+  },
+  {
+   "name": "only caveman",
+   "ok": true,
+   "first_request_tokens": 33043,
+   "results": [
+    {
+     "is_error": false,
+     "text": "42Z",
+     "cost": 0.004148880000000001,
+     "turns": 1,
+     "usage": {
+      "input_tokens": 2,
+      "cache_creation_input_tokens": 20083,
+      "cache_read_input_tokens": 12958,
+      "output_tokens": 5,
+      "output_tokens_details": {
+       "thinking_tokens": 0
+      },
+      "server_tool_use": {
+       "web_search_requests": 0,
+       "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+       "ephemeral_1h_input_tokens": 20083,
+       "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "global",
+      "iterations": [
+       {
+        "input_tokens": 2,
+        "output_tokens": 5,
+        "cache_read_input_tokens": 12958,
+        "cache_creation_input_tokens": 20083,
+        "cache_creation": {
+         "ephemeral_5m_input_tokens": 0,
+         "ephemeral_1h_input_tokens": 20083
+        },
+        "type": "message"
+       }
+      ],
+      "speed": "standard",
+      "fallback_credit": null
+     },
+     "models": {
+      "claude-haiku-5-5": {
+       "in": 2,
+       "out": 5,
+       "cache_read": 12958,
+       "cache_write": 20083,
+       "cost": 0.004148880000000001
+      }
+     }
+    }
+   ],
+   "mcp": [
+    [
+     "caveman",
+     "connected"
+    ]
+   ],
+   "children": [
+    [
+     "claude",
+     137.0
+    ],
+    [
+     "caveman-mcp",
+     22.0
+    ]
+   ],
+   "footprint_mb": 159.0,
+   "procs": 2,
+   "startup_s": 1.95,
+   "idle_cpu_s": 0.02,
+   "idle_window_s": 3
+  },
+  {
+   "name": "only codegraph",
+   "ok": true,
+   "first_request_tokens": 33509,
+   "results": [
+    {
+     "is_error": false,
+     "text": "42Z",
+     "cost": 0.0042420800000000005,
+     "turns": 1,
+     "usage": {
+      "input_tokens": 2,
+      "cache_creation_input_tokens": 20549,
+      "cache_read_input_tokens": 12958,
+      "output_tokens": 5,
+      "output_tokens_details": {
+       "thinking_tokens": 0
+      },
+      "server_tool_use": {
+       "web_search_requests": 0,
+       "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+       "ephemeral_1h_input_tokens": 20549,
+       "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "global",
+      "iterations": [
+       {
+        "input_tokens": 2,
+        "output_tokens": 5,
+        "cache_read_input_tokens": 12958,
+        "cache_creation_input_tokens": 20549,
+        "cache_creation": {
+         "ephemeral_5m_input_tokens": 0,
+         "ephemeral_1h_input_tokens": 20549
+        },
+        "type": "message"
+       }
+      ],
+      "speed": "standard",
+      "fallback_credit": null
+     },
+     "models": {
+      "claude-haiku-5-5": {
+       "in": 2,
+       "out": 5,
+       "cache_read": 12958,
+       "cache_write": 20549,
+       "cost": 0.0042420800000000005
+      }
+     }
+    }
+   ],
+   "mcp": [
+    [
+     "codegraph",
+     "connected"
+    ]
+   ],
+   "children": [
+    [
+     "claude",
+     146.0
+    ],
+    [
+     "node",
+     39.0
+    ],
+    [
+     "node",
+     13.0
+    ],
+    [
+     "node",
+     12.0
+    ]
+   ],
+   "footprint_mb": 210.0,
+   "procs": 4,
+   "startup_s": 1.92,
+   "idle_cpu_s": 0.03,
+   "idle_window_s": 3
+  },
+  {
+   "name": "only entropy",
+   "ok": true,
+   "first_request_tokens": 33869,
+   "results": [
+    {
+     "is_error": false,
+     "text": "42Z",
+     "cost": 0.00435458,
+     "turns": 1,
+     "usage": {
+      "input_tokens": 2,
+      "cache_creation_input_tokens": 20909,
+      "cache_read_input_tokens": 12958,
+      "output_tokens": 86,
+      "output_tokens_details": {
+       "thinking_tokens": 81
+      },
+      "server_tool_use": {
+       "web_search_requests": 0,
+       "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+       "ephemeral_1h_input_tokens": 20909,
+       "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "global",
+      "iterations": [
+       {
+        "input_tokens": 2,
+        "output_tokens": 86,
+        "cache_read_input_tokens": 12958,
+        "cache_creation_input_tokens": 20909,
+        "cache_creation": {
+         "ephemeral_5m_input_tokens": 0,
+         "ephemeral_1h_input_tokens": 20909
+        },
+        "type": "message"
+       }
+      ],
+      "speed": "standard",
+      "fallback_credit": null
+     },
+     "models": {
+      "claude-haiku-5-5": {
+       "in": 2,
+       "out": 86,
+       "cache_read": 12958,
+       "cache_write": 20909,
+       "cost": 0.00435458
+      }
+     }
+    }
+   ],
+   "mcp": [
+    [
+     "entropy",
+     "connected"
+    ]
+   ],
+   "children": [
+    [
+     "claude",
+     146.0
+    ],
+    [
+     "entropy-mcp",
+     1.9
+    ]
+   ],
+   "footprint_mb": 147.9,
+   "procs": 2,
+   "startup_s": 1.75,
+   "idle_cpu_s": 0.03,
+   "idle_window_s": 3
+  },
+  {
+   "name": "only blender",
+   "ok": true,
+   "first_request_tokens": 33673,
+   "results": [
+    {
+     "is_error": false,
+     "text": "42Z",
+     "cost": 0.00431138,
+     "turns": 1,
+     "usage": {
+      "input_tokens": 2,
+      "cache_creation_input_tokens": 20713,
+      "cache_read_input_tokens": 12958,
+      "output_tokens": 78,
+      "output_tokens_details": {
+       "thinking_tokens": 73
+      },
+      "server_tool_use": {
+       "web_search_requests": 0,
+       "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+       "ephemeral_1h_input_tokens": 20713,
+       "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "global",
+      "iterations": [
+       {
+        "input_tokens": 2,
+        "output_tokens": 78,
+        "cache_read_input_tokens": 12958,
+        "cache_creation_input_tokens": 20713,
+        "cache_creation": {
+         "ephemeral_5m_input_tokens": 0,
+         "ephemeral_1h_input_tokens": 20713
+        },
+        "type": "message"
+       }
+      ],
+      "speed": "standard",
+      "fallback_credit": null
+     },
+     "models": {
+      "claude-haiku-5-5": {
+       "in": 2,
+       "out": 78,
+       "cache_read": 12958,
+       "cache_write": 20713,
+       "cost": 0.00431138
+      }
+     }
+    }
+   ],
+   "mcp": [
+    [
+     "blender",
+     "connected"
+    ]
+   ],
+   "children": [
+    [
+     "claude",
+     147.0
+    ],
+    [
+     "python",
+     55.0
+    ],
+    [
+     "uv",
+     25.0
+    ]
+   ],
+   "footprint_mb": 227.0,
+   "procs": 3,
+   "startup_s": 2.64,
+   "idle_cpu_s": 0.03,
+   "idle_window_s": 3
+  },
+  {
+   "name": "only comfy-mcp",
+   "ok": true,
+   "first_request_tokens": 35260,
+   "results": [
+    {
+     "is_error": false,
+     "text": "42Z",
+     "cost": 0.004592280000000001,
+     "turns": 1,
+     "usage": {
+      "input_tokens": 2,
+      "cache_creation_input_tokens": 22300,
+      "cache_read_input_tokens": 12958,
+      "output_tokens": 5,
+      "output_tokens_details": {
+       "thinking_tokens": 0
+      },
+      "server_tool_use": {
+       "web_search_requests": 0,
+       "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+       "ephemeral_1h_input_tokens": 22300,
+       "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "global",
+      "iterations": [
+       {
+        "input_tokens": 2,
+        "output_tokens": 5,
+        "cache_read_input_tokens": 12958,
+        "cache_creation_input_tokens": 22300,
+        "cache_creation": {
+         "ephemeral_5m_input_tokens": 0,
+         "ephemeral_1h_input_tokens": 22300
+        },
+        "type": "message"
+       }
+      ],
+      "speed": "standard",
+      "fallback_credit": null
+     },
+     "models": {
+      "claude-haiku-5-5": {
+       "in": 2,
+       "out": 5,
+       "cache_read": 12958,
+       "cache_write": 22300,
+       "cost": 0.004592280000000001
+      }
+     }
+    }
+   ],
+   "mcp": [
+    [
+     "comfy-mcp",
+     "connected"
+    ]
+   ],
+   "children": [
+    [
+     "claude",
+     148.0
+    ],
+    [
+     "python",
+     60.0
+    ]
+   ],
+   "footprint_mb": 208.0,
+   "procs": 2,
+   "startup_s": 4.91,
+   "idle_cpu_s": 0.09,
+   "idle_window_s": 3
+  }
+ ]
+}

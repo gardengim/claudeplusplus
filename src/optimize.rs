@@ -161,6 +161,8 @@ pub enum Change {
     Section(String, String),
     Tools(Vec<String>),
     StrictMcp,
+    /// Keep only these servers (names as you defined them); leave the rest out.
+    McpKeep(Vec<String>),
 }
 
 #[derive(Clone, Debug)]
@@ -185,6 +187,8 @@ pub struct Input<'a> {
     pub ev: &'a Evidence,
     pub skills: &'a [(String, u64)],
     pub files: &'a [instructions::Source],
+    /// Names of the MCP servers you defined for this folder (see `mcp::defs`).
+    pub mcp: &'a [String],
 }
 
 pub fn propose(i: &Input) -> Vec<Item> {
@@ -247,8 +251,19 @@ pub fn propose(i: &Input) -> Vec<Item> {
         let mut tools: BTreeSet<String> = CORE_TOOLS.iter().chain(&KEEP_REACHABLE).map(|s| s.to_string()).collect();
         tools.extend(i.ev.tools.keys().filter(|t| t.chars().next().is_some_and(char::is_uppercase) && !t.starts_with("mcp__")).cloned());
         out.push(Item { group: "tools", label: format!("limit built-in tools to {}", tools.iter().cloned().collect::<Vec<_>>().join(", ")), why: "the core set plus every tool this project used".into(), saves: 0, on: true, change: Change::Tools(tools.into_iter().collect()) });
-        if !i.ev.tools.keys().any(|t| t.starts_with("mcp__")) {
+        let called = crate::mcp::used(i.ev.tools.keys().map(String::as_str));
+        if called.is_empty() {
             out.push(Item { group: "tools", label: "leave MCP servers out".into(), why: "no MCP tool was ever called here".into(), saves: 0, on: true, change: Change::StrictMcp });
+        } else {
+            // Keep the servers that were called; leave the others out. Only possible when every called server is one
+            // you defined (a plugin's or a connector's cannot go in a config file, so then nothing changes).
+            let keep: Vec<String> = i.mcp.iter().filter(|n| called.contains(&crate::mcp::norm(n))).cloned().collect();
+            let kept: BTreeSet<_> = keep.iter().map(|n| crate::mcp::norm(n)).collect();
+            let out_of: Vec<&String> = i.mcp.iter().filter(|n| !kept.contains(&crate::mcp::norm(n))).collect();
+            if called.is_subset(&kept) && !out_of.is_empty() {
+                let left = out_of.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ");
+                out.push(Item { group: "tools", label: format!("keep only the MCP servers used here ({})", keep.join(", ")), why: format!("never called here: {left}"), saves: 0, on: true, change: Change::McpKeep(keep) });
+            }
         }
     }
     out
@@ -262,6 +277,7 @@ pub struct Saved {
     pub skills: BTreeMap<String, String>,
     pub tools: Option<Vec<String>>,
     pub strict_mcp: bool,
+    pub mcp_keep: Option<Vec<String>>,
     pub instructions: Rules,
 }
 
@@ -278,6 +294,7 @@ pub fn from_items(level: Level, items: &[Item]) -> Saved {
             Change::Section(f, id) => drop(s.instructions.entry(f.clone()).or_default().insert(id.clone())),
             Change::Tools(t) => s.tools = Some(t.clone()),
             Change::StrictMcp => s.strict_mcp = true,
+            Change::McpKeep(k) => s.mcp_keep = Some(k.clone()),
         }
     }
     s
@@ -294,6 +311,7 @@ pub fn save(cwd: &str, s: &Saved) -> std::io::Result<()> {
         "skillOverrides": s.skills,
         "tools": s.tools,
         "strict_mcp": s.strict_mcp,
+        "mcp_keep": s.mcp_keep,
         "instructions": s.instructions,
     });
     crate::config::write_atomic(&f, &(serde_json::to_string_pretty(&v)? + "\n"))
@@ -307,6 +325,7 @@ pub fn load(cwd: &str) -> Option<Saved> {
         skills: v["skillOverrides"].as_object().into_iter().flatten().filter_map(|(k, x)| Some((k.clone(), x.as_str()?.to_string()))).collect(),
         tools: v["tools"].as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect()),
         strict_mcp: v["strict_mcp"].as_bool().unwrap_or(false),
+        mcp_keep: v["mcp_keep"].as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect()),
         instructions: v["instructions"]
             .as_object()
             .into_iter()
@@ -322,7 +341,7 @@ pub fn clear(cwd: &str) -> bool {
 
 impl Saved {
     /// Put this project's settings and flags onto a launch. A profile that already chose tools keeps them.
-    pub fn apply(&self, settings: &mut Map<String, Value>, args: &mut Vec<String>) {
+    pub fn apply(&self, settings: &mut Map<String, Value>, args: &mut Vec<String>, cwd: &str) {
         if let Some(n) = self.cap {
             settings.insert("skillListingMaxDescChars".into(), json!(n));
         }
@@ -334,6 +353,11 @@ impl Saved {
         }
         if self.strict_mcp && !args.iter().any(|a| a == "--strict-mcp-config") {
             args.push("--strict-mcp-config".into());
+        }
+        // A profile that already chose its MCP servers keeps them. If the kept servers are gone from your
+        // config, nothing is left out: losing every server would be worse than keeping them all.
+        if let Some(keep) = &self.mcp_keep && !args.iter().any(|a| a == "--strict-mcp-config" || a == "--mcp-config") && let Some(f) = crate::mcp::subset_file(cwd, keep) {
+            args.extend(["--strict-mcp-config".into(), "--mcp-config".into(), f.to_string_lossy().into_owned()]);
         }
     }
 }
@@ -360,6 +384,8 @@ pub struct Ui {
     pub verdicts: Option<Vec<Verdict>>,
     /// (message, is an error) about the review.
     pub review_note: Option<(String, bool)>,
+    /// The MCP servers you defined for this folder.
+    pub mcp: Vec<String>,
 }
 
 pub type Pending = Arc<Mutex<Option<Result<(Vec<Verdict>, f64), String>>>>;
@@ -373,7 +399,7 @@ impl Ui {
             *out.lock().unwrap() = Some(ev);
         });
         let files = instructions::Ui::new(cwd, Rules::new()).files;
-        Ui { level, sel: 0, items: vec![], loading: true, ev: None, scan, skills: None, files, start_tokens: 0, review: None, cands: vec![], verdicts: None, review_note: None }
+        Ui { level, sel: 0, items: vec![], loading: true, ev: None, scan, skills: None, files, start_tokens: 0, review: None, cands: vec![], verdicts: None, review_note: None, mcp: crate::mcp::defs(cwd).into_keys().collect() }
     }
 
     /// Take the scan result and the skill listing when both are in; true when the proposal was just built.
@@ -398,7 +424,7 @@ impl Ui {
 
     pub fn rebuild(&mut self) {
         let (Some(ev), Some(skills)) = (&self.ev, &self.skills) else { return };
-        self.items = propose(&Input { level: self.level, ev, skills, files: &self.files });
+        self.items = propose(&Input { level: self.level, ev, skills, files: &self.files, mcp: &self.mcp });
         if let Some(v) = &self.verdicts {
             self.items = with_verdicts(std::mem::take(&mut self.items), self.level, ev, &self.cands, v);
         }
@@ -696,7 +722,7 @@ mod tests {
             (at("Rust notes"), "keep".into(), "this is Rust".into()),
             (999, "hide".into(), "a made-up id".into()),
         ];
-        let base = propose(&Input { level: Level::Balanced, ev: &e, skills: &skills, files: &files });
+        let base = propose(&Input { level: Level::Balanced, ev: &e, skills: &skills, files: &files, mcp: &[] });
         let out = with_verdicts(base, Level::Balanced, &e, &cands, &v);
         let labels: Vec<&str> = out.iter().map(|i| i.label.as_str()).collect();
         assert!(labels[0].starts_with("cap skill"), "the cap stays first: {labels:?}");
@@ -705,10 +731,10 @@ mod tests {
         assert!(labels.iter().any(|l| l.starts_with("shorten Comfy workflows")), "balanced shortens what Claude would hide: {labels:?}");
         assert!(!labels.iter().any(|l| l.contains("Rust notes")), "keep means no row, even if word overlap had proposed one");
         assert!(out.iter().find(|i| i.label.starts_with("pptx")).unwrap().why.contains("slides, not Rust"));
-        let aggressive = with_verdicts(propose(&Input { level: Level::Aggressive, ev: &e, skills: &skills, files: &files }), Level::Aggressive, &e, &cands, &v);
+        let aggressive = with_verdicts(propose(&Input { level: Level::Aggressive, ev: &e, skills: &skills, files: &files, mcp: &[] }), Level::Aggressive, &e, &cands, &v);
         assert!(aggressive.iter().any(|i| i.label.starts_with("hide Comfy workflows")));
         assert!(aggressive.last().unwrap().group == "tools", "tool rows stay at the end");
-        let light = propose(&Input { level: Level::Light, ev: &e, skills: &skills, files: &files });
+        let light = propose(&Input { level: Level::Light, ev: &e, skills: &skills, files: &files, mcp: &[] });
         assert_eq!(with_verdicts(light.clone(), Level::Light, &e, &cands, &v).len(), light.len(), "light changes no skill or section");
     }
 
@@ -726,7 +752,7 @@ mod tests {
         let skills = vec![("comfy".to_string(), 300), ("review".to_string(), 200), ("tiny".to_string(), 8)];
         let files = vec![doc()];
         let e = ev(10, &["review"], &["Bash", "Read", "Grep"], &["cargo", "clippy", "ratatui", "terminal", "rendering", "workspace", "layout", "warnings"]);
-        let at = |level| propose(&Input { level, ev: &e, skills: &skills, files: &files });
+        let at = |level| propose(&Input { level, ev: &e, skills: &skills, files: &files, mcp: &[] });
         let light = at(Level::Light);
         assert!(light.len() == 1 && matches!(light[0].change, Change::Cap(160)), "light only caps descriptions");
         let bal = at(Level::Balanced);
@@ -752,7 +778,7 @@ mod tests {
         eprintln!("sessions {} tools {:?} skills {:?} vocab {}", e.sessions, e.tools, e.skills, e.vocab.len());
         let files = instructions::Ui::new(cwd, Rules::new()).files;
         for level in [Level::Balanced, Level::Aggressive] {
-            for it in propose(&Input { level, ev: &e, skills: &[], files: &files }).iter().filter(|i| i.group != "skills") {
+            for it in propose(&Input { level, ev: &e, skills: &[], files: &files, mcp: &[] }).iter().filter(|i| i.group != "skills") {
                 eprintln!("{} | {} | −{} | {}", level.name(), it.label, it.saves, it.why);
             }
         }
@@ -762,8 +788,34 @@ mod tests {
     fn with_little_history_nothing_is_called_unused() {
         let skills = vec![("comfy".to_string(), 300)];
         let e = ev(1, &[], &[], &[]);
-        let p = propose(&Input { level: Level::Aggressive, ev: &e, skills: &skills, files: &[] });
+        let p = propose(&Input { level: Level::Aggressive, ev: &e, skills: &skills, files: &[], mcp: &[] });
         assert!(p.iter().all(|i| matches!(i.change, Change::Cap(_))), "{p:?}");
+    }
+
+    #[test]
+    fn mcp_servers_the_project_called_are_kept_and_the_rest_left_out() {
+        let mcp: Vec<String> = ["caveman", "codegraph", "comfy-mcp"].map(String::from).to_vec();
+        let at = |tools: &[&str], mcp: &[String]| propose(&Input { level: Level::Aggressive, ev: &ev(5, &[], tools, &[]), skills: &[], files: &[], mcp });
+        let keep = |p: &[Item]| p.iter().find_map(|i| if let Change::McpKeep(k) = &i.change { Some(k.clone()) } else { None });
+        let p = at(&["Bash", "mcp__codegraph__codegraph_explore", "mcp__comfy-mcp__run"], &mcp);
+        assert_eq!(keep(&p), Some(vec!["codegraph".to_string(), "comfy-mcp".to_string()]));
+        assert!(p.iter().any(|i| i.why.contains("never called here: caveman")), "{p:?}");
+        assert!(!p.iter().any(|i| i.change == Change::StrictMcp), "not all of them go");
+        // A called server we cannot put in a config file (a plugin's) means everything stays.
+        let p = at(&["mcp__plugin_openviking-memory_openviking__search"], &mcp);
+        assert!(keep(&p).is_none() && !p.iter().any(|i| i.change == Change::StrictMcp), "{p:?}");
+        // Every defined server was called: nothing to leave out. None called: all of them go, as before.
+        assert!(keep(&at(&["mcp__caveman__a", "mcp__codegraph__b", "mcp__comfy-mcp__c"], &mcp)).is_none());
+        assert!(at(&["Bash"], &mcp).iter().any(|i| i.change == Change::StrictMcp));
+        // It is saved and read back.
+        let saved = from_items(Level::Aggressive, &at(&["mcp__codegraph__x"], &mcp));
+        assert_eq!(saved.mcp_keep, Some(vec!["codegraph".to_string()]));
+        let d = std::env::temp_dir().join(format!("claudeplusplus-optkeep-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        save(d.to_str().unwrap(), &saved).unwrap();
+        assert_eq!(load(d.to_str().unwrap()), Some(saved));
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]
@@ -784,12 +836,12 @@ mod tests {
         save(cwd, &saved).unwrap();
         assert_eq!(load(cwd), Some(saved.clone()));
         let (mut settings, mut args) = (Map::new(), vec![]);
-        saved.apply(&mut settings, &mut args);
+        saved.apply(&mut settings, &mut args, cwd);
         assert_eq!(settings["skillListingMaxDescChars"], 120);
         assert_eq!(settings["skillOverrides"]["a"], "off");
         assert_eq!(args, ["--tools", "Bash,Read", "--strict-mcp-config"]);
         let mut chosen = vec!["--tools".to_string(), "Bash".to_string()];
-        saved.apply(&mut Map::new(), &mut chosen);
+        saved.apply(&mut Map::new(), &mut chosen, cwd);
         assert_eq!(chosen.iter().filter(|a| *a == "--tools").count(), 1, "the profile's own tool list wins");
         assert!(clear(cwd) && load(cwd).is_none() && !clear(cwd));
     }
