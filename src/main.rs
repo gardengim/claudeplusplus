@@ -118,7 +118,7 @@ COMMANDS  /usage (/cost /status) /memory [user] /export [file] /tasks /context /
           !<command> runs a shell command here (no model turn); its output goes with your next message
 @FILES    type @ to pick a file or folder; Claude Code reads what you mention (images included)
 PROFILES  your own: ~/.config/claude++/profiles/<name>.json (system prompt, tools, MCP, model, env...; see README)
-EDITING   alt+←/→ word · alt+backspace / ctrl+w delete word · ctrl+u / ctrl+k cut to line start / end · ↑↓ move between rows, then history · ctrl+z or ctrl+_ undo, ctrl+shift+z or alt+z redo · alt+p model picker · ctrl+l repaint · ctrl+y copies the text selected with the mouse, else the last answer (also /copy [code])
+EDITING   alt+←/→ word · alt+backspace / ctrl+w delete word · ctrl+u / ctrl+k cut to line start / end · ↑↓ move between rows, then history · ctrl+z undo, ctrl+shift+z or alt+z redo · alt+p model picker · ctrl+l repaint · ctrl+y copies the text selected with the mouse, else the last answer (also /copy [code])
 IMAGES    ctrl+v, drag a file into the window or /img <path> to attach; pictures in the transcript are drawn
           inline in kitty/Ghostty (CLAUDEPP_IMAGES=on|off overrides detection)";
 
@@ -1534,7 +1534,6 @@ impl App {
         let in_normal = self.vim.on && self.vim.mode == vim::Mode::Normal && !self.vim.pending() && !alt;
         let redo_asked = match k.code {
             KeyCode::Char('z' | 'Z') if box_is_free && (ctrl || alt) => Some(shift || alt),
-            KeyCode::Char('_' | '7') if box_is_free && ctrl => Some(false), // Claude Code's undo key
             KeyCode::Char('u') if box_is_free && in_normal && !ctrl => Some(false),
             KeyCode::Char('r') if box_is_free && in_normal && ctrl => Some(true),
             _ => None,

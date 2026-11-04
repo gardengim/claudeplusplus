@@ -89,7 +89,7 @@ Release binary: ~2.3 MB.
 
 - ↑ history is Claude Code's own `~/.claude/history.jsonl` for this folder: prompts typed in either show up in both.
 - The agent's task list (TaskCreate / TaskUpdate) stays in view above the input while any task is open.
-- Keys: alt+p model picker, ctrl+_ undo (as well as ctrl+z), ctrl+l repaint, shift+tab modes (bypass too when the
+- Keys: alt+p model picker, ctrl+z undo, ctrl+l repaint, shift+tab modes (bypass too when the
   backend was started with `-- --dangerously-skip-permissions`).
 - `/cost` and `/status` open `/usage`; `/memory` edits `./CLAUDE.md` (`/memory user`: `~/.claude/CLAUDE.md`) in `$EDITOR`;
   `/export [file]` saves the conversation as text; `/mode` alone opens this tab's mode and rules.
