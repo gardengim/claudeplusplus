@@ -514,6 +514,10 @@ The price is working from a summary sooner, which no benchmark here can price fo
 default: `/config` → "Compact the conversation at" (`autocompact_k` in `config.json`: 150, 200, 300, 400 or 600; 0 is
 Claude Code's own), passed as `--autocompact <n>k` to conversations started or resumed from then on. A conversation past
 400k tokens gets a one-time note saying what each turn now re-reads and how to change it (none once a size is chosen).
+The same script shows the other cost, the cache writes: after a pause of 5 to 60 minutes only 3.8% of the author's requests
+wrote their context again (the 1-hour cache is on), after more than an hour 74% did, about 55M tokens, a third of all writes.
+Nothing but a hidden keep-alive call would stop that, which claude++ will not make; compacting before you leave makes the
+re-write smaller.
 
 **MCP servers cost very different amounts** (`python3 bench/levers.py mcp`, the process tree of one backend on `full`, each server alone against none):
 

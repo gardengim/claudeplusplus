@@ -18,7 +18,7 @@ for f in glob.glob(os.path.expanduser("~/.claude/projects/*/*.jsonl")):
             except ValueError: continue
             m, u = v.get("message") or {}, (v.get("message") or {}).get("usage")
             if v.get("type") != "assistant" or not u or v.get("isSidechain") or (since and (v.get("timestamp") or "") < since): continue
-            reqs[m.get("id") or f + l[:30]] = (f, u.get("input_tokens") or 0, u.get("cache_creation_input_tokens") or 0, u.get("cache_read_input_tokens") or 0, u.get("output_tokens") or 0)
+            reqs[m.get("id") or f + l[:30]] = (f, u.get("input_tokens") or 0, u.get("cache_creation_input_tokens") or 0, u.get("cache_read_input_tokens") or 0, u.get("output_tokens") or 0, v.get("timestamp") or "")
     except OSError:
         pass
 if not reqs: sys.exit("no transcripts found")
@@ -46,3 +46,20 @@ for n in (200e3, 300e3, 400e3):
         cycles += max(0, -(-(peak - n) // (n - 40e3))) if peak > n else 0
     paid = cycles * (0.1 * n + 1.25 * 40e3 + 5 * 5e3)
     print(f"  at {n/1e3:>3.0f}k: ~{int(cycles)} compactions; net saving {100 * (saved - paid) / t:2.0f}% of all spend (reads alone {100 * saved / t:2.0f}%)")
+
+# Cache writes after a pause: the cache lives 5 minutes (or an hour with the long cache), then the whole context is written again.
+by = collections.defaultdict(list)
+for r in R:
+    if r[5]: by[r[0]].append((datetime.datetime.fromisoformat(r[5].replace("Z", "+00:00")).timestamp(), r[1] + r[2] + r[3], r[2]))
+print("\nafter a pause of     requests   wrote most of the context again   tokens written in those")
+for lo, hi, name in [(0, 60, "< 1 min"), (60, 300, "1-5 min"), (300, 3600, "5-60 min"), (3600, 1e12, "> 60 min")]:
+    n = big = w = 0
+    for rows in by.values():
+        rows.sort()
+        for a, b in zip(rows, rows[1:]):
+            if lo <= b[0] - a[0] < hi:
+                n += 1
+                if a[1] >= 50e3 and b[2] >= 0.5 * a[1]: big += 1; w += b[2]
+    print(f"  {name:9} {n:>12} {big:>14} ({100 * big / max(n, 1):4.1f}%) {w/1e6:>22.1f}M")
+print("(few re-writes after 5-60 min means the 1-hour cache is on for you. After more than an hour nothing helps but compacting")
+print(" before you leave: a smaller context is a smaller re-write.)")
