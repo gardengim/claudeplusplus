@@ -1,0 +1,19 @@
+{
+ "answered": true,
+ "after the turn": {
+  "procs": {
+   "claudeplusplus": 1,
+   "claude": 1,
+   "caveman-mcp": 1,
+   "node": 3
+  },
+  "mb": 232.9
+ },
+ "away": {
+  "procs": {
+   "claudeplusplus": 1
+  },
+  "mb": 4.9
+ },
+ "recalled 42 after the stop": true
+}

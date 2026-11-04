@@ -368,7 +368,10 @@ Release binary: ~2.3 MB.
   claude++'s own keys still work: pgup/pgdn, alt+1..9, alt+o/q/p, shift+tab, ctrl+t/o/l always; alt+f/r/d/b/n and
   alt+←/→ stand for ctrl+f/r/d/b/n and ctrl+p/n (which the editor needs); and until you type something into the
   editor, ↑↓ walk your history (the message becomes the editor's text), ← opens the session list and Esc interrupts.
-  ctrl+z is not passed on (it would suspend the editor). Not available in that mode:
+  ctrl+z is not passed on (it would suspend the editor).
+  Memory: the editor is a process of its own and is open all the time in this mode, so a resting claude++ is its 4 MB
+  plus the editor's: measured with the whole process tree, **vim 7.5 MB, nano 6.3 MB, nvim 21.4 MB** in total (2026-11-04).
+  The 4 MB figure elsewhere in this file is for the other input modes. Not available in that mode:
   `/` and `@` completion, ↑ history, pasting images (a typed `/model` sent from the editor still runs). Tested with vim,
   nvim and nano (`bench/editors.py`); editors that need the kitty keyboard protocol or the mouse are not supported.
   If a pty cannot be opened, ctrl+g falls back to handing the terminal to the editor, and editor mode to the plain box.
