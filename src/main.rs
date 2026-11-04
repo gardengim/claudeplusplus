@@ -107,7 +107,8 @@ KEYS  enter send · shift+enter, alt+enter or ctrl+j newline · esc/ctrl+c inter
       shift+tab permission mode · ctrl+o expand all tool output · alt+o or a click folds one call · wheel or pgup/pgdn scroll · ctrl+end jump to latest
       ctrl+g edit the message in your editor, full screen inside claude++ (ctrl+\\ cancels) · ctrl+b move a running command to the background (/tasks stops it)
       alt+q manage queued messages (reorder, send now, edit) · ctrl+f search the conversation or what you sent
-      /editor: the message area is your editor, always open (quit it to send; ctrl+\\ cancels; no / or @ completion)
+      /editor: the message area is your editor, always open (quit it to send; ctrl+\\ cancels; no / or @ completion).
+              Still claude++'s: pgup/pgdn, alt+1..9, shift+tab, ctrl+t/o, alt+f/r/d/b (as ctrl+f/r/d/b), alt+←/→ tabs, and until you type: ↑↓ history, ← sessions, esc
       /vim: modal keys in the box (esc normal mode; i a o insert; hjkl w b e f t d c y p u v; / searches); /config → Input mode
       ctrl+r search the messages you sent · ← at the start of the input: earlier sessions · tab completes a /command or an @file (↑↓ to pick, esc hides)
       ctrl+v paste an image as [Image #N] at the cursor (delete the token to drop it)
@@ -280,6 +281,8 @@ pub struct App {
     pane_old: Option<(String, usize)>,
     /// Opening the editor failed (no pty): stop trying and use the plain box.
     pane_failed: bool,
+    /// Nothing has been sent to the editor since it opened: ↑ ↓ ← and Esc are still claude++'s.
+    pane_typed: bool,
     /// `editor` in config.json: a command that overrides $VISUAL and $EDITOR.
     pub editor_cmd: Option<String>,
     /// ctrl+l: clear and repaint the whole screen before the next frame.
@@ -809,6 +812,7 @@ impl App {
             pane_shape: 0,
             pane_old: None,
             pane_failed: false,
+            pane_typed: false,
             editor_cmd: None,
             clear_request: false,
             edit_file: None,
@@ -1318,6 +1322,7 @@ impl App {
 
     fn on_paste(&mut self, p: String) {
         if self.pane_has_keyboard() {
+            self.pane_typed = true;
             if self.pane.as_ref().is_some_and(|p| p.kind == pane::Use::Send) {
                 self.warm_active();
             }
@@ -1467,10 +1472,47 @@ impl App {
         self.input = t;
     }
 
+    /// With the editor open, which keys are claude++'s (translated to the key the box expects) and which are the editor's.
+    /// Claimed: chords no editor needs (alt+1..9 o q p, pgup/pgdn, shift+↑↓, ctrl+home/end, shift+tab, ctrl+t o l);
+    /// alt+f r d b n and alt+←/→ stand for ctrl+f r d b n and ctrl+p/n, which the editor needs for itself;
+    /// and, while nothing has been typed yet, ↑ ↓ (history), ← (session list) and Esc (interrupt, rewind).
+    fn app_key(&self, k: KeyEvent) -> Option<KeyEvent> {
+        use KeyCode::*;
+        let m = k.modifiers;
+        let (ctrl, alt, shift) = (m.contains(KeyModifiers::CONTROL), m.contains(KeyModifiers::ALT), m.contains(KeyModifiers::SHIFT));
+        let as_ctrl = |c: char| Some(KeyEvent::new(Char(c), KeyModifiers::CONTROL));
+        match k.code {
+            Char(c) if alt && !ctrl && matches!(c, 'f' | 'r' | 'd' | 'b' | 'n') => as_ctrl(c),
+            Left if alt => as_ctrl('p'),
+            Right if alt => as_ctrl('n'),
+            Char('1'..='9' | 'o' | 'q' | 'p') if alt && !ctrl => Some(k),
+            Char('t' | 'o' | 'l') if ctrl && !alt => Some(k),
+            PageUp | PageDown | BackTab => Some(k),
+            Up | Down if shift => Some(k),
+            Home | End if ctrl => Some(k),
+            Up | Down | Left | Esc if !self.pane_typed && m.is_empty() => Some(k),
+            _ => None,
+        }
+    }
+
     fn on_key(&mut self, k: KeyEvent) {
         if self.pane_has_keyboard() {
-            return self.pane_key(k);
+            let send = self.pane.as_ref().is_some_and(|p| p.kind == pane::Use::Send);
+            let Some(app) = send.then(|| self.app_key(k)).flatten() else { return self.pane_key(k) };
+            let before = self.hist_pos;
+            self.on_key_app(app);
+            // History put a message in the box: that is the editor's text now.
+            if self.hist_pos != before && self.pane.is_some() {
+                self.pane = None;
+                self.pane_closed();
+                self.keep_editor_open();
+            }
+            return;
         }
+        self.on_key_app(k)
+    }
+
+    fn on_key_app(&mut self, k: KeyEvent) {
         let box_is_free = !self.overlay_open() && self.sessions[self.active].pending.is_empty();
         let (ctrl, alt, shift) = (k.modifiers.contains(KeyModifiers::CONTROL), k.modifiers.contains(KeyModifiers::ALT), k.modifiers.contains(KeyModifiers::SHIFT));
         // Input mode editor, when the editor could not be opened up front: typing retries it.
@@ -2325,6 +2367,7 @@ impl App {
         let pane = pane::Pane::spawn(self.pane_seq, kind, &self.editor(), text, (rows, w), self.tx.clone(), AppEvent::Pane)?;
         self.pane = Some(pane);
         self.pane_shape = u8::MAX;
+        self.pane_typed = false;
         Ok(())
     }
 
@@ -2372,6 +2415,11 @@ impl App {
             }
             return self.flash("editor closed: nothing sent");
         }
+        // ctrl+z would suspend the editor, and nothing here could wake it.
+        if k.modifiers.contains(KeyModifiers::CONTROL) && k.code == KeyCode::Char('z') {
+            return self.flash("ctrl+z is not passed to the editor (it would suspend it)");
+        }
+        self.pane_typed = true;
         if self.pane.as_ref().is_some_and(|p| p.kind == pane::Use::Send) {
             self.warm_active();
         }

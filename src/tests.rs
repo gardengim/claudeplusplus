@@ -2641,6 +2641,50 @@ fn a_failing_editor_sends_nothing_and_keeps_the_text_and_ctrl_backslash_cancels(
 }
 
 #[test]
+fn claude_plus_plus_keys_still_work_with_the_editor_open() {
+    let (mut app, _rx) = pane_app("sleep 30 #");
+    app.history = vec!["old one".into(), "old two".into()];
+    app.apply_setting("input_mode", "editor");
+    app.tick();
+    if app.pane.is_none() {
+        return eprintln!("skipped: no pty here");
+    }
+    let id = app.pane.as_ref().unwrap().id;
+    // Untouched editor: ↑ ↓ walk history, and the message becomes the editor's text (a fresh editor).
+    press(&mut app, KeyCode::Up);
+    assert_eq!(app.hist_pos, Some(1));
+    assert!(app.input.is_empty(), "the text moved into the editor");
+    assert!(app.pane.as_ref().is_some_and(|p| p.id != id), "a new editor holds it");
+    press(&mut app, KeyCode::Up);
+    assert_eq!(app.hist_pos, Some(0));
+    press(&mut app, KeyCode::Down);
+    assert_eq!(app.hist_pos, Some(1));
+    // Chords no editor needs, and the alt twins of the ones it does.
+    press(&mut app, KeyCode::PageUp);
+    assert!(app.sessions[app.active].scroll > 0, "pgup scrolls the conversation");
+    app.on_key(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::ALT));
+    assert!(app.search.is_some(), "alt+f is ctrl+f");
+    app.search = None;
+    // ← on an untouched editor opens the session list.
+    press(&mut app, KeyCode::Left);
+    assert!(app.explorer.is_some() || app.dock.is_some(), "← goes to the sessions");
+    app.explorer = None;
+    app.dock = None;
+    // Once you type, the editor owns ↑ ↓ ← esc.
+    typed(&mut app, "x");
+    assert!(app.pane_typed);
+    let at = app.hist_pos;
+    for code in [KeyCode::Up, KeyCode::Down, KeyCode::Left, KeyCode::Esc] {
+        press(&mut app, code);
+    }
+    assert_eq!(app.hist_pos, at, "history untouched");
+    assert!(app.explorer.is_none() && app.dock.is_none(), "no session list");
+    // ctrl+z would suspend the editor: it is not passed on.
+    app.on_key(KeyEvent::new(KeyCode::Char('z'), KeyModifiers::CONTROL));
+    assert!(app.pane.is_some());
+}
+
+#[test]
 fn ctrl_g_edits_the_box_in_a_full_screen_editor_and_puts_the_text_back() {
     let (mut app, rx) = pane_app("printf 'edited text' >");
     app.set_input("old text".into());

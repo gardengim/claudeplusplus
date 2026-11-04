@@ -364,7 +364,11 @@ Release binary: ~2.3 MB.
   only when you type, as before. Quit the
   editor (`:wq`, `ctrl+x`...) and its text is sent as the message; quit with an error (`:cq`) and nothing is sent but
   your text goes into the box. **ctrl+\ always cancels** (nothing is sent), and is the only key the editor never sees.
-  A permission prompt or question takes the keyboard from the pane until you answer it. Not available in that mode:
+  A permission prompt or question takes the keyboard from the pane until you answer it.
+  claude++'s own keys still work: pgup/pgdn, alt+1..9, alt+o/q/p, shift+tab, ctrl+t/o/l always; alt+f/r/d/b/n and
+  alt+←/→ stand for ctrl+f/r/d/b/n and ctrl+p/n (which the editor needs); and until you type something into the
+  editor, ↑↓ walk your history (the message becomes the editor's text), ← opens the session list and Esc interrupts.
+  ctrl+z is not passed on (it would suspend the editor). Not available in that mode:
   `/` and `@` completion, ↑ history, pasting images (a typed `/model` sent from the editor still runs). Tested with vim,
   nvim and nano (`bench/editors.py`); editors that need the kitty keyboard protocol or the mouse are not supported.
   If a pty cannot be opened, ctrl+g falls back to handing the terminal to the editor, and editor mode to the plain box.

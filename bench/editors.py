@@ -3,6 +3,7 @@
   A  input mode "editor": type, write the message, quit -> exactly that message reaches claude
   B  ctrl+g full screen: edit the draft, quit -> the text is back in the box, then Enter sends it
   C  ctrl+\\ cancels: nothing is sent, claude++ lives, the next message goes through
+  D  claude++'s own keys: ← on an untouched editor opens the session list; after typing, ← belongs to the editor
 A fake `claude` logs every user message it receives. Usage: python3 bench/editors.py [editor ...]"""
 import os, sys, json, tempfile
 want = sys.argv[1:]; sys.argv = sys.argv[:1]
@@ -89,11 +90,23 @@ def scenario_c(name):
     got = received(log, 1) if up else []; t.close()
     return up and nothing and got == ["second try"], f"alive={up}, nothing sent by cancel={nothing}, then received {got!r}"
 
+def scenario_d(name):
+    cmd, write, _ = EDITORS[name]
+    t, log = start(cmd, "editor")
+    t.mark = len(t.buf); os.write(t.fd, b"\x1b[D")
+    opened = t.drain(3.0, b"Sessions")
+    os.write(t.fd, b"\x1b"); t.drain(1.0)                      # esc closes the list
+    os.write(t.fd, write("x")[0].encode()); t.drain(1.0)        # first key into the editor (vim: i)
+    t.mark = len(t.buf); os.write(t.fd, b"\x1b[D")
+    stayed = not t.drain(1.5, b"Sessions")
+    ok = alive(t); t.close()
+    return opened and stayed and ok, f"untouched ← opens the list: {opened}; after typing it is the editor's: {stayed}; alive={ok}"
+
 bad = 0
 for name in EDITORS:
     if want and name not in want: continue
     if subprocess.run(["which", name], capture_output=True).returncode: print(f"SKIP  {name}: not installed"); continue
-    for label, fn in (("A editor mode", scenario_a), ("B ctrl+g", scenario_b), ("C ctrl+\\ cancel", scenario_c)):
+    for label, fn in (("A editor mode", scenario_a), ("B ctrl+g", scenario_b), ("C ctrl+\\ cancel", scenario_c), ("D own keys", scenario_d)):
         try: ok, d = fn(name)
         except Exception as e: ok, d = False, f"crashed: {e!r}"
         bad += not ok; print(f"{'PASS' if ok else 'FAIL'}  {name:5} {label}: {d}", flush=True)
