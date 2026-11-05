@@ -3,10 +3,10 @@
 Measures the process tree right after the turn and after 5x --idle-suspend with no input, then types again and
 checks the conversation survived the stop. Usage: python3 bench/away.py   (one haiku turn + one resume, ~1 min)"""
 import sys
-_src = open(__file__.replace("away.py", "tabs.py")).read().split("os.makedirs(W")[0]  # reuse tabs.py's Term/tree/footprint helpers
+from _term import *
 sys.argv = sys.argv[:1]
-exec(_src)
 os.makedirs(W, exist_ok=True)
+PROMPTS = ["What is 6 times 7? Reply with the number followed by the letter Z and nothing else."]
 SUSPEND = 4  # seconds; the front tab stops after 5x this with no input
 t = Term([CPP, "--model", "haiku", "--idle-suspend", str(SUSPEND)])
 t.mark = 0; t.drain(3)

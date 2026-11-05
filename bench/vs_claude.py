@@ -5,6 +5,7 @@ XDG config/cache dirs (default settings), same model, same backend flags per pai
 memory/CPU read per PID tree (never system-wide, never other sessions), wait for load < LOAD before each run.
 Usage: python3 bench/vs_claude.py [runs] """
 import glob, os, pty, time, subprocess, select, struct, fcntl, termios, signal, sys, random, json, re, shutil, statistics as st
+from _term import footprint
 RUNS = int(sys.argv[1]) if len(sys.argv) > 1 else 3
 LOAD = 14.0  # machine is shared and busy (system daemons); load is recorded per run instead of waited out
 CPP = os.path.abspath("target/release/claudeplusplus")
@@ -37,12 +38,6 @@ def tree(root):
         return s
     return seen, sum(rows[x][0] for x in seen) / 1024, sum(secs(rows[x][1]) for x in seen)
 
-def footprint(pids):
-    """macOS `footprint` summed over pids, in MB: what the processes really hold (RSS overstates it ~2x)."""
-    args = [a for p in pids for a in ("-p", str(p))]
-    out = subprocess.run(["footprint"] + args, capture_output=True, text=True).stdout
-    mul = {"KB": 1 / 1024, "MB": 1, "GB": 1024}
-    return round(sum(float(n) * mul[u] for n, u in re.findall(r"\]: .*?Footprint: ([\d.]+) (KB|MB|GB)", out)), 1)
 
 def transcript_usage(since):
     """Tokens of every model request in the session transcripts written since `since` (the same source for both

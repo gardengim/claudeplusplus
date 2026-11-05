@@ -3,10 +3,9 @@
 mid-turn, interrupt, a permission prompt. Each scenario must leave claude++ alive and usable (or exited cleanly),
 and no `claude` process behind. Usage: python3 bench/hostile.py [scenario ...]"""
 import os, sys, tempfile
-_src = open(__file__.replace("hostile.py", "tabs.py")).read().split("os.makedirs(W")[0]  # reuse Term/tree/helpers
+from _term import *
 want = sys.argv[1:]; sys.argv = sys.argv[:1]
 USER_CFG = os.environ.get("HOSTILE_CONFIG") == "user"  # default: claude++ default settings; "user": your ~/.config/claude++ (e.g. vim mode)
-exec(_src)
 os.makedirs(W, exist_ok=True)
 if not USER_CFG: os.environ["XDG_CONFIG_HOME"] = tempfile.mkdtemp(prefix="cpp-hostile-cfg-")
 Q = "What is 6 times 7? Reply with the number followed by the letter Z and nothing else."

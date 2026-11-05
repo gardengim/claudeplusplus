@@ -7,8 +7,7 @@
 A fake `claude` logs every user message it receives. Usage: python3 bench/editors.py [editor ...]"""
 import os, sys, json, tempfile
 want = sys.argv[1:]; sys.argv = sys.argv[:1]
-_src = open(__file__.replace("editors.py", "tabs.py")).read().split("os.makedirs(W")[0]  # reuse Term/tree helpers
-exec(_src)
+from _term import *
 os.makedirs(W, exist_ok=True)
 
 FAKE = r'''#!/usr/bin/env python3

@@ -6,8 +6,7 @@ import os, sys, tempfile, stat
 SMALL = int(sys.argv[1]) if len(sys.argv) > 1 else 300
 LARGE = int(sys.argv[2]) if len(sys.argv) > 2 else 3000
 sys.argv = sys.argv[:1]
-_src = open(__file__.replace("soak.py", "tabs.py")).read().split("os.makedirs(W")[0]  # reuse Term/tree/footprint
-exec(_src)
+from _term import *
 os.makedirs(W, exist_ok=True)
 
 FAKE = r'''#!/usr/bin/env python3

@@ -2,9 +2,8 @@
 """The thesis as a budget: a resting claude++ must stay tiny, whatever features are added. No model calls (free, ~15 s).
 Fails (exit 1) when a change makes it heavier. Run after `cargo build --release`:  python3 bench/budget.py"""
 import sys
-_src = open(__file__.replace("budget.py", "tabs.py")).read().split("os.makedirs(W")[0]  # reuse Term/tree/footprint
+from _term import *
 sys.argv = sys.argv[:1]
-exec(_src)
 os.makedirs(W, exist_ok=True)
 BUDGET = {"binary_mb": 3.0, "resting_mb": 8.0, "first_paint_ms": 150, "idle_cpu_s_per_10s": 0.1}
 

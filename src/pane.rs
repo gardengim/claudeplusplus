@@ -87,6 +87,15 @@ fn winsize(rows: u16, cols: u16) -> libc::winsize {
     libc::winsize { ws_row: rows.max(1), ws_col: cols.max(1), ws_xpixel: 0, ws_ypixel: 0 }
 }
 
+/// A new file in the temp folder, readable by you alone, holding `text`. The name is unique within this process.
+pub fn private_temp(prefix: &str, text: &str) -> io::Result<std::path::PathBuf> {
+    static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let path = std::env::temp_dir().join(format!("{prefix}-{}-{}.md", std::process::id(), N.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
+    let mut f = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&path)?;
+    f.write_all(text.as_bytes())?;
+    Ok(path)
+}
+
 impl Pane {
     /// Start `editor` (a shell command, so `code -w` works) on a temp file holding `text`.
     pub fn spawn<E: Send + 'static>(
@@ -98,11 +107,7 @@ impl Pane {
         tx: Sender<E>,
         wrap: impl Fn(u64, Msg) -> E + Send + 'static,
     ) -> io::Result<Pane> {
-        static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-        let path = std::env::temp_dir().join(format!("claudepp-pane-{}-{}.md", std::process::id(), N.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
-        let mut f = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&path)?;
-        f.write_all(text.as_bytes())?;
-        drop(f);
+        let path = private_temp("claudepp-pane", text)?;
         let started = Self::start(editor, &path, (rows, cols));
         let (child, master) = match started {
             Ok(x) => x,

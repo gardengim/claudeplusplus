@@ -12,6 +12,7 @@ claude++ uses. Measures: tokens of the first request, every model that was calle
 result's modelUsage), cost, footprint (macOS `footprint`, summed over the process tree) after the turn, CPU
 seconds over an idle window, startup time. Results: bench/results/<date>-levers-<stage>.json"""
 import datetime, json, os, queue, re, shutil, subprocess, sys, tempfile, threading, time
+from _term import footprint
 
 LEAN_TOOLS = re.search(r'LEAN_TOOLS[^"]*"([^"]+)"', open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "../src/profile.rs")).read()).group(1)
 FULL = os.environ.get("LEVERS_BASE") == "full"  # no profile: your own settings, plugins, skills and MCP servers
@@ -40,11 +41,6 @@ def tree(root):
     return seen, sum(cpu[x] for x in seen)
 
 
-def footprint(pids):
-    args = [a for p in pids for a in ("-p", str(p))]
-    out = subprocess.run(["footprint"] + args, capture_output=True, text=True).stdout
-    mul = {"KB": 1 / 1024, "MB": 1, "GB": 1024}
-    return round(sum(float(n) * mul[u] for n, u in re.findall(r"\]: .*?Footprint: ([\d.]+) (KB|MB|GB)", out)), 1)
 
 
 def run(name, args=(), env=None, prompts=(TRIVIAL,), model="haiku", idle=10, cwd=None, peak=False, setup=None, sample=False, settle=False, detail=False):

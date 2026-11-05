@@ -386,12 +386,7 @@ static EDITING: AtomicBool = AtomicBool::new(false);
 /// `text` edited in `editor` (a shell command, so `code -w` works) through a private temp file; the editor's
 /// last line break is not part of the message. Err when the editor could not run or failed.
 fn edit_text(editor: &str, text: &str) -> io::Result<String> {
-    use std::os::unix::fs::OpenOptionsExt;
-    static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-    let path = std::env::temp_dir().join(format!("claudepp-message-{}-{}.md", std::process::id(), N.fetch_add(1, Ordering::Relaxed)));
-    let mut f = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&path)?;
-    f.write_all(text.as_bytes())?;
-    drop(f);
+    let path = pane::private_temp("claudepp-message", text)?;
     let status = std::process::Command::new("sh").arg("-c").arg(format!("{editor} \"$1\"")).arg("sh").arg(&path).status();
     let edited = std::fs::read_to_string(&path);
     let _ = std::fs::remove_file(&path);
@@ -612,7 +607,7 @@ fn run(opts: Opts) -> io::Result<()> {
     }
     let mode = statusline::Mode::parse(&opts.statusline).or_else(|| saved("statusline").as_deref().and_then(statusline::Mode::parse));
     app.startup_note = app.apply_statusline_mode(mode.unwrap_or(statusline::Mode::Builtin));
-    app.known_commands = load_commands();
+    app.known_commands = cache_path("commands.json").map(|p| read_commands(&p)).unwrap_or_default();
     app.history = history::sent_prompts(&app.cwd);
     app.known_models = cache_path("models.json").map(|p| read_models(&p)).unwrap_or_default();
     app.new_tab();
@@ -1039,7 +1034,9 @@ impl App {
                     s.on_backend(pid, msg);
                     if std::mem::take(&mut s.cmds_new) && s.commands.len() != self.known_commands.len() {
                         self.known_commands = s.commands.clone();
-                        save_commands(&self.known_commands);
+                        if let Some(p) = cache_path("commands.json") {
+                            write_commands(&p, &self.known_commands);
+                        }
                     }
                     if std::mem::take(&mut s.models_new) && !s.models.is_empty() {
                         self.known_models = s.models.clone();
@@ -2082,7 +2079,7 @@ impl App {
         if self.rewind.is_some() {
             return self.rewind_key(k);
         }
-        if self.dock_focus && self.dock.is_some() && self.settings.is_none() && self.tabcfg.is_none() && self.instr.is_none() && self.perms.is_none() && self.opt.is_none() && !self.usage_open && self.ctx_ui.is_none() && self.lanes.is_none() && self.queue_ui.is_none() && self.sched_ui.is_none() && self.search.is_none() && self.sessions[self.active].pending.is_empty() {
+        if self.dock_focus && self.dock.is_some() && !self.overlay_open() && self.sessions[self.active].pending.is_empty() {
             use KeyCode::*;
             if k.code == Char('t') && ctrl {
                 self.new_tab();
@@ -2678,56 +2675,42 @@ fn cache_path(name: &str) -> Option<std::path::PathBuf> {
     config::cache_dir().map(|d| d.join(name))
 }
 
-fn commands_cache() -> Option<std::path::PathBuf> {
-    cache_path("commands.json")
+/// A cached JSON array, one `f` per element (empty when the file is missing or not an array).
+fn read_list<T>(path: &std::path::Path, f: impl Fn(&serde_json::Value) -> T) -> Vec<T> {
+    let list: Option<Vec<serde_json::Value>> = std::fs::read_to_string(path).ok().and_then(|t| serde_json::from_str(&t).ok());
+    list.unwrap_or_default().iter().map(f).collect()
+}
+
+fn write_list(p: &std::path::Path, items: Vec<serde_json::Value>) {
+    let _ = p.parent().map(std::fs::create_dir_all);
+    let _ = std::fs::write(p, serde_json::Value::Array(items).to_string());
+}
+
+fn text(v: &serde_json::Value, k: &str) -> String {
+    v[k].as_str().unwrap_or_default().to_string()
 }
 
 fn read_models(path: &std::path::Path) -> Vec<ModelInfo> {
-    let list: Option<Vec<serde_json::Value>> = std::fs::read_to_string(path).ok().and_then(|t| serde_json::from_str(&t).ok());
-    let s = |c: &serde_json::Value, k: &str| c[k].as_str().unwrap_or_default().to_string();
-    list.unwrap_or_default()
-        .iter()
-        .map(|m| ModelInfo {
-            value: s(m, "value"),
-            name: s(m, "name"),
-            desc: s(m, "desc"),
-            resolved: s(m, "resolved"),
-            efforts: m["efforts"].as_array().into_iter().flatten().filter_map(|e| e.as_str().map(String::from)).collect(),
-            fast: m["fast"] == true,
-        })
-        .collect()
+    read_list(path, |m| ModelInfo {
+        value: text(m, "value"),
+        name: text(m, "name"),
+        desc: text(m, "desc"),
+        resolved: text(m, "resolved"),
+        efforts: m["efforts"].as_array().into_iter().flatten().filter_map(|e| e.as_str().map(String::from)).collect(),
+        fast: m["fast"] == true,
+    })
 }
 
 fn write_models(p: &std::path::Path, models: &[ModelInfo]) {
-    let v: Vec<_> = models
-        .iter()
-        .map(|m| json!({"value": m.value, "name": m.name, "desc": m.desc, "resolved": m.resolved, "efforts": m.efforts, "fast": m.fast}))
-        .collect();
-    let _ = p.parent().map(std::fs::create_dir_all);
-    let _ = std::fs::write(p, serde_json::Value::Array(v).to_string());
-}
-
-fn load_commands() -> Vec<Cmd> {
-    commands_cache().map(|p| read_commands(&p)).unwrap_or_default()
+    write_list(p, models.iter().map(|m| json!({"value": m.value, "name": m.name, "desc": m.desc, "resolved": m.resolved, "efforts": m.efforts, "fast": m.fast})).collect());
 }
 
 fn read_commands(path: &std::path::Path) -> Vec<Cmd> {
-    let list: Option<Vec<serde_json::Value>> =
-        std::fs::read_to_string(path).ok().and_then(|t| serde_json::from_str(&t).ok());
-    let s = |c: &serde_json::Value, k: &str| c[k].as_str().unwrap_or_default().to_string();
-    list.unwrap_or_default().iter().map(|c| Cmd { name: s(c, "name"), desc: s(c, "desc"), hint: s(c, "hint") }).collect()
-}
-
-fn save_commands(cmds: &[Cmd]) {
-    if let Some(p) = commands_cache() {
-        write_commands(&p, cmds);
-    }
+    read_list(path, |c| Cmd { name: text(c, "name"), desc: text(c, "desc"), hint: text(c, "hint") })
 }
 
 fn write_commands(p: &std::path::Path, cmds: &[Cmd]) {
-    let v: Vec<_> = cmds.iter().map(|c| json!({"name": c.name, "desc": c.desc, "hint": c.hint})).collect();
-    let _ = p.parent().map(std::fs::create_dir_all);
-    let _ = std::fs::write(p, serde_json::Value::Array(v).to_string());
+    write_list(p, cmds.iter().map(|c| json!({"name": c.name, "desc": c.desc, "hint": c.hint})).collect());
 }
 
 /// Footprint (KB) per root pid including its child processes. macOS `footprint` reports what the
