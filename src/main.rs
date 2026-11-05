@@ -5,6 +5,7 @@ mod jobs;
 mod lanes;
 mod mcp;
 mod share;
+mod trust;
 mod commands;
 mod pane_host;
 mod panels;
@@ -123,7 +124,7 @@ IMAGES    ctrl+v, drag a file into the window or /img <path> to attach; pictures
           inline in kitty/Ghostty (CLAUDEPP_IMAGES=on|off overrides detection)";
 
 /// Commands claude++ handles itself: (name, argument hint, description).
-const LOCAL_COMMANDS: [(&str, &str, &str); 32] = [
+const LOCAL_COMMANDS: [(&str, &str, &str); 33] = [
     ("new", "[profile]", "open a new tab"),
     ("profile", "[name] [--hard]", "show or change this tab's profile"),
     ("close", "", "close this tab"),
@@ -144,7 +145,8 @@ const LOCAL_COMMANDS: [(&str, &str, &str); 32] = [
     ("vim", "", "turn vim keys in the message box on or off"),
     ("editor", "", "turn the message box into your $EDITOR on or off (quit the editor to send)"),
     ("copy", "[code]", "copy the last answer, or its last code block, to the clipboard"),
-    ("config", "", "settings: claude++'s and Claude Code's, by section, searchable"),
+    ("config", "", "claude++'s settings"),
+    ("trust", "", "start claude in this folder although Claude Code has not trusted it (this run only)"),
     ("setting", "", "same as /config"),
     ("session", "", "this tab's permission mode and tool rules"),
     ("usage", "", "where this tab's context goes, and your plan limits"),

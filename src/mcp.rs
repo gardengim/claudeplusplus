@@ -18,7 +18,7 @@ pub fn norm(name: &str) -> String {
     name.chars().map(|c| if c.is_ascii_alphanumeric() || c == '_' || c == '-' { c } else { '_' }).collect()
 }
 
-fn claude_json() -> Option<PathBuf> {
+pub(crate) fn claude_json() -> Option<PathBuf> {
     let dir = std::env::var_os("CLAUDE_CONFIG_DIR").map(PathBuf::from).or_else(|| std::env::var_os("HOME").map(PathBuf::from))?;
     Some(dir.join(".claude.json"))
 }
@@ -42,6 +42,19 @@ fn defs_in(claude_json: Option<&Path>, cwd: &str) -> BTreeMap<String, Value> {
     if let Some(v) = read(&Path::new(cwd).join(".mcp.json")) {
         out.extend(servers_of(&v));
     }
+    // What `/mcp disable` left behind: servers the user turned off for this folder stay off.
+    let off = |v: &Value, key: &str| v[key].as_array().into_iter().flatten().filter_map(|n| n.as_str().map(String::from)).collect::<Vec<_>>();
+    let mut gone = vec![];
+    if let Some(v) = claude_json.and_then(read) {
+        gone.extend(off(&v["projects"][cwd], "disabledMcpServers"));
+        gone.extend(off(&v["projects"][cwd], "disabledMcpjsonServers"));
+    }
+    for f in [".claude/settings.json", ".claude/settings.local.json"] {
+        if let Some(v) = read(&Path::new(cwd).join(f)) {
+            gone.extend(off(&v, "disabledMcpjsonServers"));
+        }
+    }
+    out.retain(|k, _| !gone.contains(k));
     out
 }
 
@@ -155,11 +168,14 @@ mod tests {
         let cj = d.join("claude.json");
         std::fs::write(&cj, serde_json::to_string(&json!({
             "mcpServers": {"user-one": {"command": "a"}},
-            "projects": {cwd: {"mcpServers": {"local-one": {"command": "b"}}}, "/elsewhere": {"mcpServers": {"not-mine": {"command": "c"}}}}
+            "projects": {cwd: {"mcpServers": {"local-one": {"command": "b"}, "muted": {"command": "m"}}, "disabledMcpServers": ["muted"]}, "/elsewhere": {"mcpServers": {"not-mine": {"command": "c"}}}}
         })).unwrap()).unwrap();
         std::fs::write(proj.join(".mcp.json"), r#"{"mcpServers": {"shared": {"command": "d"}}}"#).unwrap();
+        std::fs::create_dir_all(proj.join(".claude")).unwrap();
+        std::fs::write(proj.join(".claude/settings.local.json"), r#"{"disabledMcpjsonServers": ["switched-off"]}"#).unwrap();
+        std::fs::write(proj.join(".mcp.json"), r#"{"mcpServers": {"shared": {"command": "d"}, "switched-off": {"command": "e"}}}"#).unwrap();
         let all = defs_in(Some(&cj), cwd);
-        assert_eq!(all.keys().collect::<Vec<_>>(), ["local-one", "shared", "user-one"], "another folder's servers are not ours");
+        assert_eq!(all.keys().collect::<Vec<_>>(), ["local-one", "shared", "user-one"], "another folder's servers are not ours, nor are the ones switched off with /mcp disable");
         assert!(defs_in(None, "/nowhere").is_empty());
         // The file: only what was asked, and a name that is gone is skipped.
         let cache = d.join("cache");

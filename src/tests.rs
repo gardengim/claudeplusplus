@@ -2132,6 +2132,31 @@ fn vim_keys_edit_the_box_in_modes_and_sending_returns_to_insert() {
 }
 
 #[test]
+fn a_folder_that_brings_commands_of_its_own_does_not_start_claude_until_trusted() {
+    let (mut app, d) = fake_app("trust-gate");
+    let proj = std::env::temp_dir().join(format!("claudeplusplus-untrusted-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&proj);
+    std::fs::create_dir_all(&proj).unwrap();
+    std::fs::write(proj.join(".mcp.json"), r#"{"mcpServers": {"from-the-repo": {"command": "sh"}}}"#).unwrap();
+    app.sessions[0].cwd = Some(proj.to_str().unwrap().into());
+    app.sessions[0].trust_gate = true; // off in tests, which use folders of their own
+    typed(&mut app, "hello"); // typing would start claude ahead of the message
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(spawns(&d), 0, "nothing was started in the untrusted folder");
+    let why = app.sessions[0].items.iter().rev().find_map(|i| match &i.entry {
+        session::Entry::Error(e) => Some(e.clone()),
+        _ => None,
+    });
+    let why = why.expect("the refusal is shown");
+    assert!(why.contains("Not started") && why.contains("from-the-repo") && why.contains("/trust"), "{why}");
+    run_cmd(&mut app, "/trust");
+    typed(&mut app, "again");
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(wait_spawns(&d, 1), 1, "after /trust claude starts");
+    let _ = std::fs::remove_dir_all(&proj);
+}
+
+#[test]
 fn shared_mcp_hands_the_stdio_servers_to_claude_plus_plus_and_leaves_the_rest() {
     if !config::cache_dir().is_some_and(|d| std::fs::create_dir_all(&d).and_then(|_| std::fs::write(d.join(".probe"), "")).is_ok()) {
         return eprintln!("skipped: the cache directory cannot be written here");

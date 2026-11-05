@@ -178,6 +178,13 @@ impl App {
                     }
                 }
             }
+            "/trust" => {
+                let cwd = std::path::PathBuf::from(self.cwd());
+                trust::allow(&cwd);
+                self.sessions.iter_mut().for_each(|s| s.trust = None);
+                self.flash(format!("starting claude in {} although Claude Code has not trusted it", cwd.display()));
+                self.warm_active();
+            }
             "/search" => {
                 self.open_search();
                 if !arg.is_empty() && let Some(ui) = self.search.as_mut() {

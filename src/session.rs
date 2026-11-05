@@ -153,6 +153,10 @@ pub struct Session {
     pub long_hinted: bool,
     /// The note about shared MCP servers has been shown for this tab.
     pub share_hinted: bool,
+    /// Whether claude may start in this folder (see `trust`), asked once and remembered; `/trust` clears it.
+    pub trust: Option<Result<(), String>>,
+    /// Off in tests, which run in folders of their own choosing.
+    pub trust_gate: bool,
     /// The message box while another tab is in front: (text, cursor).
     pub draft: (String, usize),
     /// This tab's own tool rules, (rule, allow?), sent as `permissions` and re-sent when the process restarts.
@@ -325,6 +329,8 @@ impl Session {
             lean_hinted: false,
             long_hinted: false,
             share_hinted: false,
+            trust: None,
+            trust_gate: !cfg!(test),
             draft: Default::default(),
             rules: vec![],
             tools: vec![],
@@ -758,6 +764,12 @@ impl Session {
         if self.backend.is_some() {
             return Ok(());
         }
+        if self.trust_gate {
+            let cwd = launch.cwd.as_deref().map(std::path::PathBuf::from).or_else(|| std::env::current_dir().ok()).unwrap_or_default();
+            if let Err(why) = self.trust.get_or_insert_with(|| crate::trust::check(&cwd)) {
+                return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, why.clone()));
+            }
+        }
         // A conversation we already have an id for is resumed (e.g. after idle suspension).
         let resume = match (&self.session_id, &self.start) {
             (Some(id), _) => Resume::Id(id),
@@ -906,6 +918,7 @@ impl Session {
                     }
                 }
             }
+            Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => self.error(e.to_string()),
             Err(e) => {
                 self.backend = None;
                 self.error(format!("could not reach claude: {e}"));

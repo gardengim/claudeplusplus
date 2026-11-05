@@ -118,15 +118,6 @@ fn project_root(cwd: &Path, home: Option<&Path>) -> Option<PathBuf> {
     None
 }
 
-/// Claude Code's own record of "you trusted this folder", from `~/.claude.json`, checked for `cwd` and
-/// every parent as Claude Code does. Project settings may run commands, so they wait for this.
-fn trusted(cwd: &Path, claude_json: Option<&Path>) -> bool {
-    let Some(v) = claude_json.and_then(|f| std::fs::read_to_string(f).ok()).and_then(|t| serde_json::from_str::<Value>(&t).ok()) else {
-        return false;
-    };
-    cwd.ancestors().any(|a| v["projects"][a.to_string_lossy().as_ref()]["hasTrustDialogAccepted"] == true)
-}
-
 /// The status line Claude Code would use here: managed, then project-local, then project, then user
 /// settings (the first that defines one wins). Project and local ones need the folder to be trusted.
 pub fn lookup(cwd: &Path, paths: &Paths) -> Lookup {
@@ -146,7 +137,7 @@ pub fn lookup(cwd: &Path, paths: &Paths) -> Lookup {
         else {
             continue;
         };
-        if matches!(source, Source::Project | Source::Local) && !trusted(cwd, paths.claude_json.as_deref()) {
+        if matches!(source, Source::Project | Source::Local) && !crate::trust::trusted(cwd, paths.claude_json.as_deref()) {
             untrusted.get_or_insert((source, cfg.command));
             continue;
         }
