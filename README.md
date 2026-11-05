@@ -11,6 +11,36 @@ cargo build --release
 claude++ --help
 ```
 
+## Status: early, and what that means
+
+claude++ is **unofficial**. It is not made, reviewed or endorsed by Anthropic; "Claude" and "Claude Code" are Anthropic's
+names, used here only to say what it works with. It drives the official `claude` binary under your own login and adds no
+model calls of its own. Licensed MIT (see `LICENSE`). Build from source (`./install.sh`, needs a Rust toolchain); there is
+no prebuilt binary.
+
+| | |
+|---|---|
+| **macOS, Apple Silicon** | the only platform it has been used on, day to day; every number in this file comes from it |
+| **Linux** | builds and type-checks, and CI runs the tests on it, but nobody has used it by hand yet (a CI workflow is set up to run the tests there; it has not run yet, as there is no remote). Expect rough edges (memory figures fall back to `ps`, image paste needs `wl-paste`/`xclip`) |
+| **Windows** | not supported (it needs a pty and POSIX process groups) |
+| **Claude Code** | measured on 2.1.317 and 2.1.318. It leans on parts Claude Code does not document (flags such as `--autocompact`, `--system-prompt-snapshot`; control requests such as `get_context_usage` and `mcp_message`; the on-disk transcript and `~/.claude/jobs` state files). It says so when your `claude` is a newer line than it was verified on, and `python3 bench/contract.py` checks the ones that matter |
+| **Terminals** | keyboard protocol, inline images, OSC 52 and colours behave differently per terminal; only the author's were tried |
+
+Things to know before you rely on it:
+
+- **Folders you open.** `claude -p` never shows Claude Code's "do you trust this folder?" dialog, and it starts a folder's
+  `.mcp.json` servers and runs its project hooks without asking. So claude++ asks in its place: in a folder Claude Code has
+  not recorded as trusted (`hasTrustDialogAccepted` in `~/.claude.json`) that has `.mcp.json` servers or project settings
+  that run commands (`hooks`, `env`, `apiKeyHelper`, ...), it does **not** start `claude` and lists what would run. Open the
+  folder once in `claude` and accept its dialog, or type `/trust` to start anyway for this run. A folder that brings nothing
+  to run starts at once.
+- **The benches spend real money.** `cargo test` and `bench/budget.py` are free; `contract`, `hostile`, `away`, `share`, `run`,
+  `lanes`, `levers` and `tabs` call the real API: cents each, and the long sweeps (`levers`, `run`) up to a couple of dollars (one growth test cost about $2.30). The table at the end gives the cost per command.
+- **Known flakes, not understood.** One `backend` unit test failed once while a release build ran alongside it (0 failures
+  in 85 loaded reruns since); the `hostile` bench's permission scenario depends on the model attempting a tool call and
+  retries up to three times; one vim-editor bench run failed once and has not recurred.
+- **Sharing MCP servers between tabs** (`/config`) is experimental and off by default; see its section for what it drops.
+
 ## Measured against `claude`
 
 Claude Code 2.1.317, model haiku, macOS on Apple Silicon, 2026-11-03 (machine busy: load 6–14). Memory is macOS `footprint` summed over each
@@ -101,7 +131,7 @@ Release binary: ~2.3 MB.
   subagents, and `x` stops one. A tab with a command still running is never stopped by idle suspension or `--mem-budget`.
 - The model's thinking shows as one folded `✻ Thinking…` line; ctrl+o or a click reads it.
 - Key hints are written the way your keyboard labels them, fixed when claude++ is built: `⌃t`, `⌥o`, `⇧⇥` on macOS
-  (⌥ is Option, which terminals send as Alt), `Ctrl+T`, `Alt+O`, `Shift+Tab` on Windows and Linux.
+  (⌥ is Option, which terminals send as Alt), `Ctrl+T`, `Alt+O`, `Shift+Tab` on Linux.
 - Differences: ctrl+t opens a tab; Claude Code commands that open an interactive panel
   (`/hooks`, `/login`, `/plugin`...) answer that they need the Claude Code terminal.
 
@@ -648,7 +678,7 @@ timings in the full table, not tokens or memory. Use footprint, not RSS: RSS ove
 - A backend that dies before its first message twice in a row (a bad flag, a deleted conversation) is no longer
   started by typing; sending a message tries again. A conversation `claude` cannot find is forgotten, and the next
   message starts a new one.
-- Tested on macOS only. macOS tools used where present: `footprint` (memory), `sips` (image conversion), `osascript`
+- Tested by hand on macOS only (Linux: compiles and passes the tests in CI; Windows: not supported). macOS tools used where present: `footprint` (memory), `sips` (image conversion), `osascript`
   (clipboard images) and `pbcopy`; elsewhere memory falls back to `ps` RSS and images need `wl-paste`/`xclip`.
 
 ## Confidence checks
@@ -657,13 +687,14 @@ Run `cargo build --release` first. All use the real `claude` or none at all; non
 
 | Command | Checks | Cost |
 |---|---|---|
-| `cargo test` | 286 unit and end-to-end tests (the pty ones skip themselves where no pty can be opened) against a fake `claude`; includes a light fuzz run | free, 5 s |
+| `cargo test` | 289 unit and end-to-end tests (the pty ones skip themselves where no pty can be opened) against a fake `claude`; includes a light fuzz run | free, 5 s |
 | `git config core.hooksPath .githooks` | once per clone: `git push` then runs `cargo test` and `bench/budget.py` first (`git push --no-verify` skips it). The contract check calls the real `claude`, so it stays manual | free, ~2 min |
 | `FUZZ_ROUNDS=40 FUZZ_SEED=7 cargo test --release hostile_backend` | the UI against hostile backend messages (mutated real ones: wrong types, huge values, control characters), random keys, read-only panels, terminals from 1×1 to 300×4. Run it in a debug build too: that is where integer overflow shows. Found: an overflow on absurd token counts, now capped at the source (`backend::count`) | free |
 | `FUZZ_FILES=600 cargo test hostile_transcript` | resume and every history reader against corrupt transcripts (cut-off lines, invalid UTF-8, a 3 MB line) | free |
 | `python3 bench/contract.py` | the installed `claude` still behaves as claude++ assumes, including the token saving | cents |
 | `python3 bench/budget.py` | resting claude++ stays tiny: binary, memory, first paint, idle CPU | free |
 | `python3 bench/hostile.py` | SIGTERM/SIGHUP/SIGKILL leave no orphan `claude` and a restored terminal; a backend killed mid-turn; Esc interrupts; a permission prompt can be declined. `HOSTILE_CONFIG=user` uses your own config | cents, 3 min |
+| `python3 bench/share.py` | three tabs, three MCP servers, sharing off vs on: server processes started, who answered each tool call, memory, and that nothing is left after a quit or a SIGKILL | cents |
 | `python3 bench/editors.py` | real vim, nvim and nano inside claude++: editor-mode send, ctrl+g full screen, ctrl+\\ cancel; a fake `claude` logs exactly what it receives | free |
 | `python3 bench/soak.py` | 3,000 turns cost 23 MB (about 4 KB per turn, linear), echo stays near 1 ms, idle CPU about 0; a single 30 MB tool result costs 191 MB and stays responsive | free |
 | `python3 bench/away.py` | the front tab gives its memory back when you leave, and the conversation survives | cents |
@@ -673,7 +704,7 @@ Run `cargo build --release` first. All use the real `claude` or none at all; non
 - `cargo test`: protocol state machine (streaming → final reconciliation, tools/results,
   permission queue, questions, interrupt, subagent nesting), wrapping / CJK width / cursor
   math, diff rendering, base64, and backend process lifecycle against a fake `claude` script
-  (round trip, stderr capture, clean exit, kill on hang).
+  (round trip, stderr capture, clean exit, kill on hang). `.github/workflows/ci.yml` runs `cargo test` and `clippy -D warnings` on macOS and Linux (not yet run: no remote).
 - End-to-end runs were driven through a pty plus a terminal emulator against the real backend:
   permission → file written, multi-turn recall, tabs, interrupt, AskUserQuestion, image
   attachment, idle suspend → resume with context, and quit with no orphans.
