@@ -25,7 +25,6 @@ mod schedule;
 mod search;
 mod vim;
 mod session;
-mod cc_keys;
 mod context;
 mod settings;
 mod statusline;
@@ -84,10 +83,6 @@ USAGE: claude++ [options] [-- <extra claude args>]
 
   --profile <name>            profile for new tabs: full|sources|lean or one of yours (see PROFILES) (change per tab with /profile, /new <profile>)
                         sources = project+local settings only; lean = that plus core tools, no MCP
-  --sources <list>      which settings to load: user,project,local (default all). Excluding
-                        `user` drops your ~/.claude CLAUDE.md, skills, hooks, plugins
-  --tools <list>        built-in tools to offer, e.g. Bash,Read,Edit,Write
-  --no-mcp              ignore all MCP servers
   --env KEY=VAL         set an env var on every claude process (repeatable), e.g.
                         BUN_JSC_gcMaxHeapSize=100000000
   --model <m>           model alias or id
@@ -519,12 +514,6 @@ fn parse_args() -> Result<Opts, String> {
         match arg.as_str() {
             "-h" | "--help" => return Err(HELP.into()),
             "--profile" => profile = need(&mut a, &arg)?,
-            "--sources" | "--tools" => {
-                let flag = if arg == "--sources" { "--setting-sources".to_string() } else { arg.clone() };
-                extra.push(flag);
-                extra.push(need(&mut a, &arg)?);
-            }
-            "--no-mcp" => extra.push("--strict-mcp-config".into()),
             "--env" => {
                 let kv = need(&mut a, &arg)?;
                 let (k, v) = kv.split_once('=').ok_or("--env needs KEY=VALUE")?;
@@ -595,9 +584,8 @@ fn run(opts: Opts) -> io::Result<()> {
         app.list_prefs = (explorer::group(), folds.unwrap_or_default());
     }
     app.dock_mode = saved("side_panel").as_deref() == Some("on");
-    // "vim": "on" is what older configs say.
-    let mode = saved("input_mode").unwrap_or_else(|| if saved("vim").as_deref() == Some("on") { "vim".into() } else { "default".into() });
-    app.vim.on = mode == "vim" || mode == "helix"; // "helix" was an input mode once: its users get vim
+    let mode = saved("input_mode").unwrap_or_default();
+    app.vim.on = mode == "vim";
     app.editor_mode = mode == "editor";
     app.editor_cmd = saved("editor").filter(|c| !c.trim().is_empty());
     app.autocopy = saved("autocopy").as_deref() == Some("on");

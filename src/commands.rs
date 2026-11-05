@@ -142,7 +142,7 @@ impl App {
                     self.s().note(format!("status line → {name}{extra} ({saved})"));
                 }
             },
-            "/config" | "/setting" => self.settings = Some(settings::Ui::new(self.cwd())),
+            "/config" | "/setting" => self.settings = Some(settings::Ui::default()),
             "/session" => self.tabcfg = Some(tabcfg::Ui::default()),
             "/optimize" => self.optimize_cmd(&arg),
             "/permissions" => self.perms = Some(permissions::Ui::new(self.cwd(), &self.sessions[self.active])),

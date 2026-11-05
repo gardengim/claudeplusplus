@@ -126,15 +126,10 @@ Release binary: ~2.3 MB.
   A finished agent folds its steps into a count under its report; ctrl+o lists them.
 - **Panels**: every interactive surface (prompts, suggestions, model picker, config, session browser) is drawn by
   one shared component at the bottom of the screen above the input, so they look and behave alike; see
-  [DESIGN.md](DESIGN.md). **`/config`** (or `/setting`) is one panel for every setting. Its first tab is
-  claude++'s own (status line, profile for new tabs, inline images, prompt-cache lifetime, idle-suspend time,
-  memory budget...): ←→ changes a value, it applies at once and is saved to `~/.config/claude++/config.json`; a
-  command-line flag still wins for that run. The other tabs hold every key a Claude Code settings file can set
-  (about 190, by topic: Model, Permissions, Sandbox, Context, ...): ←→ steps on/off and pick-one keys through
-  their values and back to unset, Enter types text, numbers or JSON, Del removes the key, and ctrl+s picks the file
-  (user `~/.claude/settings.json`, project `.claude/settings.json` or local `.claude/settings.local.json`). Each row
-  shows the value in that file, or what another file or the default gives. Typing searches every tab at once.
-  The key list is generated from Claude Code's settings reference by `tools/gen_cc_settings.py`.
+  [DESIGN.md](DESIGN.md). **`/config`** (or `/setting`) lists claude++'s own settings (status line, profile for new tabs, inline images,
+  prompt-cache lifetime, idle-suspend time, memory budget...): ←→ changes a value, it applies at once and is saved
+  to `~/.config/claude++/config.json`; a command-line flag still wins for that run. Claude Code's own settings
+  are edited in its settings files (or `/config` in `claude` itself).
 - Prompts the agent waits on, as one choice-list panel (see [DESIGN.md](DESIGN.md)): permission requests (↑↓ + Enter,
   or y / a / n at once; the "always" row says what it remembers, e.g. "auto-accept edits for this session" or
   "don't ask again for Bash(npm test:*)"; plan approval shows the plan as markdown and also offers auto-accept, as
@@ -421,7 +416,7 @@ Release binary: ~2.3 MB.
 | Idle suspension | background tabs idle > `--idle-suspend` (120 s; a restart takes ~0.5 s) have their backend stopped; the next message respawns it with `--resume <id>` | three idle conversations: **225 MB** vs 787 MB in three `claude` windows; context kept; the first request after resume read 32.5k tokens from cache and wrote 117 (99.6%) |
 | Memory budget | `--mem-budget <MB>`: when all backends together exceed it (measured as macOS `footprint` incl. child processes), stop the least-recently-used tab that is safe to stop; never the focused, busy, prompting tab, or one that started background work (heuristic: `run_in_background`, Monitor, Cron/ScheduleWakeup) | e2e with 2 real tabs and a 200 MB budget: LRU tab stopped (`1z`), focused tab kept, one `claude` left; warns (max once a minute) if only protected tabs remain |
 | `--profile lean` | core tools + no MCP + `--setting-sources project,local` (skips user-level CLAUDE.md, skills, hooks) | a fresh request: **30.4k → 9.3k** tokens; three small coding tasks cost **$0.0061–0.0075 → $0.0017–0.0019** each, all passed; the backend's process tree **243 → 132 MB** (`bench/run.py`, 2026-10-28, below). Large user-level instruction files (`~/.claude/CLAUDE.md`) count on top and are skipped too. Plus `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` (telemetry, autoupdate, `/ultrareview`, `/advisor`, `/import`, design): footprint **134 → 123 MB**, prompt **9,407 → 8,741** tokens (3 interleaved runs each, identical within a config) |
-| `--sources` / `--tools` / `--no-mcp` | the same levers, individually | a fresh request, 30.4k tokens by default: `--sources project,local` alone 19.5k, the lean `--tools` set alone 11.6k |
+| `-- --setting-sources …` / `-- --tools …` / `-- --strict-mcp-config` | the same levers, individually (anything after `--` goes to claude) | a fresh request, 30.4k tokens by default: `--setting-sources project,local` alone 19.5k, the lean `--tools` set alone 11.6k |
 | `--env K=V` | passes env to every `claude` (Bun reads `BUN_JSC_*`; invalid names are rejected) | `BUN_JSC_gcMaxHeapSize=30000000` trimmed peak RSS ~11% (308M → 274M) on a light workload; not tested under heavy load. No hard cap: macOS doesn't enforce RLIMIT_AS/RSS |
 | Cheap redraws | coalesced events (at most ~30 frames a second while streaming) + cached wrapping, kept only near the view | 3,000-entry transcript: 0.2–0.5 ms per redraw (release build on a busy machine, `cargo test --release redraw_cost -- --nocapture`). 6,000 entries (3,000 command outputs, 3,000 markdown replies): 94 MB held, 86 MB of it the conversation itself (304 MB before rendered lines were dropped away from the view); a resize redraws in 5 ms while following the newest output (2.4 s before), 0.5 s when scrolled up (`cargo test --release zz_long_session_memory -- --ignored --nocapture`) |
 
@@ -597,7 +592,7 @@ config, shuffled runs, warm-ups discarded, a clean environment). Latest run: Cla
 | config | tokens, fresh request | process tree | cost per task (bugfix / implement / rename) | passed |
 |---|---|---|---|---|
 | default | 30.4k | 243 MB | $0.0062 / $0.0061 / $0.0075 | 9/9 |
-| `--sources project,local` | 19.5k | 141 MB | $0.0032 / $0.0034 / $0.0036 | 9/9 |
+| `--setting-sources project,local` | 19.5k | 141 MB | $0.0032 / $0.0034 / $0.0036 | 9/9 |
 | lean `--tools` set | 11.6k | 148 MB | $0.0025 / $0.0024 / $0.0025 | 9/9 |
 | `lean` (both) | 9.3k | 132 MB | $0.0017 / $0.0018 / $0.0019 | 9/9 |
 | `lean` + a short custom system prompt | 6.3k | 133 MB | $0.0010 / $0.0010 / $0.0013 | 9/9 |

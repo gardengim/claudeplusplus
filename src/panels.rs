@@ -287,94 +287,20 @@ impl App {
     }
 
     pub(crate) fn settings_key(&mut self, k: KeyEvent) {
-        use settings::Row;
         let Some(mut ui) = self.settings.take() else { return };
         let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
-        ui.note = None;
-        if let Some(mut text) = ui.edit.take() {
-            match k.code {
-                KeyCode::Esc => {}
-                KeyCode::Char('c') if ctrl => {}
-                KeyCode::Enter => {
-                    if let Some(Row::Cc(i)) = ui.at() {
-                        let key = &cc_keys::KEYS[i];
-                        if let Err(e) = settings::parse(key, &text).and_then(|v| ui.save(key, v)) {
-                            ui.note = Some((e, true));
-                            ui.edit = Some(text);
-                        } else {
-                            ui.note = Some((format!("{} saved to {} settings", key.key, ui.scope.name()), false));
-                        }
-                    }
-                }
-                KeyCode::Backspace => {
-                    text.pop();
-                    ui.edit = Some(text);
-                }
-                KeyCode::Char(c) if !ctrl => {
-                    text.push(c);
-                    ui.edit = Some(text);
-                }
-                _ => ui.edit = Some(text),
-            }
-            return self.settings = Some(ui);
-        }
         match k.code {
-            KeyCode::Esc | KeyCode::Char('c') if k.code == KeyCode::Esc || ctrl => {
-                if ui.query.is_empty() {
-                    return; // closed
-                }
-                (ui.query, ui.sel) = (String::new(), 0);
-            }
+            KeyCode::Esc => return, // closed
+            KeyCode::Char('c') if ctrl => return,
             KeyCode::Up => ui.step(-1),
             KeyCode::Down => ui.step(1),
             KeyCode::PageUp => ui.step(-10),
             KeyCode::PageDown => ui.step(10),
-            KeyCode::Tab => ui.switch_tab(1),
-            KeyCode::BackTab => ui.switch_tab(-1),
-            KeyCode::Left => self.settings_change(&mut ui, -1),
-            KeyCode::Right | KeyCode::Enter => self.settings_change(&mut ui, 1),
-            KeyCode::Char(' ') if ui.query.is_empty() => self.settings_change(&mut ui, 1),
-            KeyCode::Char('s') if ctrl => ui.cycle_scope(),
-            KeyCode::Delete => {
-                if let Some(Row::Cc(i)) = ui.at() {
-                    let key = &cc_keys::KEYS[i];
-                    ui.note = Some(match ui.save(key, None) {
-                        Ok(()) => (format!("{} removed from {} settings", key.key, ui.scope.name()), false),
-                        Err(e) => (e, true),
-                    });
-                }
-            }
-            KeyCode::Backspace => {
-                ui.query.pop();
-                ui.sel = 0;
-            }
-            KeyCode::Char(c) if !ctrl => {
-                ui.query.push(c);
-                ui.sel = 0;
-            }
+            KeyCode::Left => self.change_setting(ui.sel, -1),
+            KeyCode::Right | KeyCode::Enter | KeyCode::Char(' ') => self.change_setting(ui.sel, 1),
             _ => {}
         }
         self.settings = Some(ui);
-    }
-
-    /// ←→/enter on a `/config` row: step a choice, or start typing a value.
-    pub(crate) fn settings_change(&mut self, ui: &mut settings::Ui, delta: isize) {
-        match ui.at() {
-            Some(settings::Row::Own(i)) => self.change_setting(i, delta),
-            Some(settings::Row::Cc(i)) => {
-                let key = &cc_keys::KEYS[i];
-                match ui.cycled(key, delta) {
-                    Some(v) => {
-                        ui.note = Some(match ui.save(key, v) {
-                            Ok(()) => (format!("{} saved to {} settings", key.key, ui.scope.name()), false),
-                            Err(e) => (e, true),
-                        })
-                    }
-                    None => ui.edit = Some(ui.edit_text(key)),
-                }
-            }
-            None => {}
-        }
     }
 
     /// Colours changed: drop every rendered line that baked the old ones in, and repaint the whole screen.

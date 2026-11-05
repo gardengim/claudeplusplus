@@ -1094,11 +1094,8 @@ fn config_applies_at_once_persists_and_keeps_the_keyboard() {
     assert!(app.settings.is_some());
     typed(&mut app, "abc");
     assert!(app.input.is_empty(), "keys belong to the panel");
-    assert_eq!(app.settings.as_ref().unwrap().query, "abc", "typing searches");
     app.on_paste("pasted".into());
     assert!(app.input.is_empty());
-    press(&mut app, KeyCode::Esc);
-    assert!(app.settings.as_ref().is_some_and(|u| u.query.is_empty()), "esc clears the search first, then closes");
 
     // row 1: profile for new tabs
     press(&mut app, KeyCode::Down);
@@ -1139,8 +1136,6 @@ fn config_applies_at_once_persists_and_keeps_the_keyboard() {
     press(&mut app, KeyCode::Right);
     assert_eq!(image::mode(), "auto");
 
-    press(&mut app, KeyCode::Tab);
-    assert_eq!(app.settings.as_ref().unwrap().tab, 1, "tab moves to Claude Code's first section");
     press(&mut app, KeyCode::Esc);
     assert!(app.settings.is_none());
     assert_eq!(app.input, "", "nothing leaked into the message box");
