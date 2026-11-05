@@ -1145,7 +1145,7 @@ impl App {
                         self.last_input = Instant::now();
                         self.drag = self.hits.body.contains(p.into()).then_some((p, p));
                         self.dragging = self.drag.is_some();
-                        return self.click(m.column, m.row);
+                        self.click(m.column, m.row)
                     }
                     MouseEventKind::Drag(MouseButton::Left) => {
                         if let Some((a, _)) = self.drag.filter(|_| self.dragging) {

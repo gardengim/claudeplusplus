@@ -644,7 +644,7 @@ pub(crate) mod tests {
         let swatch = v.body[0].spans[1].style.fg;
         let first_segment = v.head[2].spans[1].style.fg;
         assert!(swatch.is_some() && swatch == first_segment, "{swatch:?} vs {first_segment:?}");
-        assert_eq!(v.body[1].spans[1].style.fg.is_some(), true);
+        assert!(v.body[1].spans[1].style.fg.is_some());
         assert_ne!(v.body[0].spans[1].style.fg, v.body[1].spans[1].style.fg, "neighbouring categories differ");
     }
 
@@ -688,7 +688,7 @@ pub(crate) mod tests {
         assert!(all.contains("claude-haiku-5-5") && all.contains("20.2k of 1.0M") && all.contains("auto-compact at 967.0k · 946.8k to go"), "{all}");
         assert!(all.contains("window") && all.contains("used") && all.contains("last request") && all.contains("89% hit"), "{all}");
         assert!(all.contains("System tools") && all.contains("MCP tools · on demand") && all.contains("Autocompact buffer · reserved") && all.contains("95% of the window"), "{all}");
-        assert!(all.contains("3 skills listed, by source") && all.contains("claude.ai") == false && all.contains("yours · 1"), "the cursor row is Skills: {all}");
+        assert!(all.contains("3 skills listed, by source") && !all.contains("claude.ai") && all.contains("yours · 1"), "the cursor row is Skills: {all}");
         assert!(all.contains("/optimize caps") && all.contains("⏎ optimize"), "{all}");
         assert!(all.contains("■") && all.contains("█"), "the grid is drawn");
         let other = screen(view(&Ui { sel: 1 }, &u, 120), 120, 40).join("\n");

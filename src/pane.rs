@@ -371,7 +371,7 @@ pub fn encode(k: KeyEvent, app_cursor: bool) -> Vec<u8> {
         KeyCode::PageUp => tilde(5),
         KeyCode::PageDown => tilde(6),
         KeyCode::F(n @ 1..=4) => {
-            let c = [b'P', b'Q', b'R', b'S'][n as usize - 1] as char;
+            let c = b"PQRS"[n as usize - 1] as char;
             if m > 1 { format!("\x1b[1;{m}{c}") } else { format!("\x1bO{c}") }.into_bytes()
         }
         KeyCode::F(n @ 5..=12) => tilde([15, 17, 18, 19, 20, 21, 23, 24][n as usize - 5]),
@@ -487,11 +487,8 @@ mod tests {
             Ok(p) => p,
             Err(e) => return eprintln!("skipped: no pty here ({e})"),
         };
-        loop {
-            match rx.recv_timeout(std::time::Duration::from_secs(10)).expect("the editor ended") {
-                (_, Msg::Bytes(b)) => pane.feed(&b),
-                (_, Msg::Ended) => break,
-            }
+        while let (_, Msg::Bytes(b)) = rx.recv_timeout(std::time::Duration::from_secs(10)).expect("the editor ended") {
+            pane.feed(&b);
         }
         let mut buf = Buffer::empty(Rect::new(0, 0, 30, 4));
         pane.render(&mut buf, Rect::new(0, 0, 30, 4));
