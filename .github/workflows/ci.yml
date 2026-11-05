@@ -1,0 +1,22 @@
+name: ci
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      # The tests use a fake `claude` and need no network, account or API key. The pty ones skip themselves
+      # where no pty can be opened. The benches in bench/ call the real API and are not run here.
+      - run: cargo test --locked
+      - run: cargo clippy --locked --all-targets -- -D warnings
