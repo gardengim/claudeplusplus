@@ -1,0 +1,56 @@
+{
+ "claude": "2.1.318 (Claude Code)",
+ "ok": true,
+ "checks": [
+  {
+   "check": "initialize is answered with our request_id",
+   "ok": true,
+   "detail": "success"
+  },
+  {
+   "check": "get_settings is answered",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "check": "system/init carries session_id, model, claude_code_version",
+   "ok": true,
+   "detail": "2.1.318"
+  },
+  {
+   "check": "partial messages stream (message_start)",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "check": "result is a success containing the answer",
+   "ok": true,
+   "detail": "42Z"
+  },
+  {
+   "check": "THESIS: headless request stays under 40000 tokens",
+   "ok": true,
+   "detail": "33932"
+  },
+  {
+   "check": "--exclude-dynamic-system-prompt-sections still exists",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "check": "--autocompact still exists",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "check": "--resume <id> continues the conversation",
+   "ok": true,
+   "detail": "OK"
+  },
+  {
+   "check": "--resume <unknown id> exits non-zero saying 'No conversation found'",
+   "ok": true,
+   "detail": "exit 1: No conversation found with session ID: 00000000-0000-4000-80"
+  }
+ ]
+}
