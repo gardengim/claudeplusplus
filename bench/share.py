@@ -52,6 +52,7 @@ for share in (False, True):
     setup(share)
     t = Term([CPP, "--model", "haiku", "--", "--allowedTools", "mcp__alpha", "mcp__beta", "mcp__gamma"], cwd=D, env_extra={"XDG_CONFIG_HOME": D + "/xdg"})
     t.mark = 0; t.drain(3)
+    os.write(t.fd, b"/trust\r"); t.drain(1)  # the folder has an .mcp.json and was never trusted in `claude`: claude++ asks first
     ok = []
     for i in range(3):
         if i: os.write(t.fd, b"\x14"); t.drain(1)  # ctrl+t: a new tab in the same folder
@@ -70,7 +71,7 @@ for share in (False, True):
 # Sharing on, claude++ killed outright: the servers' input closes with it, so they must not be left running.
 setup(True)
 t = Term([CPP, "--model", "haiku", "--", "--allowedTools", "mcp__alpha", "mcp__beta", "mcp__gamma"], cwd=D, env_extra={"XDG_CONFIG_HOME": D + "/xdg"})
-t.mark = 0; t.drain(3); t.ask(PROMPT, b"Worked for"); ps = tree(t.pid)
+t.mark = 0; t.drain(3); os.write(t.fd, b"/trust\r"); t.drain(1); t.ask(PROMPT, b"Worked for"); ps = tree(t.pid)
 os.kill(t.pid, signal.SIGKILL); time.sleep(4)
 res["on, claude++ killed (SIGKILL)"] = {"processes in the tree": len(ps), "left after 4 s": alive(ps[1:])}
 print(json.dumps(res, indent=1))
