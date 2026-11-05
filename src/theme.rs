@@ -483,6 +483,9 @@ mod tests {
             ("markdown.rs", include_str!("markdown.rs")),
             ("main.rs", include_str!("main.rs")),
             ("session.rs", include_str!("session.rs")),
+            ("panels.rs", include_str!("panels.rs")),
+            ("pane_host.rs", include_str!("pane_host.rs")),
+            ("commands.rs", include_str!("commands.rs")),
         ];
         let banned = ["Color::", ".dark_gray()", ".yellow()", ".cyan()", ".green()", ".red()", ".magenta()", ".blue()", ".white()", ".reversed()"];
         for (name, src) in sources {

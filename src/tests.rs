@@ -2448,7 +2448,7 @@ fn a_queued_message_gets_a_time_from_the_queue_panel_and_loses_it_with_an_empty_
 /// Every `{...}` JSON message written as a raw string in our own tests: realistic seeds that stay current.
 pub(crate) fn seed_messages() -> Vec<Value> {
     let mut out = vec![];
-    for src in [include_str!("session.rs"), include_str!("tests.rs")] {
+    for src in [include_str!("session.rs"), include_str!("session/tests.rs"), include_str!("tests.rs")] {
         let mut rest = src;
         while let Some(i) = rest.find("r#\"{") {
             rest = &rest[i + 3..];

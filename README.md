@@ -55,7 +55,9 @@ Where it comes from, and what it costs:
 
 ```
 ┌──────── claude++ (one process, ~4 MB footprint) ──────────┐
-│ main.rs     event loop, keys, slash commands, tabs        │
+│ main.rs     event loop, keys, tabs, settings              │
+│ commands.rs `/` commands and sending  panels.rs  panels   │
+│ pane_host.rs the embedded editor (pane.rs: pty + vt100)   │
 │ ui.rs       ratatui renderer (per-entry wrap cache)       │
 │ session.rs  protocol → transcript state machine (per tab) │
 │ backend.rs  child process + stream-json I/O               │
@@ -631,7 +633,8 @@ Run `cargo build --release` first. All use the real `claude` or none at all; non
 
 | Command | Checks | Cost |
 |---|---|---|
-| `cargo test` | 274 unit and end-to-end tests (the pty ones skip themselves where no pty can be opened) against a fake `claude`; includes a light fuzz run | free, 5 s |
+| `cargo test` | 281 unit and end-to-end tests (the pty ones skip themselves where no pty can be opened) against a fake `claude`; includes a light fuzz run | free, 5 s |
+| `git config core.hooksPath .githooks` | once per clone: `git push` then runs `cargo test` and `bench/budget.py` first (`git push --no-verify` skips it). The contract check calls the real `claude`, so it stays manual | free, ~2 min |
 | `FUZZ_ROUNDS=40 FUZZ_SEED=7 cargo test --release hostile_backend` | the UI against hostile backend messages (mutated real ones: wrong types, huge values, control characters), random keys, read-only panels, terminals from 1×1 to 300×4. Run it in a debug build too: that is where integer overflow shows. Found: an overflow on absurd token counts, now capped at the source (`backend::count`) | free |
 | `FUZZ_FILES=600 cargo test hostile_transcript` | resume and every history reader against corrupt transcripts (cut-off lines, invalid UTF-8, a 3 MB line) | free |
 | `python3 bench/contract.py` | the installed `claude` still behaves as claude++ assumes, including the token saving | cents |
