@@ -37,8 +37,10 @@ Things to know before you rely on it:
 - **The benches spend real money.** `cargo test` and `bench/budget.py` are free; `contract`, `hostile`, `away`, `share`, `run`,
   `lanes`, `levers` and `tabs` call the real API: cents each, and the long sweeps (`levers`, `run`) up to a couple of dollars (one growth test cost about $2.30). The table at the end gives the cost per command.
 - **Known flakes, not understood.** One `backend` unit test failed once while a release build ran alongside it (0 failures
-  in 85 loaded reruns since); the `hostile` bench's permission scenario depends on the model attempting a tool call and
-  retries up to three times; one vim-editor bench run failed once and has not recurred.
+  in 85 loaded reruns since); the `hostile` bench's permission scenario asks the model to run a command and
+  retries up to three times if it declines (it also switches Claude Code's sandbox off for that run: with the sandbox on,
+  a command outside the folder is blocked without a prompt, which made it fail three times in a row before this was found);
+  one vim-editor bench run failed once and has not recurred.
 - **Sharing MCP servers between tabs** (`/config`) is experimental and off by default; see its section for what it drops.
 
 ## Measured against `claude`

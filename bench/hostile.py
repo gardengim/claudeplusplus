@@ -68,9 +68,11 @@ def sc_interrupt():
     return ok2 and marked and dt < 20, f"interrupt marker shown={marked}, follow-up answered={ok2} in {dt:.1f}s after Esc" + ("" if ok2 else " | screen tail: " + screen(t)[-500:].replace("\n", " / "))
 
 def sc_permission():
-    """Needs the model to attempt the tool call; it sometimes declines to, so try up to 3 fresh sessions."""
+    """Needs the model to attempt the tool call; it sometimes declines to, so try up to 3 fresh sessions. Claude Code's
+    own sandbox is turned off for this run: with it on (a setting of yours), a command outside the working folder is
+    blocked by the sandbox and never asks, so there would be no prompt to decline."""
     for attempt in range(3):
-        t = Term([CPP, "--model", "haiku", "--permission-mode", "default"]); t.mark = 0; t.drain(2)
+        t = Term([CPP, "--model", "haiku", "--permission-mode", "default", "--", "--settings", '{"sandbox":{"enabled":false}}']); t.mark = 0; t.drain(2)
         t.mark = len(t.buf); os.write(t.fd, b"Run this exact shell command with the Bash tool: touch /private/tmp/cppbench/perm-probe.txt"); t.drain(0.5); os.write(t.fd, b"\r")
         prompt = t.drain(60, b"don't ask again") or t.drain(1, b"Yes")  # outside the working folder, so it asks
         if prompt: os.write(t.fd, b"\x1b"); t.drain(3)  # decline with esc
