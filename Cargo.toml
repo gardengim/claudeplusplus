@@ -2,6 +2,13 @@
 name = "claudeplusplus"
 version = "0.1.0"
 edition = "2024"
+description = "A light native terminal front-end for Claude Code: tabs, panels and an embedded editor over headless `claude -p`"
+license = "MIT"
+readme = "README.md"
+keywords = ["claude", "claude-code", "tui", "terminal"]
+categories = ["command-line-utilities"]
+# Not for crates.io: the name claude++ is not a valid crate name, and it is built from source (install.sh).
+publish = false
 
 [dependencies]
 libc = "0.2"

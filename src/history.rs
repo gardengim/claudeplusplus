@@ -498,7 +498,7 @@ mod tests {
     #[test]
     fn folder_names_match_claude_codes_encoding() {
         // Observed on disk for this very project.
-        assert_eq!(encode_cwd("/Users/jeongwonkim/Projects/claude++"), "-Users-jeongwonkim-Projects-claude--");
+        assert_eq!(encode_cwd("/Users/me/Projects/claude++"), "-Users-me-Projects-claude--");
         // Expected values computed by Claude Code's own function (2.1.311) under node.
         assert_eq!(encode_cwd("/a/😀b"), "-a---b");
         let long = format!("/Users/me/{}😀x", "deeply-nested-folder/".repeat(10));
