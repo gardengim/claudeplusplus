@@ -3,9 +3,11 @@
 
 use serde_json::{Value, json};
 use std::io::{self, BufRead, BufReader, Read, Write};
+use std::collections::HashMap;
 use std::process::{Child, Command, Stdio};
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Sender};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -17,10 +19,27 @@ pub enum Msg {
 
 pub struct Backend {
     child: Option<Child>,
-    /// Lines for the writer thread; dropping it closes claude's stdin once the queue is written.
-    stdin: Option<Sender<Vec<u8>>>,
+    /// Lines for claude's stdin.
+    pipe: Arc<Pipe>,
     pub pid: u32,
     next_id: u64,
+}
+
+/// Claude's stdin, as lines for a writer thread. Shared with the reader thread, which answers MCP messages for
+/// the servers we host; `close` ends it for everyone, so claude still sees end-of-input when the tab lets go.
+struct Pipe(Mutex<Option<Sender<Vec<u8>>>>);
+
+impl Pipe {
+    fn send(&self, mut line: Vec<u8>) -> bool {
+        line.push(b'\n');
+        self.0.lock().is_ok_and(|g| g.as_ref().is_some_and(|tx| tx.send(line).is_ok()))
+    }
+
+    fn close(&self) {
+        if let Ok(mut g) = self.0.lock() {
+            *g = None;
+        }
+    }
 }
 
 /// How to launch `claude`. `args` already contains the optimization profile and passthrough args.
@@ -32,6 +51,8 @@ pub struct Launch {
     pub env: Vec<(String, String)>,
     /// Working directory of the child; `None` inherits ours.
     pub cwd: Option<String>,
+    /// MCP servers this process gets from claude++ instead of starting its own (see `share`): name and definition.
+    pub shared: Vec<(String, crate::share::Def)>,
 }
 
 /// A count read from the protocol (tokens, milliseconds, sizes). It comes from another process, so it is capped
@@ -53,6 +74,8 @@ impl Backend {
         tx: Sender<E>,
         wrap: impl Fn(u32, Msg) -> E + Send + 'static,
     ) -> io::Result<Self> {
+        // Started first so they come up while claude does. One that cannot start still answers, with that error.
+        let shares: HashMap<String, Result<Arc<crate::share::Server>, String>> = launch.shared.iter().map(|(n, d)| (n.clone(), crate::share::acquire(d))).collect();
         let mut cmd = Command::new(&launch.bin);
         cmd.args([
             "-p",
@@ -87,6 +110,21 @@ impl Backend {
         let stdout = child.stdout.take().unwrap();
         let mut stderr = child.stderr.take().unwrap();
 
+        // Writes go through a thread: a multi-megabyte image message, or a child that stops
+        // reading, must not block the UI on a full pipe.
+        let mut stdin_pipe = child.stdin.take().unwrap();
+        let (stdin_tx, stdin_rx) = mpsc::channel::<Vec<u8>>();
+        thread::spawn(move || {
+            for line in stdin_rx {
+                if stdin_pipe.write_all(&line).is_err() {
+                    break;
+                }
+            }
+        });
+        let pipe = Arc::new(Pipe(Mutex::new(Some(stdin_tx))));
+        let client = NEXT_CLIENT.fetch_add(1, Ordering::Relaxed);
+        let reader_pipe = pipe.clone();
+
         // stderr is only interesting when the process dies; keep the tail.
         let err_thread = thread::spawn(move || {
             let mut buf = String::new();
@@ -111,6 +149,10 @@ impl Backend {
                 }
                 let mut v = serde_json::from_str(line)
                     .unwrap_or_else(|_| json!({"type": "_raw", "text": line}));
+                if v["type"] == "control_request" && v["request"]["subtype"] == "mcp_message" {
+                    answer_mcp(&v, client, &shares, &reader_pipe);
+                    continue;
+                }
                 crate::image::pre_convert(&mut v);
                 if tx.send(wrap(pid, Msg::Line(v))).is_err() {
                     return;
@@ -120,34 +162,20 @@ impl Backend {
             let _ = tx.send(wrap(pid, Msg::Exited { status: "exited".into(), stderr_tail }));
         });
 
-        // Writes go through a thread: a multi-megabyte image message, or a child that stops
-        // reading, must not block the UI on a full pipe.
-        let mut pipe = child.stdin.take().unwrap();
-        let (stdin_tx, stdin_rx) = mpsc::channel::<Vec<u8>>();
-        thread::spawn(move || {
-            for line in stdin_rx {
-                if pipe.write_all(&line).is_err() {
-                    break;
-                }
-            }
-        });
-        let stdin = Some(stdin_tx);
-        let mut b = Backend { child: Some(child), stdin, pid, next_id: 0 };
-        b.control("initialize", json!({}))?;
+        let mut b = Backend { child: Some(child), pipe, pid, next_id: 0 };
+        // The servers we host are named once, here; a later `initialize` leaves them as they are.
+        let hosted: Vec<&String> = launch.shared.iter().map(|(n, _)| n).collect();
+        b.control("initialize", if hosted.is_empty() { json!({}) } else { json!({"sdkMcpServers": hosted}) })?;
         Ok(b)
     }
 
     /// Signal EOF; claude finishes the current write and exits. Drop then waits briefly.
     pub fn close(&mut self) {
-        self.stdin = None;
+        self.pipe.close();
     }
 
     fn send(&mut self, v: &Value) -> io::Result<()> {
-        let closed = || io::Error::new(io::ErrorKind::BrokenPipe, "backend stdin closed");
-        let stdin = self.stdin.as_ref().ok_or_else(closed)?;
-        let mut line = serde_json::to_vec(v)?;
-        line.push(b'\n');
-        stdin.send(line).map_err(|_| closed())
+        if self.pipe.send(serde_json::to_vec(v)?) { Ok(()) } else { Err(io::Error::new(io::ErrorKind::BrokenPipe, "backend stdin closed")) }
     }
 
     /// `content` is a string or an array of content blocks (text/image).
@@ -193,23 +221,54 @@ impl Drop for Backend {
     /// kill it only if it lingers. The wait runs off the UI thread (closing tabs or
     /// suspending several must not freeze it).
     fn drop(&mut self) {
-        self.stdin = None;
-        let Some(mut child) = self.child.take() else { return };
-        let reaper = thread::spawn(move || {
-            let deadline = Instant::now() + Duration::from_millis(800);
-            while Instant::now() < deadline {
-                if let Ok(Some(_)) = child.try_wait() {
-                    return;
-                }
-                thread::sleep(Duration::from_millis(20));
-            }
-            let _ = child.kill();
-            let _ = child.wait();
-        });
-        if let Ok(mut r) = REAPERS.lock() {
-            r.retain(|h| !h.is_finished());
-            r.push(reaper);
+        self.pipe.close();
+        if let Some(child) = self.child.take() {
+            reap(child, false);
         }
+    }
+}
+
+/// Wait briefly for a child whose input is closed to exit by itself, then kill it (the whole process group
+/// when it leads one: an MCP server with helper processes). Runs off the calling thread; `wait_for_exits` joins.
+pub fn reap(mut child: Child, group: bool) {
+    let reaper = thread::spawn(move || {
+        let deadline = Instant::now() + Duration::from_millis(800);
+        while Instant::now() < deadline {
+            if let Ok(Some(_)) = child.try_wait() {
+                return;
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+        if group {
+            unsafe { libc::killpg(child.id() as i32, libc::SIGKILL) };
+        }
+        let _ = child.kill();
+        let _ = child.wait();
+    });
+    if let Ok(mut r) = REAPERS.lock() {
+        r.retain(|h| !h.is_finished());
+        r.push(reaper);
+    }
+}
+
+static NEXT_CLIENT: AtomicU64 = AtomicU64::new(1);
+
+/// Claude asked for an MCP server we host: pass the message to the shared process and send its answer back.
+fn answer_mcp(v: &Value, client: u64, shares: &HashMap<String, Result<Arc<crate::share::Server>, String>>, pipe: &Arc<Pipe>) {
+    let (rid, req) = (v["request_id"].clone(), &v["request"]);
+    let msg = req["message"].clone();
+    let pipe = pipe.clone();
+    let reply: crate::share::Reply = Box::new(move |resp| {
+        let line = json!({"type": "control_response", "response": {"subtype": "success", "request_id": rid, "response": {"mcp_response": resp}}});
+        if let Ok(b) = serde_json::to_vec(&line) {
+            pipe.send(b);
+        }
+    });
+    let fail = |e: &str| json!({"jsonrpc": "2.0", "id": msg.get("id").cloned().unwrap_or(Value::Null), "error": {"code": -32000, "message": e}});
+    match req["server_name"].as_str().and_then(|n| shares.get(n)) {
+        Some(Ok(server)) => server.route(client, msg.clone(), reply),
+        Some(Err(e)) => reply(fail(e)),
+        None => reply(fail("no such server")),
     }
 }
 
@@ -293,5 +352,58 @@ echo bye >&2"#,
             Msg::Line(v) => assert_eq!(v["dir"].as_str(), launch.cwd.as_deref()),
             Msg::Exited { .. } => panic!("exited early"),
         }
+    }
+
+    #[test]
+    fn two_backends_get_the_same_hosted_mcp_server_and_still_see_end_of_input() {
+        let (def, log) = crate::share::tests::server("backend");
+        let out = log.with_file_name("claude-out");
+        // The fake claude names the server in `initialize`, then asks it two things over the pipe, like the real one.
+        let mut launch = fake(
+            "mcp",
+            r#"while IFS= read -r line; do
+  case "$line" in
+    *sdkMcpServers*)
+      echo "$line" >> "$OUT"
+      echo '{"type":"control_request","request_id":"m1","request":{"subtype":"mcp_message","server_name":"srv","message":{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}}}'
+      echo '{"type":"control_request","request_id":"m2","request":{"subtype":"mcp_message","server_name":"srv","message":{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{}}}}';;
+    *'"type":"control_response"'*) echo "$line" >> "$OUT";;
+  esac
+done
+echo bye >&2"#,
+        );
+        launch.env.push(("OUT".into(), out.to_string_lossy().into()));
+        launch.shared = vec![("srv".into(), def)];
+        let lines = |n: usize| {
+            for _ in 0..250 {
+                let t = std::fs::read_to_string(&out).unwrap_or_default();
+                if t.lines().count() >= n {
+                    return t;
+                }
+                thread::sleep(Duration::from_millis(20));
+            }
+            panic!("only {:?}", std::fs::read_to_string(&out));
+        };
+        let (tx1, rx1) = mpsc::channel();
+        let (tx2, rx2) = mpsc::channel();
+        let a = Backend::spawn(&launch, Resume::New, tx1, |_, m| m).unwrap();
+        let b = Backend::spawn(&launch, Resume::New, tx2, |_, m| m).unwrap();
+        let text = lines(6); // per backend: the initialize line and two answers
+        assert_eq!(text.matches(r#""sdkMcpServers":["srv"]"#).count(), 2, "{text}");
+        let pids: Vec<&str> = text.lines().filter(|l| l.contains("mcp_response") && l.contains(r#""id":2"#)).map(|l| l.split(r#""pid":"#).nth(1).unwrap().split(['}', ',']).next().unwrap()).collect();
+        assert_eq!(pids.len(), 2, "{text}");
+        assert_eq!(pids[0], pids[1], "one server process answered both backends");
+        assert!(text.contains(r#""request_id":"m1""#) && text.contains(r#""request_id":"m2""#));
+        // The messages were ours to answer: the UI never sees them.
+        assert!(rx1.try_recv().is_err() && rx2.try_recv().is_err());
+        // Letting go still ends claude's input (the reader thread holds the pipe too), so it exits by itself.
+        drop((a, b));
+        for rx in [rx1, rx2] {
+            match rx.recv_timeout(Duration::from_secs(5)).unwrap() {
+                Msg::Exited { stderr_tail, .. } => assert_eq!(stderr_tail, "bye"),
+                Msg::Line(v) => panic!("unexpected {v}"),
+            }
+        }
+        let _ = std::fs::remove_dir_all(log.parent().unwrap());
     }
 }

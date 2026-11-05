@@ -61,6 +61,12 @@ pub const ITEMS: &[Item] = &[
         choices: &[("0", "Claude Code's own (~967k)"), ("150", "150k"), ("200", "200k"), ("300", "300k"), ("400", "400k"), ("600", "600k")],
     },
     Item {
+        key: "share_mcp",
+        label: "Share MCP servers",
+        help: "off: every tab starts its own copy of each MCP server you defined (codegraph alone is four processes, 13 to 92 MB per server). on: tabs in the same folder share one copy, started by claude++ and stopped with the last tab. In this mode a tab loads only the servers in your own config files, so MCP servers from plugins and claude.ai connectors are left out; a shared server cannot send progress or list-changed notices; one that keeps state per conversation should not be shared. Applies to conversations started or resumed from now on.",
+        choices: &[("off", "off"), ("on", "on")],
+    },
+    Item {
         key: "notify",
         label: "Background tabs",
         help: "How a tab you are not looking at gets your attention when it finishes a turn or needs an answer. bell: the terminal bell. desktop: a desktop notification (terminals that support OSC 9, such as iTerm2, Ghostty and WezTerm). off: tab marker only.",

@@ -61,6 +61,7 @@ Where it comes from, and what it costs:
 │ ui.rs       ratatui renderer (per-entry wrap cache)       │
 │ session.rs  protocol → transcript state machine (per tab) │
 │ backend.rs  child process + stream-json I/O               │
+│ share.rs    one MCP server process for several tabs (opt-in)│
 └───────┬───────────────────────────────┬───────────────────┘
         │ stdin/stdout NDJSON           │ (one per tab, lazily)
    claude -p --input-format stream-json --output-format stream-json
@@ -533,6 +534,34 @@ re-write smaller.
 Hence `/optimize` aggressive keeps the servers a project called and leaves the others out (`mcp_keep` in
 `.claude++/optimize.json`), instead of all or none; a new tab in a folder that never used `blender` no longer starts it.
 
+**Sharing MCP servers between tabs** (`/config` → Share MCP servers, off by default; `python3 bench/share.py`). Every tab's
+`claude` starts its own copy of every MCP server you defined, so three tabs in one project run three codegraphs (four
+processes each). With sharing on, claude++ starts each stdio server once and gives the tabs a hosted one instead: the
+SDK mechanism (`initialize.sdkMcpServers`, the backend sends `mcp_message` control requests over the pipe it already
+has, claude++ answers from one child process). The model sees the same `mcp__<name>__<tool>` tools. Three tabs asked,
+in the same folder, to call three servers (synthetic ones with 40 MB each, next to your own caveman and codegraph):
+
+| 3 tabs, 3 + 2 servers | processes | memory | server processes started | tool calls answered by |
+|---|---|---|---|---|
+| each tab its own copy (off) | 25 | 1,168 MB | 9 + the user's | 9 different processes |
+| shared (on) | **11** | **697 MB** | 3 + the user's, once | **3** processes, all 9 calls |
+
+(`bench/results/*-share.json`, 2026-11-04.) The process stops with the last tab that uses it and is restarted, and shaken
+hands with again, if it dies. Nothing is left after a quit or a `SIGKILL` of claude++. What it costs, which is why it is off:
+
+- **Plugin and claude.ai connector MCP servers are not loaded** in this mode: sharing needs `--strict-mcp-config` so a tab
+  does not start its own copy as well, and those servers cannot be put in a config file. Remote (http/sse) servers you
+  defined stay with `claude`. A tab says so once, when it starts. The profile `lean` (no MCP) and `/optimize` strict leave
+  the tab alone.
+- Only tabs with the same command, arguments, environment and **folder** share a process.
+- A shared server cannot send progress, `list_changed` or logging notices to a tab, and a request it makes of its client
+  (sampling, roots, elicitation) is refused. A server that keeps state per conversation should not be shared.
+- A server that exits mid-call fails that call; the next one starts it again (three starts in a row without a finished
+  handshake and it is given up on).
+
+One `claude` process cannot host several conversations (its protocol binds a process to one session; `claim_session` only
+binds a pre-warmed spare), so this, subagents (above) and `/optimize` are what is left to reduce.
+
 **Tool output caps, measured and left alone** (`BASH_MAX_OUTPUT_LENGTH`, `CLAUDE_CODE_FILE_READ_MAX_OUTPUT_TOKENS`; haiku,
 an exact command so the runs are comparable). A result under the cap goes into the conversation whole and is re-read by
 every later request: `seq 1 4000` (19 KB) added **9.8k tokens** to the next request (28.7k vs 18.9k). A result over the
@@ -628,7 +657,7 @@ Run `cargo build --release` first. All use the real `claude` or none at all; non
 
 | Command | Checks | Cost |
 |---|---|---|
-| `cargo test` | 279 unit and end-to-end tests (the pty ones skip themselves where no pty can be opened) against a fake `claude`; includes a light fuzz run | free, 5 s |
+| `cargo test` | 286 unit and end-to-end tests (the pty ones skip themselves where no pty can be opened) against a fake `claude`; includes a light fuzz run | free, 5 s |
 | `git config core.hooksPath .githooks` | once per clone: `git push` then runs `cargo test` and `bench/budget.py` first (`git push --no-verify` skips it). The contract check calls the real `claude`, so it stays manual | free, ~2 min |
 | `FUZZ_ROUNDS=40 FUZZ_SEED=7 cargo test --release hostile_backend` | the UI against hostile backend messages (mutated real ones: wrong types, huge values, control characters), random keys, read-only panels, terminals from 1×1 to 300×4. Run it in a debug build too: that is where integer overflow shows. Found: an overflow on absurd token counts, now capped at the source (`backend::count`) | free |
 | `FUZZ_FILES=600 cargo test hostile_transcript` | resume and every history reader against corrupt transcripts (cut-off lines, invalid UTF-8, a 3 MB line) | free |

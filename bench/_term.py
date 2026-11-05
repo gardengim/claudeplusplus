@@ -26,11 +26,11 @@ def names(pids):
     return c
 
 class Term:
-    def __init__(self, argv):
-        env = {k: v for k, v in os.environ.items() if not k.startswith("CLAUDE")}; env["TERM"] = "xterm-256color"
+    def __init__(self, argv, cwd=W, env_extra=None):
+        env = {k: v for k, v in os.environ.items() if not k.startswith("CLAUDE")}; env["TERM"] = "xterm-256color"; env.update(env_extra or {})
         self.pid, self.fd = pty.fork()
         if self.pid == 0:
-            os.chdir(W); os.execvpe(argv[0], argv, env)
+            os.chdir(cwd); os.execvpe(argv[0], argv, env)
         fcntl.ioctl(self.fd, termios.TIOCSWINSZ, struct.pack("HHHH", 50, 160, 0, 0))
         self.buf = bytearray()
     def drain(self, t, want=None):

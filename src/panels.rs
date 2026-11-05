@@ -328,6 +328,7 @@ impl App {
             "input_mode" => if self.vim.on { "vim" } else if self.editor_mode { "editor" } else { "default" }.to_string(),
             "theme" => theme::mode_name().to_string(),
             "queue" => if self.queue_on { "on" } else { "off" }.to_string(),
+            "share_mcp" => if self.share_mcp { "on" } else { "off" }.to_string(),
             _ => String::new(),
         }
     }
@@ -371,6 +372,7 @@ impl App {
                 self.vim_shape();
             }
             "queue" => self.queue_on = value == "on",
+            "share_mcp" => self.share_mcp = value == "on",
             "side_panel" => {
                 self.dock_mode = value == "on";
                 if !self.dock_mode {

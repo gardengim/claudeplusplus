@@ -2132,6 +2132,37 @@ fn vim_keys_edit_the_box_in_modes_and_sending_returns_to_insert() {
 }
 
 #[test]
+fn shared_mcp_hands_the_stdio_servers_to_claude_plus_plus_and_leaves_the_rest() {
+    if !config::cache_dir().is_some_and(|d| std::fs::create_dir_all(&d).and_then(|_| std::fs::write(d.join(".probe"), "")).is_ok()) {
+        return eprintln!("skipped: the cache directory cannot be written here");
+    }
+    let (mut app, _d) = fake_app("share-mcp");
+    let dir = std::env::temp_dir().join(format!("claudeplusplus-share-cfg-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join(".mcp.json"), r#"{"mcpServers": {"cpp-test-stdio": {"command": "true"}, "cpp-test-remote": {"type": "http", "url": "https://example.test/mcp"}}}"#).unwrap();
+    let cwd = dir.to_str().unwrap().to_string();
+    app.sessions[0].cwd = Some(cwd.clone());
+    let off = app.launch_for(0);
+    assert!(off.shared.is_empty() && !off.args.contains(&"--strict-mcp-config".to_string()), "off by default: claude starts its own servers");
+    assert_eq!(app.setting_value("share_mcp"), "off");
+    app.apply_setting("share_mcp", "on");
+    assert_eq!(app.setting_value("share_mcp"), "on");
+    let on = app.launch_for(0);
+    let mine = on.shared.iter().find(|s| s.0 == "cpp-test-stdio").expect("the stdio server is hosted");
+    assert_eq!((mine.1.command.as_str(), mine.1.cwd.as_str()), ("true", cwd.as_str()), "started in the tab's folder");
+    assert!(!on.shared.iter().any(|s| s.0 == "cpp-test-remote"), "a remote server costs no process: claude keeps it");
+    assert!(on.args.contains(&"--strict-mcp-config".to_string()), "so claude does not start its own copy too");
+    let file = &on.args[on.args.iter().position(|a| a == "--mcp-config").unwrap() + 1];
+    let rest = std::fs::read_to_string(file).unwrap();
+    assert!(rest.contains("cpp-test-remote") && !rest.contains("cpp-test-stdio"), "{rest}");
+    // A profile that already chose its MCP servers (lean has none) is left alone.
+    app.sessions[0].profile = "lean".into();
+    assert!(app.launch_for(0).shared.is_empty());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn config_turns_vim_keys_and_the_message_queue_on_and_off() {
     let (mut app, _d) = fake_app("cfg-vim");
     let cfg = std::env::temp_dir().join(format!("claudeplusplus-cfg-vim-{}", std::process::id())).join("config.json");

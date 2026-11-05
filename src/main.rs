@@ -4,6 +4,7 @@ mod explorer;
 mod jobs;
 mod lanes;
 mod mcp;
+mod share;
 mod commands;
 mod pane_host;
 mod panels;
@@ -267,6 +268,8 @@ pub struct App {
     pub vim: vim::Vim,
     /// Messages sent while Claude works wait in the queue (else they go at once).
     pub queue_on: bool,
+    /// Tabs share one copy of each stdio MCP server (`share_mcp`, see `share.rs`).
+    pub share_mcp: bool,
     /// ctrl+g was pressed: the main loop opens the editor.
     edit_request: bool,
     /// Input mode "editor": the message box is your editor, running in a pane; quitting it sends the message.
@@ -590,6 +593,7 @@ fn run(opts: Opts) -> io::Result<()> {
     app.editor_cmd = saved("editor").filter(|c| !c.trim().is_empty());
     app.autocopy = saved("autocopy").as_deref() == Some("on");
     app.queue_on = saved("queue").as_deref() != Some("off");
+    app.share_mcp = saved("share_mcp").as_deref() == Some("on");
     if let Some(n) = saved("notify").filter(|n| ["off", "bell", "desktop"].contains(&n.as_str())) {
         app.notify = n;
     }
@@ -801,6 +805,7 @@ impl App {
             search: None,
             vim: Default::default(),
             queue_on: true,
+            share_mcp: false,
             edit_request: false,
             editor_mode: false,
             pane: None,
@@ -896,6 +901,16 @@ impl App {
         let mut settings = serde_json::Map::new();
         let cwd = self.sessions[i].cwd.clone().unwrap_or_else(|| self.cwd.clone());
         let saved = optimize::load(&cwd);
+        // Sharing hands the folder's stdio servers to claude++, so `claude` loads only what is left in its own
+        // config. Not when a profile or `/optimize` already chose the MCP servers (lean has none).
+        let chose_mcp = args.iter().any(|a| a == "--strict-mcp-config" || a == "--mcp-config") || saved.as_ref().is_some_and(|o| o.strict_mcp);
+        if self.share_mcp && !chose_mcp && let Some(sh) = mcp::sharing(&cwd, saved.as_ref().and_then(|o| o.mcp_keep.as_deref())) {
+            args.push("--strict-mcp-config".into());
+            if let Some(f) = sh.rest {
+                args.extend(["--mcp-config".into(), f.to_string_lossy().into_owned()]);
+            }
+            l.shared = sh.shared;
+        }
         if let Some(o) = &saved {
             o.apply(&mut settings, &mut args, &cwd);
         }

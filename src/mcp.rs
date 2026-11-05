@@ -3,6 +3,8 @@
 //! touches while keeping the ones it does: a server is a child process (measured 13 to 92 MB each) and its tools
 //! add prompt tokens.
 //!
+//! The same list drives sharing (`share.rs`): the stdio servers among them can be started once for all tabs.
+//!
 //! Only servers you defined yourself can be picked one by one: `~/.claude.json` (user scope, then this
 //! folder's), and `<folder>/.mcp.json`. Servers from plugins and claude.ai connectors cannot be listed in a
 //! config file, so a project that called one of them keeps everything.
@@ -56,6 +58,11 @@ pub fn subset_file(cwd: &str, keep: &[String]) -> Option<PathBuf> {
 
 fn write_subset(all: &BTreeMap<String, Value>, dir: &Path, keep: &[String]) -> Option<PathBuf> {
     let chosen: BTreeMap<_, _> = keep.iter().filter_map(|k| Some((k.clone(), all.get(k)?.clone()))).collect();
+    write_config(&chosen, dir)
+}
+
+/// A config file holding exactly `chosen`, named by its content so the same servers reuse one file.
+fn write_config(chosen: &BTreeMap<String, Value>, dir: &Path) -> Option<PathBuf> {
     if chosen.is_empty() {
         return None;
     }
@@ -66,6 +73,64 @@ fn write_subset(all: &BTreeMap<String, Value>, dir: &Path, keep: &[String]) -> O
         crate::config::write_atomic(&path, &text).ok()?;
     }
     Some(path)
+}
+
+/// What sharing does with a folder's servers: the stdio ones claude++ starts once (`shared`), and a config file
+/// with the rest (remote servers, which cost no local process) for `claude` itself.
+pub struct Sharing {
+    pub shared: Vec<(String, crate::share::Def)>,
+    pub rest: Option<PathBuf>,
+}
+
+/// `keep` narrows it to those names (the servers `/optimize` kept). None when no stdio server is left to share.
+pub fn sharing(cwd: &str, keep: Option<&[String]>) -> Option<Sharing> {
+    plan(&defs(cwd), cwd, &crate::config::cache_dir()?, keep)
+}
+
+fn plan(all: &BTreeMap<String, Value>, cwd: &str, dir: &Path, keep: Option<&[String]>) -> Option<Sharing> {
+    let (mut shared, mut rest) = (vec![], BTreeMap::new());
+    for (name, d) in all.iter().filter(|(n, _)| keep.is_none_or(|k| k.contains(n))) {
+        match stdio(d, cwd) {
+            Some(def) => shared.push((name.clone(), def)),
+            None => {
+                rest.insert(name.clone(), d.clone());
+            }
+        }
+    }
+    if shared.is_empty() {
+        return None;
+    }
+    // The remote servers must reach claude through a file; if it cannot be written, share nothing rather than lose them.
+    let rest = if rest.is_empty() { None } else { Some(write_config(&rest, dir)?) };
+    Some(Sharing { shared, rest })
+}
+
+/// A stdio server's command line, `${VAR}` and `${VAR:-default}` filled in as Claude Code does.
+fn stdio(d: &Value, cwd: &str) -> Option<crate::share::Def> {
+    if !matches!(d["type"].as_str(), None | Some("stdio")) {
+        return None;
+    }
+    let strings = |v: &Value| v.as_array().into_iter().flatten().filter_map(|a| a.as_str().map(expand)).collect();
+    Some(crate::share::Def {
+        command: expand(d["command"].as_str()?),
+        args: strings(&d["args"]),
+        env: d["env"].as_object().into_iter().flatten().filter_map(|(k, v)| Some((k.clone(), expand(v.as_str()?)))).collect(),
+        cwd: cwd.into(),
+    })
+}
+
+fn expand(s: &str) -> String {
+    let mut out = String::new();
+    let mut rest = s;
+    while let Some(at) = rest.find("${") {
+        out.push_str(&rest[..at]);
+        let Some(end) = rest[at..].find('}') else { break };
+        let (name, default) = rest[at + 2..at + end].split_once(":-").unwrap_or((&rest[at + 2..at + end], ""));
+        out.push_str(&std::env::var(name).unwrap_or_else(|_| default.into()));
+        rest = &rest[at + end + 1..];
+    }
+    out.push_str(rest);
+    out
 }
 
 #[cfg(test)]
@@ -103,6 +168,36 @@ mod tests {
         assert_eq!(v["mcpServers"].as_object().unwrap().keys().collect::<Vec<_>>(), ["shared"]);
         assert_eq!(write_subset(&all, &cache, &["shared".into()]), Some(f), "same servers, same file");
         assert!(write_subset(&all, &cache, &["gone".into()]).is_none());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn stdio_servers_are_shared_and_the_rest_stay_with_claude() {
+        let d = std::env::temp_dir().join(format!("claudeplusplus-mcp-share-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        let all: BTreeMap<String, Value> = serde_json::from_value(json!({
+            "graph": {"command": "node", "args": ["${HOME}/g.js", "--x"], "env": {"K": "${CLAUDEPP_NOPE:-fallback}"}},
+            "docs": {"type": "http", "url": "https://example.test/mcp"},
+            "plain": {"type": "stdio", "command": "tool"}
+        }))
+        .unwrap();
+        let p = plan(&all, "/proj", &d, None).unwrap();
+        assert_eq!(p.shared.iter().map(|s| s.0.as_str()).collect::<Vec<_>>(), ["graph", "plain"]);
+        let graph = &p.shared[0].1;
+        assert_eq!((graph.command.as_str(), graph.cwd.as_str()), ("node", "/proj"));
+        assert_eq!(graph.args[0], format!("{}/g.js", std::env::var("HOME").unwrap_or_default()));
+        assert_eq!(graph.env, [("K".to_string(), "fallback".to_string())]);
+        let rest: Value = serde_json::from_str(&std::fs::read_to_string(p.rest.unwrap()).unwrap()).unwrap();
+        assert_eq!(rest["mcpServers"].as_object().unwrap().keys().collect::<Vec<_>>(), ["docs"], "remote servers go to claude");
+        // `/optimize` keeping only some narrows what is shared; nothing stdio left means no sharing at all.
+        let only = plan(&all, "/proj", &d, Some(&["plain".to_string()])).unwrap();
+        assert_eq!(only.shared.len(), 1);
+        assert!(only.rest.is_none(), "nothing else kept");
+        assert!(plan(&all, "/proj", &d, Some(&["docs".to_string()])).is_none());
+        let blocked = d.join("file");
+        std::fs::write(&blocked, "").unwrap();
+        assert!(plan(&all, "/proj", &blocked, None).is_none(), "no place for the rest: nothing is shared");
+        assert!(plan(&BTreeMap::new(), "/proj", &d, None).is_none());
         let _ = std::fs::remove_dir_all(&d);
     }
 }

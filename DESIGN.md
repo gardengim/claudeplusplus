@@ -118,6 +118,9 @@ Adding a surface means writing a function that returns a `View`. Adding a config
 - Config options are choice lists only; free-form values (a number, a path) will need a text-entry row.
 - The transcript's tool/diff rendering predates the theme and is only partly cleaned up.
 - No mouse. Intentional (it would break text selection), but it is a choice.
+- Shared MCP servers (`share.rs`) pass requests and replies only: a server's own notifications (progress, `list_changed`) are
+  dropped and its requests to the client refused, because there is no single tab to deliver them to. Routing progress by
+  token and broadcasting `list_changed` is the next step if a server needs it.
 
 ## Session lists (full screen and side panel)
 

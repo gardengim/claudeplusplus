@@ -151,6 +151,8 @@ pub struct Session {
     pub usage: crate::usage::Usage,
     pub lean_hinted: bool,
     pub long_hinted: bool,
+    /// The note about shared MCP servers has been shown for this tab.
+    pub share_hinted: bool,
     /// The message box while another tab is in front: (text, cursor).
     pub draft: (String, usize),
     /// This tab's own tool rules, (rule, allow?), sent as `permissions` and re-sent when the process restarts.
@@ -322,6 +324,7 @@ impl Session {
             usage: Default::default(),
             lean_hinted: false,
             long_hinted: false,
+            share_hinted: false,
             draft: Default::default(),
             rules: vec![],
             tools: vec![],
@@ -772,6 +775,10 @@ impl Session {
         }
         let launch = &launch;
         let mut b = Backend::spawn(launch, resume, tx.clone(), move |pid, m| AppEvent::Backend(sid, pid, m))?;
+        if !launch.shared.is_empty() && !std::mem::replace(&mut self.share_hinted, true) {
+            let names: Vec<&str> = launch.shared.iter().map(|(n, _)| n.as_str()).collect();
+            self.note(format!("MCP servers shared with other tabs: {} ({} shared processes running). Plugin and claude.ai connector servers are not loaded in this mode; /config turns it off.", names.join(", "), crate::share::live()));
+        }
         if let Some(m) = &self.model_pref {
             b.control("set_model", json!({"model": m}))?;
         }

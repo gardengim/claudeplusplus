@@ -30,7 +30,7 @@
   {
    "check": "THESIS: headless request stays under 40000 tokens",
    "ok": true,
-   "detail": "34205"
+   "detail": "33921"
   },
   {
    "check": "--exclude-dynamic-system-prompt-sections still exists",
