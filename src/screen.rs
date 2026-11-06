@@ -8,6 +8,8 @@
 use std::io::{self, Write};
 
 const BEGIN: &[u8] = b"\x1b[?2026h\x1b[?25l";
+const SHOW: &[u8] = b"\x1b[?25h";
+const HIDE: &[u8] = b"\x1b[?25l";
 const END: &[u8] = b"\x1b[?2026l";
 /// A frame this short holds no cell updates, only the reset and cursor commands ratatui ends every frame with.
 const CURSOR_ONLY: usize = 64;
@@ -17,11 +19,14 @@ pub struct Frames<W: Write> {
     frame: Vec<u8>,
     /// The last frame sent if it was cursor-only; cleared by any frame that drew something.
     last_cursor_only: Vec<u8>,
+    /// Whether ratatui last asked for the cursor to be visible. It tracks that itself and sends a show only on a change, so a frame
+    /// that merely moves the cursor says nothing about visibility, and our own hide at the start of the frame would stick.
+    visible: bool,
 }
 
 impl<W: Write> Frames<W> {
     pub fn new(out: W) -> Self {
-        Frames { out, frame: Vec::with_capacity(16 * 1024), last_cursor_only: vec![] }
+        Frames { out, frame: Vec::with_capacity(16 * 1024), last_cursor_only: vec![], visible: false }
     }
 }
 
@@ -40,9 +45,15 @@ impl<W: Write> Write for Frames<W> {
             self.frame.clear();
             return Ok(());
         }
-        let mut wire = Vec::with_capacity(BEGIN.len() + self.frame.len() + END.len());
+        let asked = self.frame.windows(SHOW.len()).rposition(|w| w == SHOW || w == HIDE).map(|i| &self.frame[i..i + SHOW.len()] == SHOW);
+        let restore = asked.is_none() && self.visible;
+        self.visible = asked.unwrap_or(self.visible);
+        let mut wire = Vec::with_capacity(BEGIN.len() + self.frame.len() + SHOW.len() + END.len());
         wire.extend_from_slice(BEGIN);
         wire.extend_from_slice(&self.frame);
+        if restore {
+            wire.extend_from_slice(SHOW);
+        }
         wire.extend_from_slice(END);
         self.last_cursor_only = if small { std::mem::take(&mut self.frame) } else { vec![] };
         self.frame.clear();
@@ -70,6 +81,18 @@ mod tests {
             f.flush().unwrap();
             assert_eq!(f.out.len(), want, "the first cursor-only frame is sent, the repeats are not");
         }
+        // ratatui sends a show only when it changes; a frame that just moves the cursor must still leave it visible
+        let mut g = Frames::new(Vec::new());
+        g.write_all(b"\x1b[0m\x1b[?25h\x1b[3;4H").unwrap();
+        g.flush().unwrap();
+        g.write_all(b"\x1b[5;6H").unwrap();
+        g.flush().unwrap();
+        assert!(g.out.ends_with(b"\x1b[5;6H\x1b[?25h\x1b[?2026l"), "{:?}", String::from_utf8_lossy(&g.out));
+        g.write_all(b"\x1b[?25l").unwrap();
+        g.flush().unwrap();
+        g.write_all(b"\x1b[1;1Hx").unwrap();
+        g.flush().unwrap();
+        assert!(g.out.ends_with(b"\x1b[1;1Hx\x1b[?2026l"), "a cursor ratatui hid stays hidden");
         f.write_all(b"\x1b[1;1Hbye").unwrap();
         f.flush().unwrap();
         f.write_all(cursor).unwrap();
