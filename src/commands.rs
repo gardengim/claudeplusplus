@@ -119,6 +119,7 @@ impl App {
             }
             "/version" => self.version_cmd(&arg),
             "/cd" => self.cd_cmd(&arg),
+            "/worktree" | "/wt" => self.worktree_cmd(&arg),
             "/open" => {
                 let found = open::collect(&self.sessions[self.active].items, std::path::Path::new(self.cwd()));
                 if arg.is_empty() {
@@ -325,7 +326,7 @@ impl App {
     /// `/cd <path>`: this tab works in another folder from its next message. The conversation goes with it: Claude
     /// Code resumes it from the new folder (tools run there, its CLAUDE.md and settings load), and the transcript stays
     /// where it was. `/cd` alone says where the tab is, `/cd -` goes back, `~` and relative paths work.
-    fn cd_cmd(&mut self, arg: &str) {
+    pub(crate) fn cd_cmd(&mut self, arg: &str) {
         let here = self.cwd().to_string();
         let arg = arg.trim().trim_matches(['"', '\'']);
         if arg.is_empty() {
@@ -364,5 +365,52 @@ impl App {
         self.files_at = None;
         let more = if started { "; the conversation continues from there on your next message (the prompt cache is normally kept)" } else { "" };
         self.s().note(format!("working folder → {}{more}", ui::tilde(&dir)));
+    }
+    /// `/worktree`: the panel; `/worktree add <name> [base]` and `/worktree rm <name|path>` do it without it.
+    fn worktree_cmd(&mut self, arg: &str) {
+        let cwd = self.cwd().to_string();
+        let (verb, rest) = arg.split_once(' ').map_or((arg, ""), |(v, r)| (v, r.trim()));
+        match verb {
+            "" | "list" => match worktree::list(&cwd) {
+                Ok(list) => self.wt_ui = Some(worktree::Ui { list, ..Default::default() }),
+                Err(e) => self.flash(e),
+            },
+            "add" | "new" => {
+                let (name, base) = rest.split_once(' ').map_or((rest, None), |(n, b)| (n, Some(b.trim().to_string())));
+                self.wt_add(name, base);
+            }
+            "rm" | "remove" => match worktree::list(&cwd) {
+                Ok(list) => match list.iter().skip(1).find(|w| w.path == rest || w.branch.as_deref() == Some(rest) || w.path.rsplit('/').next() == Some(rest)) {
+                    Some(w) => self.wt_remove(&w.path.clone()),
+                    None => self.flash(format!("no worktree {rest:?} besides the main one; /worktree lists them")),
+                },
+                Err(e) => self.flash(e),
+            },
+            _ => self.flash("usage: /worktree [add <name> [base]] [rm <name|path>]"),
+        }
+    }
+
+    /// `git worktree add` off the UI thread (a checkout can take a while); the new folder opens in a tab when it is done.
+    pub(crate) fn wt_add(&mut self, name: &str, base: Option<String>) {
+        if !worktree::valid_name(name) {
+            return self.flash(format!("{name:?} is not a usable name: letters, digits and . _ - / only"));
+        }
+        let (cwd, name, tx) = (self.cwd().to_string(), name.to_string(), self.tx.clone());
+        self.flash(format!("adding worktree {name}…"));
+        std::thread::spawn(move || {
+            let res = worktree::add(&cwd, &name, base.as_deref()).map(|p| (format!("worktree {name} added: {}", ui::tilde(&p)), Some(p)));
+            let _ = tx.send(AppEvent::Worktree(res));
+        });
+    }
+
+    pub(crate) fn wt_remove(&mut self, path: &str) {
+        let (cwd, path, tx) = (self.cwd().to_string(), path.to_string(), self.tx.clone());
+        if self.sessions.iter().any(|s| s.cwd.as_deref().unwrap_or(&self.cwd) == path) {
+            return self.flash("a tab is working in it: close or /cd that tab first");
+        }
+        std::thread::spawn(move || {
+            let res = worktree::remove(&cwd, &path).map(|()| (format!("worktree removed: {}", ui::tilde(&path)), None));
+            let _ = tx.send(AppEvent::Worktree(res));
+        });
     }
 }

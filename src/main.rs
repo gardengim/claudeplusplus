@@ -10,6 +10,7 @@ mod shell;
 mod share;
 mod trust;
 mod version;
+mod worktree;
 mod commands;
 mod open;
 mod pane_host;
@@ -77,6 +78,8 @@ pub enum AppEvent {
     Mem(Vec<(u32, u64)>, u64),
     /// The terminal's background turned light (true) or dark while running.
     Theme(bool),
+    /// A `/worktree` add or remove finished: what to say and the folder to open in a tab, or why not.
+    Worktree(Result<(String, Option<String>), String>),
 }
 
 /// `--profile lean` = this tool set, no MCP, and no user-level settings (user CLAUDE.md,
@@ -129,7 +132,7 @@ IMAGES    ctrl+v, drag a file into the window or /img <path> to attach; pictures
           inline in kitty/Ghostty (CLAUDEPP_IMAGES=on|off overrides detection)";
 
 /// Commands claude++ handles itself: (name, argument hint, description).
-const LOCAL_COMMANDS: [(&str, &str, &str); 36] = [
+const LOCAL_COMMANDS: [(&str, &str, &str); 37] = [
     ("new", "[profile]", "open a new tab"),
     ("profile", "[name] [--hard]", "show or change this tab's profile"),
     ("close", "", "close this tab"),
@@ -160,6 +163,7 @@ const LOCAL_COMMANDS: [(&str, &str, &str); 36] = [
     ("optimize", "[light|balanced|aggressive|off|now]", "trim this project's start-up context from evidence (reversible)"),
     ("permissions", "", "saved allow/ask/deny rules from your settings files: add and delete"),
     ("instructions", "", "tick CLAUDE.md files and sections in or out of new sessions"),
+    ("worktree", "[add <name> | rm <name>]", "list, add and remove git worktrees, each can have its own tab (also /wt)"),
     ("open", "[n|link|path]", "open a link or file from this conversation (also: click it)"),
     ("cd", "[path|-]", "work in another folder from the next message on (this conversation goes with you)"),
     ("version", "[x.y.z|default]", "list the installed Claude Code versions, or pin the one claude++ runs"),
@@ -262,6 +266,8 @@ pub struct App {
     pub items_ui: Option<segments::Ui>,
     /// `/open`: the links and files of this conversation.
     pub open_ui: Option<open::Ui>,
+    /// `/worktree`: the repository's worktrees.
+    pub wt_ui: Option<worktree::Ui>,
     /// The installed Claude Code that new and restarted tabs run instead of the `claude` on PATH (`/version`).
     pin: Option<version::Installed>,
     /// `!command` runs in your login shell (`$SHELL`) rather than `sh`.
@@ -836,6 +842,7 @@ impl App {
             tabcfg: None,
             items_ui: None,
             open_ui: None,
+            wt_ui: None,
             pin: None,
             shell_login: true,
             versions_dir: version::versions_dir(),
@@ -981,7 +988,7 @@ impl App {
     /// Directory of the tab in front: what `@`, the status line and history are relative to.
     /// Some panel owns the keyboard (the input box is not the focus).
     fn overlay_open(&self) -> bool {
-        self.explorer.is_some() || self.model_picker.is_some() || self.color_picker.is_some() || self.rewind.is_some() || self.settings.is_some() || self.items_ui.is_some() || self.open_ui.is_some() || self.tabcfg.is_some() || self.instr.is_some() || self.perms.is_some() || self.opt.is_some() || self.usage_open || self.ctx_ui.is_some() || self.lanes.is_some() || self.queue_ui.is_some() || self.sched_ui.is_some() || self.search.is_some()
+        self.explorer.is_some() || self.model_picker.is_some() || self.color_picker.is_some() || self.rewind.is_some() || self.settings.is_some() || self.items_ui.is_some() || self.open_ui.is_some() || self.wt_ui.is_some() || self.tabcfg.is_some() || self.instr.is_some() || self.perms.is_some() || self.opt.is_some() || self.usage_open || self.ctx_ui.is_some() || self.lanes.is_some() || self.queue_ui.is_some() || self.sched_ui.is_some() || self.search.is_some()
     }
 
     fn cwd(&self) -> &str {
@@ -1233,6 +1240,19 @@ impl App {
                     _ => {}
                 }
             }
+            AppEvent::Worktree(res) => match res {
+                Ok((msg, open)) => {
+                    self.flash(msg);
+                    if let Some(p) = open {
+                        self.open_folder_tab(&p);
+                    }
+                    self.wt_refresh();
+                }
+                Err(e) => {
+                    self.flash(e);
+                    self.wt_refresh();
+                }
+            },
             AppEvent::Quit => self.quit = true,
             AppEvent::Term(_) => {}
         }
@@ -1885,6 +1905,39 @@ impl App {
         }
     }
 
+    /// The tab working in `path` comes to the front, or a new tab opens there.
+    fn open_folder_tab(&mut self, path: &str) {
+        let canon = |p: &str| std::fs::canonicalize(p).map_or(p.to_string(), |c| c.to_string_lossy().into_owned());
+        let want = canon(path);
+        if let Some(i) = self.sessions.iter().position(|s| canon(s.cwd.as_deref().unwrap_or(&self.cwd)) == want) {
+            return self.goto(i);
+        }
+        self.new_tab();
+        if !self.profile_forced && let Some(p) = project_profile(&want) {
+            self.s().profile = p;
+        }
+        let mode = permissions::default_mode(&want);
+        let s = self.s();
+        s.title = std::path::Path::new(&want).file_name().map(|n| n.to_string_lossy().chars().take(18).collect()).unwrap_or_default();
+        if !self.launch.args.iter().any(|a| a == "--permission-mode") {
+            self.s().mode = mode;
+        }
+        self.s().cwd = Some(want);
+        self.files_at = None;
+    }
+
+    /// Re-read the open `/worktree` panel's list (after an add or remove).
+    fn wt_refresh(&mut self) {
+        let cwd = self.cwd().to_string();
+        if let Some(ui) = self.wt_ui.as_mut() {
+            if let Ok(l) = worktree::list(&cwd) {
+                ui.sel = ui.sel.min(l.len().saturating_sub(1));
+                ui.list = l;
+            }
+            ui.armed = None;
+        }
+    }
+
     /// A click on a link or file path in the conversation opens it. False when the click was not on one.
     fn open_link_at(&mut self, p: (u16, u16)) -> bool {
         let body = self.hits.body;
@@ -2183,6 +2236,9 @@ impl App {
         }
         if self.open_ui.is_some() {
             return self.open_key(k);
+        }
+        if self.wt_ui.is_some() {
+            return self.wt_key(k);
         }
         if self.tabcfg.is_some() {
             return self.tabcfg_key(k);

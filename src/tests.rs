@@ -1050,6 +1050,14 @@ fn every_panel_sits_at_the_bottom_above_the_input_with_the_same_frame() {
     check(&mut app, "status line items", "Status line", "⎋ close");
     press(&mut app, KeyCode::Esc);
 
+    app.wt_ui = Some(worktree::Ui { list: vec![worktree::Wt { path: "/a/app".into(), branch: Some("main".into()), head: "abc1234".into(), bare: false, locked: false, prunable: false }], ..Default::default() });
+    check(&mut app, "worktrees", "Worktrees", "⎋ close");
+    press(&mut app, KeyCode::Esc);
+
+    app.open_ui = Some(open::Ui { sel: 0, found: vec![open::Found { target: open::Target::Url("https://example.com".into()), line: None }] });
+    check(&mut app, "open", "Open", "⎋ close");
+    press(&mut app, KeyCode::Esc);
+
     run_cmd(&mut app, "/session");
     check(&mut app, "session config", "Session", "⎋ close");
     press(&mut app, KeyCode::Esc);
@@ -1066,7 +1074,7 @@ fn every_panel_sits_at_the_bottom_above_the_input_with_the_same_frame() {
     press(&mut app, KeyCode::Esc);
     app.sessions[0].handle(&serde_json::from_str(r#"{"type":"control_request","request_id":"p1","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"ls"},"permission_suggestions":[]}}"#).unwrap());
     check(&mut app, "permission", "Permission", "⎋ deny");
-    assert_eq!(cases.len(), 8, "all eight panels were checked (the session list is full screen, checked above)");
+    assert_eq!(cases.len(), 10, "all ten panels were checked (the session list is full screen, checked above)");
 }
 
 #[test]
@@ -3006,4 +3014,58 @@ fn open_lists_links_and_files_opens_them_and_a_click_on_one_does_too() {
     mouse(&mut app, MouseEventKind::Up(MouseButton::Left));
     assert_eq!(opened().len(), n + 1);
     assert_eq!(opened().last().unwrap().last().unwrap(), "https://example.com/guide");
+}
+
+#[test]
+fn worktree_adds_opens_a_tab_in_the_new_folder_lists_and_removes_it_after_a_second_d() {
+    if std::process::Command::new("git").arg("--version").output().is_err() {
+        return eprintln!("skipped: no git");
+    }
+    let dir = std::env::temp_dir().join(format!("claudeplusplus-wt-app-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let repo = dir.join("app");
+    std::fs::create_dir_all(&repo).unwrap();
+    let g = |args: &[&str]| assert!(std::process::Command::new("git").current_dir(&repo).args(["-c", "user.email=t@t", "-c", "user.name=t", "-c", "init.defaultBranch=main"]).args(args).output().unwrap().status.success());
+    g(&["init", "-q"]);
+    std::fs::write(repo.join("f"), "x").unwrap();
+    g(&["add", "."]);
+    g(&["commit", "-q", "-m", "one"]);
+    let repo = std::fs::canonicalize(&repo).unwrap();
+    let (tx, rx) = mpsc::channel();
+    let mut app = App::new(Launch::default(), repo.to_string_lossy().into(), tx, Duration::ZERO);
+    app.new_tab();
+    let next = |app: &mut App| {
+        let ev = (0..50).find_map(|_| rx.recv_timeout(Duration::from_millis(200)).ok().filter(|e| matches!(e, AppEvent::Worktree(_)))).expect("the git call finished");
+        app.on_event(ev);
+    };
+
+    run_cmd(&mut app, "/worktree add feat/x");
+    next(&mut app);
+    assert_eq!(app.sessions.len(), 2, "a tab opened in the new folder");
+    let wt = repo.parent().unwrap().join("app-feat-x");
+    assert_eq!(app.cwd(), std::fs::canonicalize(&wt).unwrap().to_string_lossy());
+    assert!(app.flash.as_deref().is_some_and(|f| f.contains("worktree feat/x added")), "{:?}", app.flash);
+
+    app.goto(0);
+    run_cmd(&mut app, "/wt");
+    let rows = screen(&mut app, 120, 24);
+    assert!(rows.iter().any(|r| r.starts_with("┌ Worktrees")) && rows.iter().any(|r| r.contains("feat/x") && r.contains("1 tab")) && rows.iter().any(|r| r.contains("main") && r.contains("this tab")), "{}", rows.join("\n"));
+    press(&mut app, KeyCode::Down);
+    press(&mut app, KeyCode::Char('d'));
+    press(&mut app, KeyCode::Char('d'));
+    assert!(app.flash.as_deref().is_some_and(|f| f.contains("a tab is working in it")) && wt.exists(), "not while a tab is in it");
+
+    app.sessions.remove(1);
+    app.active = 0;
+    press(&mut app, KeyCode::Char('d'));
+    press(&mut app, KeyCode::Char('d'));
+    next(&mut app);
+    assert!(!wt.exists() && app.wt_ui.as_ref().unwrap().list.len() == 1, "removed, and the panel re-read the list");
+    press(&mut app, KeyCode::Char('d'));
+    assert!(app.flash.as_deref().is_some_and(|f| f.contains("main worktree")));
+    press(&mut app, KeyCode::Char('n'));
+    typed(&mut app, "bad name");
+    press(&mut app, KeyCode::Enter);
+    assert!(app.flash.as_deref().is_some_and(|f| f.contains("not a usable name")));
+    let _ = std::fs::remove_dir_all(&dir);
 }

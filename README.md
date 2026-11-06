@@ -185,6 +185,11 @@ Release binary: ~2.3 MB.
   the conversation does the same, on release (a drag still selects text; a link broken across rows is put back together).
   Only `http(s)` links are opened. Files that run code when opened (apps, scripts, installers, `.py`, `.js`...) are shown in the
   file manager instead of opened. Checked in a real terminal session: a mouse press and release on a link called `open` with that exact URL.
+- **Worktrees** (`/worktree`, `/wt`): a panel of the repository's git worktrees with the tabs working in each. Enter opens one in a tab (the
+  tab already there, else a new one), `c` moves this tab into it (like `/cd`), `n` adds one (a sibling folder `<repo>-<name>` on branch
+  `<name>`, made or reused; the new tab opens when git is done), `d` twice removes one. `/worktree add <name> [base]` and
+  `/worktree rm <name>` do it without the panel. Nothing is forced: git's refusal to remove a worktree with changes is shown as it
+  is, the main worktree cannot be removed, and neither can one a tab is working in. Tested against real git, not a stand-in.
 - **Panels**: every interactive surface (prompts, suggestions, model picker, config, session browser) is drawn by
   one shared component at the bottom of the screen above the input, so they look and behave alike; see
   [DESIGN.md](DESIGN.md). **`/config`** (or `/setting`) lists claude++'s own settings (status line, profile for new tabs, inline images,
@@ -720,7 +725,7 @@ Run `cargo build --release` first. All use the real `claude` or none at all; non
 
 | Command | Checks | Cost |
 |---|---|---|
-| `cargo test` | 308 unit and end-to-end tests (5 more are ignored by default) (the pty ones skip themselves where no pty can be opened) against a fake `claude`; includes a light fuzz run | free, 5 s |
+| `cargo test` | 312 unit and end-to-end tests (5 more are ignored by default) (the pty ones skip themselves where no pty can be opened) against a fake `claude`; includes a light fuzz run | free, 5 s |
 | `git config core.hooksPath .githooks` | once per clone: `git push` then runs `cargo test` and `bench/budget.py` first (`git push --no-verify` skips it). The contract check calls the real `claude`, so it stays manual | free, ~2 min |
 | `FUZZ_ROUNDS=40 FUZZ_SEED=7 cargo test --release hostile_backend` | the UI against hostile backend messages (mutated real ones: wrong types, huge values, control characters), random keys, read-only panels, terminals from 1×1 to 300×4. Run it in a debug build too: that is where integer overflow shows. Found: an overflow on absurd token counts, now capped at the source (`backend::count`) | free |
 | `FUZZ_FILES=600 cargo test hostile_transcript` | resume and every history reader against corrupt transcripts (cut-off lines, invalid UTF-8, a 3 MB line) | free |

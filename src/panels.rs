@@ -329,6 +329,59 @@ impl App {
         self.items_ui = Some(ui);
     }
 
+    pub(crate) fn wt_key(&mut self, k: KeyEvent) {
+        let Some(mut ui) = self.wt_ui.take() else { return };
+        if let Some(text) = ui.adding.as_mut() {
+            match k.code {
+                KeyCode::Esc => ui.adding = None,
+                KeyCode::Enter => {
+                    let name = std::mem::take(text);
+                    ui.adding = None;
+                    self.wt_add(name.trim(), None);
+                }
+                KeyCode::Backspace => drop(text.pop()),
+                KeyCode::Char(c) if !k.modifiers.contains(KeyModifiers::CONTROL) => text.push(c),
+                _ => {}
+            }
+            self.wt_ui = Some(ui);
+            return;
+        }
+        let n = ui.list.len().max(1);
+        let sel = ui.sel.min(n - 1);
+        match k.code {
+            KeyCode::Esc => return, // closed
+            KeyCode::Char('c') if k.modifiers.contains(KeyModifiers::CONTROL) => return,
+            KeyCode::Up | KeyCode::Down => {
+                ui.sel = panel::cycle(sel, n, k.code == KeyCode::Up);
+                ui.armed = None;
+            }
+            KeyCode::Enter | KeyCode::Char('c') => {
+                if let Some(w) = ui.list.get(sel) {
+                    if w.prunable {
+                        self.flash("that worktree's folder is missing; `git worktree prune` clears it");
+                    } else if k.code == KeyCode::Enter {
+                        self.open_folder_tab(&w.path.clone());
+                    } else {
+                        self.cd_cmd(&w.path.clone());
+                    }
+                }
+                return;
+            }
+            KeyCode::Char('n') => ui.adding = Some(String::new()),
+            KeyCode::Char('d') | KeyCode::Delete => match ui.list.get(sel) {
+                Some(_) if sel == 0 => self.flash("that is the main worktree"),
+                Some(w) if ui.armed == Some(sel) => {
+                    ui.armed = None;
+                    self.wt_remove(&w.path.clone());
+                }
+                Some(_) => ui.armed = Some(sel),
+                None => {}
+            },
+            _ => {}
+        }
+        self.wt_ui = Some(ui);
+    }
+
     pub(crate) fn open_key(&mut self, k: KeyEvent) {
         let Some(mut ui) = self.open_ui.take() else { return };
         let n = ui.found.len().max(1);

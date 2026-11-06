@@ -322,6 +322,12 @@ fn surface(app: &mut App, width: usize) -> Option<View> {
     if let Some(ui) = &app.settings {
         return Some(settings::view(ui, width, |k| app.setting_value(k)));
     }
+    if let Some(ui) = &app.wt_ui {
+        let canon = |p: &str| std::fs::canonicalize(p).map_or(p.to_string(), |c| c.to_string_lossy().into_owned());
+        let tabs: Vec<String> = app.sessions.iter().map(|s| canon(s.cwd.as_deref().unwrap_or(&app.cwd))).collect();
+        let here = canon(app.cwd());
+        return Some(crate::worktree::view(ui, &tabs, &here));
+    }
     if let Some(ui) = &app.open_ui {
         return Some(crate::open::view(ui));
     }
