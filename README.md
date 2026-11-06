@@ -179,6 +179,12 @@ Release binary: ~2.3 MB.
 - **`!command` runs in your login shell** (`$SHELL`: fish, nushell, zsh, bash, ksh, tcsh, elvish, xonsh, PowerShell), so it means what it
   means in your terminal; `/config` → "Shell for !" pins plain `sh` instead, and a shell claude++ does not know falls back to
   `sh`. The status line command stays on bash/zsh (those scripts are bash), and Claude's own Bash tool uses the shell Claude Code picks.
+- **Opening links and files** (`/open`): a panel lists the `http(s)` links and the existing file paths of this conversation, newest
+  first (what Claude said, the files it read or changed, what you wrote; `file.rs:42` works). Enter opens one with the system's
+  opener (`open`, `xdg-open`), `e` edits a file in your editor, `/open 2` or `/open <link|path>` skips the panel. **Clicking** a link or path in
+  the conversation does the same, on release (a drag still selects text; a link broken across rows is put back together).
+  Only `http(s)` links are opened. Files that run code when opened (apps, scripts, installers, `.py`, `.js`...) are shown in the
+  file manager instead of opened. Checked in a real terminal session: a mouse press and release on a link called `open` with that exact URL.
 - **Panels**: every interactive surface (prompts, suggestions, model picker, config, session browser) is drawn by
   one shared component at the bottom of the screen above the input, so they look and behave alike; see
   [DESIGN.md](DESIGN.md). **`/config`** (or `/setting`) lists claude++'s own settings (status line, profile for new tabs, inline images,
@@ -714,7 +720,7 @@ Run `cargo build --release` first. All use the real `claude` or none at all; non
 
 | Command | Checks | Cost |
 |---|---|---|
-| `cargo test` | 303 unit and end-to-end tests (5 more are ignored by default) (the pty ones skip themselves where no pty can be opened) against a fake `claude`; includes a light fuzz run | free, 5 s |
+| `cargo test` | 308 unit and end-to-end tests (5 more are ignored by default) (the pty ones skip themselves where no pty can be opened) against a fake `claude`; includes a light fuzz run | free, 5 s |
 | `git config core.hooksPath .githooks` | once per clone: `git push` then runs `cargo test` and `bench/budget.py` first (`git push --no-verify` skips it). The contract check calls the real `claude`, so it stays manual | free, ~2 min |
 | `FUZZ_ROUNDS=40 FUZZ_SEED=7 cargo test --release hostile_backend` | the UI against hostile backend messages (mutated real ones: wrong types, huge values, control characters), random keys, read-only panels, terminals from 1×1 to 300×4. Run it in a debug build too: that is where integer overflow shows. Found: an overflow on absurd token counts, now capped at the source (`backend::count`) | free |
 | `FUZZ_FILES=600 cargo test hostile_transcript` | resume and every history reader against corrupt transcripts (cut-off lines, invalid UTF-8, a 3 MB line) | free |

@@ -329,6 +329,33 @@ impl App {
         self.items_ui = Some(ui);
     }
 
+    pub(crate) fn open_key(&mut self, k: KeyEvent) {
+        let Some(mut ui) = self.open_ui.take() else { return };
+        let n = ui.found.len().max(1);
+        let sel = ui.sel.min(n - 1);
+        match k.code {
+            KeyCode::Esc => return, // closed
+            KeyCode::Char('c') if k.modifiers.contains(KeyModifiers::CONTROL) => return,
+            KeyCode::Up => ui.sel = panel::cycle(sel, n, true),
+            KeyCode::Down => ui.sel = panel::cycle(sel, n, false),
+            KeyCode::Enter => {
+                if let Some(f) = ui.found.get(sel) {
+                    self.open_found(f);
+                }
+                return;
+            }
+            KeyCode::Char('e') => {
+                match ui.found.get(sel).map(|f| &f.target) {
+                    Some(open::Target::Path(p)) if p.is_file() => self.edit_file = Some(p.clone()),
+                    _ => self.flash("e edits a file; this is a link or a folder"),
+                }
+                return;
+            }
+            _ => {}
+        }
+        self.open_ui = Some(ui);
+    }
+
     /// Colours changed: drop every rendered line that baked the old ones in, and repaint the whole screen.
     pub(crate) fn restyle(&mut self) {
         for s in &mut self.sessions {

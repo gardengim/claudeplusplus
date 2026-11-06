@@ -322,6 +322,9 @@ fn surface(app: &mut App, width: usize) -> Option<View> {
     if let Some(ui) = &app.settings {
         return Some(settings::view(ui, width, |k| app.setting_value(k)));
     }
+    if let Some(ui) = &app.open_ui {
+        return Some(crate::open::view(ui));
+    }
     if let Some(ui) = &app.items_ui {
         return Some(crate::segments::view(ui, &app.line_items));
     }

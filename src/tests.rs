@@ -1947,7 +1947,10 @@ fn a_command_run_folds_per_call_by_click_or_alt_o_and_failures_show_their_end() 
     assert!(text.contains("whole command"), "{text}");
     // Clicking the first call unfolds it only.
     let &(y, _, _) = app.hits.calls.first().expect("calls are clickable");
-    app.on_event(AppEvent::Term(Event::Mouse(MouseEvent { kind: MouseEventKind::Down(MouseButton::Left), column: 3, row: y, modifiers: KeyModifiers::NONE })));
+    let mouse = |app: &mut App, kind| app.on_event(AppEvent::Term(Event::Mouse(MouseEvent { kind, column: 3, row: y, modifiers: KeyModifiers::NONE })));
+    mouse(&mut app, MouseEventKind::Down(MouseButton::Left));
+    screen(&mut app, 80, 40); // the frame drawn while the button is down
+    mouse(&mut app, MouseEventKind::Up(MouseButton::Left)); // the click lands on release
     let text = screen(&mut app, 80, 80).join("\n");
     assert!(text.contains("line 20") && text.contains("▴ fold") && text.contains("16 earlier lines"), "{text}");
     // alt+o flips the latest call; ctrl+o resets them all to the global setting.
@@ -2961,4 +2964,46 @@ fn the_shell_setting_picks_login_or_sh() {
     assert!(!app.shell_login && app.setting_value("shell") == "sh");
     app.apply_setting("shell", "login");
     assert!(app.shell_login);
+}
+
+#[test]
+fn open_lists_links_and_files_opens_them_and_a_click_on_one_does_too() {
+    use ratatui::crossterm::event::MouseEvent;
+    let (mut app, d) = fake_app("open");
+    let dir = d.join("proj");
+    std::fs::create_dir_all(dir.join("src")).unwrap();
+    std::fs::write(dir.join("src/lib.rs"), "x").unwrap();
+    app.sessions[0].cwd = Some(dir.to_string_lossy().into());
+    app.sessions[0].push(session::Entry::Assistant { text: "Docs at https://example.com/guide and the code in src/lib.rs:7.".into(), msg_id: String::new(), streaming: false });
+    open::OPENED.lock().unwrap().clear();
+    let opened = || open::OPENED.lock().unwrap().clone();
+
+    run_cmd(&mut app, "/open");
+    assert_eq!(app.open_ui.as_ref().unwrap().found.len(), 2);
+    let rows = screen(&mut app, 100, 24);
+    assert!(rows.iter().any(|r| r.starts_with("┌ Open")) && rows.iter().any(|r| r.contains("https://example.com/guide")) && rows.iter().any(|r| r.contains("src/lib.rs:7")), "{}", rows.join("\n"));
+    press(&mut app, KeyCode::Enter);
+    assert!(app.open_ui.is_none() && opened().last().unwrap().last().unwrap() == "https://example.com/guide", "{:?}", opened());
+
+    run_cmd(&mut app, "/open 2");
+    assert!(opened().last().unwrap().last().unwrap().ends_with("src/lib.rs"));
+    run_cmd(&mut app, "/open ftp://nope");
+    assert!(app.flash.as_deref().is_some_and(|f| f.contains("nothing to open")));
+    let n = opened().len();
+    run_cmd(&mut app, "/open");
+    press(&mut app, KeyCode::Down);
+    app.on_key(KeyEvent::new(KeyCode::Char('e'), KeyModifiers::NONE));
+    assert_eq!(app.edit_file.as_deref(), Some(dir.join("src/lib.rs").as_path()), "e edits the file here");
+    assert_eq!(opened().len(), n, "and opens nothing outside");
+
+    // A click on the link in the conversation, on release.
+    let rows = screen(&mut app, 100, 24);
+    let (y, x) = rows.iter().enumerate().find_map(|(y, r)| r.find("https://example.com").map(|i| (y, r[..i].chars().count()))).unwrap();
+    let mouse = |app: &mut App, kind| app.on_event(AppEvent::Term(Event::Mouse(MouseEvent { kind, column: x as u16 + 3, row: y as u16, modifiers: KeyModifiers::NONE })));
+    mouse(&mut app, MouseEventKind::Down(MouseButton::Left));
+    assert_eq!(opened().len(), n, "nothing happens on the press");
+    screen(&mut app, 100, 24);
+    mouse(&mut app, MouseEventKind::Up(MouseButton::Left));
+    assert_eq!(opened().len(), n + 1);
+    assert_eq!(opened().last().unwrap().last().unwrap(), "https://example.com/guide");
 }

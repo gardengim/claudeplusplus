@@ -119,6 +119,17 @@ impl App {
             }
             "/version" => self.version_cmd(&arg),
             "/cd" => self.cd_cmd(&arg),
+            "/open" => {
+                let found = open::collect(&self.sessions[self.active].items, std::path::Path::new(self.cwd()));
+                if arg.is_empty() {
+                    return self.open_ui = Some(open::Ui { sel: 0, found });
+                }
+                let hit = arg.parse::<usize>().ok().and_then(|n| found.get(n.wrapping_sub(1)).cloned()).or_else(|| open::parse_token(&arg, std::path::Path::new(self.cwd())));
+                match hit {
+                    Some(f) => self.open_found(&f),
+                    None => self.flash(format!("nothing to open for {arg:?}: give a number from /open, an http(s) link, or a path that exists")),
+                }
+            }
             "/statusline" if arg == "items" => self.items_ui = Some(segments::Ui::default()),
             "/statusline" => match statusline::Mode::parse(&arg).filter(|m| !matches!(m, statusline::Mode::Command(_))) {
                 None if arg.is_empty() => {

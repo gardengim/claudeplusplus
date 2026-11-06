@@ -11,6 +11,7 @@ mod share;
 mod trust;
 mod version;
 mod commands;
+mod open;
 mod pane_host;
 mod panels;
 mod profile;
@@ -128,7 +129,7 @@ IMAGES    ctrl+v, drag a file into the window or /img <path> to attach; pictures
           inline in kitty/Ghostty (CLAUDEPP_IMAGES=on|off overrides detection)";
 
 /// Commands claude++ handles itself: (name, argument hint, description).
-const LOCAL_COMMANDS: [(&str, &str, &str); 35] = [
+const LOCAL_COMMANDS: [(&str, &str, &str); 36] = [
     ("new", "[profile]", "open a new tab"),
     ("profile", "[name] [--hard]", "show or change this tab's profile"),
     ("close", "", "close this tab"),
@@ -159,6 +160,7 @@ const LOCAL_COMMANDS: [(&str, &str, &str); 35] = [
     ("optimize", "[light|balanced|aggressive|off|now]", "trim this project's start-up context from evidence (reversible)"),
     ("permissions", "", "saved allow/ask/deny rules from your settings files: add and delete"),
     ("instructions", "", "tick CLAUDE.md files and sections in or out of new sessions"),
+    ("open", "[n|link|path]", "open a link or file from this conversation (also: click it)"),
     ("cd", "[path|-]", "work in another folder from the next message on (this conversation goes with you)"),
     ("version", "[x.y.z|default]", "list the installed Claude Code versions, or pin the one claude++ runs"),
     ("statusline", "[claude|builtin|items]", "choose which status line to show, or which parts of claude++'s own"),
@@ -258,6 +260,8 @@ pub struct App {
     pub settings: Option<settings::Ui>,
     /// `/statusline items`: which parts of our own status line show, and in what order.
     pub items_ui: Option<segments::Ui>,
+    /// `/open`: the links and files of this conversation.
+    pub open_ui: Option<open::Ui>,
     /// The installed Claude Code that new and restarted tabs run instead of the `claude` on PATH (`/version`).
     pin: Option<version::Installed>,
     /// `!command` runs in your login shell (`$SHELL`) rather than `sh`.
@@ -831,6 +835,7 @@ impl App {
             settings: None,
             tabcfg: None,
             items_ui: None,
+            open_ui: None,
             pin: None,
             shell_login: true,
             versions_dir: version::versions_dir(),
@@ -976,7 +981,7 @@ impl App {
     /// Directory of the tab in front: what `@`, the status line and history are relative to.
     /// Some panel owns the keyboard (the input box is not the focus).
     fn overlay_open(&self) -> bool {
-        self.explorer.is_some() || self.model_picker.is_some() || self.color_picker.is_some() || self.rewind.is_some() || self.settings.is_some() || self.items_ui.is_some() || self.tabcfg.is_some() || self.instr.is_some() || self.perms.is_some() || self.opt.is_some() || self.usage_open || self.ctx_ui.is_some() || self.lanes.is_some() || self.queue_ui.is_some() || self.sched_ui.is_some() || self.search.is_some()
+        self.explorer.is_some() || self.model_picker.is_some() || self.color_picker.is_some() || self.rewind.is_some() || self.settings.is_some() || self.items_ui.is_some() || self.open_ui.is_some() || self.tabcfg.is_some() || self.instr.is_some() || self.perms.is_some() || self.opt.is_some() || self.usage_open || self.ctx_ui.is_some() || self.lanes.is_some() || self.queue_ui.is_some() || self.sched_ui.is_some() || self.search.is_some()
     }
 
     fn cwd(&self) -> &str {
@@ -1190,7 +1195,13 @@ impl App {
                         self.last_input = Instant::now();
                         self.drag = self.hits.body.contains(p.into()).then_some((p, p));
                         self.dragging = self.drag.is_some();
-                        self.click(m.column, m.row)
+                        // In the conversation a click waits for the button to come up: it may be on a link, and which
+                        // word is under it comes from the frame drawn after this press.
+                        if self.dragging {
+                            self.snap.clear();
+                        } else {
+                            self.click(m.column, m.row)
+                        }
                     }
                     MouseEventKind::Drag(MouseButton::Left) => {
                         if let Some((a, _)) = self.drag.filter(|_| self.dragging) {
@@ -1200,6 +1211,10 @@ impl App {
                     MouseEventKind::Up(MouseButton::Left) => {
                         if self.dragging {
                             self.dragging = false;
+                            let moved = self.drag.is_some_and(|(a, _)| a != p);
+                            if !moved && !self.open_link_at(p) {
+                                self.click(m.column, m.row);
+                            }
                             self.drag = self.drag.map(|(a, _)| (a, p)).filter(|s| s.0 != s.1);
                             if self.autocopy {
                                 self.copy_selection();
@@ -1870,6 +1885,24 @@ impl App {
         }
     }
 
+    /// A click on a link or file path in the conversation opens it. False when the click was not on one.
+    fn open_link_at(&mut self, p: (u16, u16)) -> bool {
+        let body = self.hits.body;
+        if !self.sessions[self.active].pending.is_empty() || self.snap.is_empty() || !body.contains(p.into()) {
+            return false;
+        }
+        let found = open::at(&self.snap, (p.0 - body.x) as usize, (p.1 - body.y) as usize, std::path::Path::new(self.cwd()));
+        found.map(|f| self.open_found(&f)).is_some()
+    }
+
+    fn open_found(&mut self, f: &open::Found) {
+        let (args, said) = open::plan(f);
+        match open::run(args) {
+            Ok(()) => self.flash(said),
+            Err(e) => self.flash(format!("could not open it: {e}")),
+        }
+    }
+
     /// A left click: a tab switches to it; a row of a list moves the cursor there, and a click on the row
     /// the cursor is already on does what Enter does. Done as the keys, so every panel keeps its own rules.
     fn click(&mut self, col: u16, row: u16) {
@@ -2147,6 +2180,9 @@ impl App {
         }
         if self.items_ui.is_some() {
             return self.items_key(k);
+        }
+        if self.open_ui.is_some() {
+            return self.open_key(k);
         }
         if self.tabcfg.is_some() {
             return self.tabcfg_key(k);
