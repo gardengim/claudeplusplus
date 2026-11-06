@@ -164,6 +164,13 @@ Release binary: ~2.3 MB.
   working from a summary, and a compaction wasted if you were about to come back. A tab you are typing in, or one
   that is busy, asking, or stopped, is left alone. A claude++ that is not running cannot do it: nothing compacts while
   the terminal is closed.
+- **Claude Code versions** (`/version`): lists the versions the native installer keeps in `~/.local/share/claude/versions` (marking the
+  one your `claude` command runs, the newest, and the ones on the line claude++ was verified on), and `/version 2.1.317` pins claude++
+  to one: new and restarted tabs run that file directly with Claude Code's own updater switched off for them (idle tabs switch on
+  their next message; a busy one keeps its version until restarted). `/version default` unpins. Your `claude` command and symlink are
+  not touched, nothing is downloaded (`claude install <x.y.z>` fetches a version), and `--claude-bin` wins over a pin. Saved as
+  `claude_version`. An npm or Homebrew install keeps no such folder, so there is nothing to list or pin. `/statusline items` can show
+  the running version as `cc 2.1.317`. Verified end to end against the installed 2.1.317 (the process on disk and the tab both report it).
 - **Panels**: every interactive surface (prompts, suggestions, model picker, config, session browser) is drawn by
   one shared component at the bottom of the screen above the input, so they look and behave alike; see
   [DESIGN.md](DESIGN.md). **`/config`** (or `/setting`) lists claude++'s own settings (status line, profile for new tabs, inline images,
@@ -699,7 +706,7 @@ Run `cargo build --release` first. All use the real `claude` or none at all; non
 
 | Command | Checks | Cost |
 |---|---|---|
-| `cargo test` | 296 unit and end-to-end tests (5 more are ignored by default) (the pty ones skip themselves where no pty can be opened) against a fake `claude`; includes a light fuzz run | free, 5 s |
+| `cargo test` | 300 unit and end-to-end tests (5 more are ignored by default) (the pty ones skip themselves where no pty can be opened) against a fake `claude`; includes a light fuzz run | free, 5 s |
 | `git config core.hooksPath .githooks` | once per clone: `git push` then runs `cargo test` and `bench/budget.py` first (`git push --no-verify` skips it). The contract check calls the real `claude`, so it stays manual | free, ~2 min |
 | `FUZZ_ROUNDS=40 FUZZ_SEED=7 cargo test --release hostile_backend` | the UI against hostile backend messages (mutated real ones: wrong types, huge values, control characters), random keys, read-only panels, terminals from 1×1 to 300×4. Run it in a debug build too: that is where integer overflow shows. Found: an overflow on absurd token counts, now capped at the source (`backend::count`) | free |
 | `FUZZ_FILES=600 cargo test hostile_transcript` | resume and every history reader against corrupt transcripts (cut-off lines, invalid UTF-8, a 3 MB line) | free |

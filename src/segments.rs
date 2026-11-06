@@ -26,6 +26,7 @@ pub const ALL: &[Seg] = &[
     Seg { id: "dir", label: "Folder", help: "the tab's working folder" },
     Seg { id: "branch", label: "Git branch", help: "the branch checked out in that folder" },
     Seg { id: "clock", label: "Clock", help: "the time of day" },
+    Seg { id: "version", label: "Claude Code", help: "the version of Claude Code this tab runs (`/version` lists and pins)" },
 ];
 
 pub const DEFAULT: &[&str] = &["profile", "model", "ctx", "hit", "cache", "cost", "limits", "mem"];

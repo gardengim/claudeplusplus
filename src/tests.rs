@@ -2874,3 +2874,46 @@ fn the_builtin_status_line_shows_the_parts_you_chose_in_the_order_you_chose_and_
 fn rows_of(app: &App) -> Vec<&'static str> {
     segments::rows(&app.line_items)
 }
+
+#[test]
+fn version_lists_what_is_installed_and_pins_one_for_new_and_restarted_tabs() {
+    let (mut app, d) = fake_app("version");
+    let vdir = d.join("versions");
+    std::fs::create_dir_all(&vdir).unwrap();
+    for v in ["2.1.5", "2.1.6", "2.1.10"] {
+        std::fs::write(vdir.join(v), "x").unwrap();
+    }
+    app.versions_dir = Some(vdir.clone());
+    let cfg = d.join("config.json");
+    app.config_path = Some(cfg.clone());
+    let last_note = |a: &App| a.sessions[0].items.iter().rev().find_map(|i| if let session::Entry::Note(t) = &i.entry { Some(t.clone()) } else { None }).unwrap_or_default();
+    run_cmd(&mut app, "/version");
+    let list = last_note(&app);
+    assert!(list.find("2.1.6").unwrap() < list.find("2.1.10").unwrap() && list.contains("2.1.10  (newest, verified line)"), "{list}");
+
+    let (launch, tx) = (app.launch.clone(), app.tx.clone());
+    app.sessions[0].warm(&launch, &tx);
+    assert!(app.sessions[0].backend.is_some());
+    app.launch.bin = "claude".into(); // the fake script stood in for it; from here on it is the plain command
+    run_cmd(&mut app, "/version 9.9.9");
+    assert!(app.flash.as_deref().is_some_and(|f| f.contains("not installed")) && app.pin.is_none());
+
+    run_cmd(&mut app, "/version 2.1.6");
+    let want = vdir.join("2.1.6").to_string_lossy().into_owned();
+    let l = app.launch_for(0);
+    assert_eq!(l.bin, want, "the pinned file is what runs");
+    assert!(l.env.contains(&("DISABLE_AUTOUPDATER".into(), "1".into())), "and it does not update itself");
+    assert_eq!(config::get_str(&cfg, "claude_version").as_deref(), Some("2.1.6"));
+    assert!(app.sessions[0].backend.is_none(), "an idle tab restarts on the pinned version with its next message");
+    assert!(last_note(&app).contains("pinned to 2.1.6") && last_note(&app).contains("1 idle tab"));
+
+    run_cmd(&mut app, "/version default");
+    let l = app.launch_for(0);
+    assert_eq!(l.bin, "claude");
+    assert!(!l.env.iter().any(|(k, _)| k == "DISABLE_AUTOUPDATER"));
+    assert_eq!(config::get_str(&cfg, "claude_version").as_deref(), Some(""));
+
+    app.launch.bin = "/opt/my-claude".into();
+    run_cmd(&mut app, "/version 2.1.5");
+    assert!(app.pin.is_none() && app.flash.as_deref().is_some_and(|f| f.contains("--claude-bin")), "an explicit executable wins");
+}

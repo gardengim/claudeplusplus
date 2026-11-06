@@ -1115,6 +1115,7 @@ fn segment(app: &App, s: &Session, id: &str, ext: bool) -> Option<(String, Style
         "dir" => (tilde(s.cwd.as_deref().unwrap_or(&app.cwd)), theme::dim()),
         "branch" => (format!("⎇ {}", crate::segments::branch(s.cwd.as_deref().unwrap_or(&app.cwd))?), theme::dim()),
         "clock" => (crate::queue::clock(std::time::SystemTime::now()), theme::dim()),
+        "version" if !s.claude_version().is_empty() => (format!("cc {}", s.claude_version()), theme::dim()),
         _ => return None,
     })
 }

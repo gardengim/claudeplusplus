@@ -116,6 +116,7 @@ impl App {
                     (None, None) => self.s().note(format!("no session with an id starting {arg:?} or named so; /resume lists them")),
                 }
             }
+            "/version" => self.version_cmd(&arg),
             "/statusline" if arg == "items" => self.items_ui = Some(segments::Ui::default()),
             "/statusline" => match statusline::Mode::parse(&arg).filter(|m| !matches!(m, statusline::Mode::Command(_))) {
                 None if arg.is_empty() => {
@@ -264,5 +265,48 @@ impl App {
                 self.s().submit(text, &mentioned, &launch, &tx);
             }
         }
+    }
+    /// `/version`: the installed Claude Code versions, or pin one (`/version 2.1.317`) or unpin (`/version default`).
+    fn version_cmd(&mut self, arg: &str) {
+        let list = self.versions_dir.as_deref().map(version::installed_in).unwrap_or_default();
+        let default = self.versions_dir.as_deref().and_then(|d| version::default_in(d, &self.launch.bin));
+        let arg = arg.trim();
+        if arg.is_empty() {
+            let running: Vec<(String, String)> = self.sessions.iter().enumerate().filter(|(_, s)| s.backend.is_some() && !s.claude_version().is_empty()).map(|(i, s)| (format!("tab {}", i + 1), s.claude_version().to_string())).collect();
+            let text = version::describe(&list, default.as_deref(), self.pin.as_ref().map(|p| p.version.as_str()), session::VERIFIED_LINE, &running);
+            return self.s().note(text);
+        }
+        let target = match arg {
+            "default" | "unpin" => None,
+            v => match list.iter().find(|i| i.version == v) {
+                Some(i) => Some(i.clone()),
+                None => return self.flash(format!("Claude Code {v} is not installed here; /version lists what is (`claude install {v}` fetches it)")),
+            },
+        };
+        if target.is_some() && self.launch.bin != "claude" {
+            return self.flash("--claude-bin names the executable for this run, so there is nothing to pin");
+        }
+        let want = target.as_ref().map(|t| t.version.clone()).or(default);
+        self.pin = target;
+        if let Some(p) = &self.config_path {
+            let _ = config::set_str(p, "claude_version", self.pin.as_ref().map_or("", |t| t.version.as_str()));
+        }
+        // Tabs that are idle move over at once (their next message resumes on the other version); a busy one is left alone.
+        let (mut moved, mut stay) = (0, 0);
+        for s in &mut self.sessions {
+            if s.backend.is_some() && Some(s.claude_version()) != want.as_deref() {
+                if s.restart_later().is_ok() { moved += 1 } else { stay += 1 }
+            }
+        }
+        let now = match &self.pin {
+            Some(p) => format!("Claude Code pinned to {} (its updater is off for claude++'s tabs)", p.version),
+            None => "Claude Code unpinned: tabs run the `claude` on your PATH again".into(),
+        };
+        let tabs = match (moved, stay) {
+            (0, 0) => String::new(),
+            (m, 0) => format!("; {m} idle tab(s) switch on their next message"),
+            (m, s) => format!("; {m} idle tab(s) switch on their next message, {s} busy one(s) keep their version until they are restarted"),
+        };
+        self.s().note(format!("{now}{tabs}"));
     }
 }

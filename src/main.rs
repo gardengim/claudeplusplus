@@ -8,6 +8,7 @@ mod screen;
 mod segments;
 mod share;
 mod trust;
+mod version;
 mod commands;
 mod pane_host;
 mod panels;
@@ -126,7 +127,7 @@ IMAGES    ctrl+v, drag a file into the window or /img <path> to attach; pictures
           inline in kitty/Ghostty (CLAUDEPP_IMAGES=on|off overrides detection)";
 
 /// Commands claude++ handles itself: (name, argument hint, description).
-const LOCAL_COMMANDS: [(&str, &str, &str); 33] = [
+const LOCAL_COMMANDS: [(&str, &str, &str); 34] = [
     ("new", "[profile]", "open a new tab"),
     ("profile", "[name] [--hard]", "show or change this tab's profile"),
     ("close", "", "close this tab"),
@@ -157,6 +158,7 @@ const LOCAL_COMMANDS: [(&str, &str, &str); 33] = [
     ("optimize", "[light|balanced|aggressive|off|now]", "trim this project's start-up context from evidence (reversible)"),
     ("permissions", "", "saved allow/ask/deny rules from your settings files: add and delete"),
     ("instructions", "", "tick CLAUDE.md files and sections in or out of new sessions"),
+    ("version", "[x.y.z|default]", "list the installed Claude Code versions, or pin the one claude++ runs"),
     ("statusline", "[claude|builtin|items]", "choose which status line to show, or which parts of claude++'s own"),
     ("help", "", "keys and commands"),
     ("quit", "", "leave claude++"),
@@ -254,6 +256,10 @@ pub struct App {
     pub settings: Option<settings::Ui>,
     /// `/statusline items`: which parts of our own status line show, and in what order.
     pub items_ui: Option<segments::Ui>,
+    /// The installed Claude Code that new and restarted tabs run instead of the `claude` on PATH (`/version`).
+    pin: Option<version::Installed>,
+    /// Where installed Claude Code versions are kept (a field so tests can point it at a folder of their own).
+    versions_dir: Option<std::path::PathBuf>,
     pub line_items: Vec<&'static str>,
     pub tabcfg: Option<tabcfg::Ui>,
     pub instr: Option<instructions::Ui>,
@@ -590,6 +596,14 @@ fn run(opts: Opts) -> io::Result<()> {
     app.cache_ttl = Duration::from_secs(opts.cache_ttl_min.or(saved_num("cache_ttl_min")).unwrap_or(60) * 60);
     app.autocompact_k = saved_num("autocompact_k").filter(|k| (100..=1000).contains(k)).unwrap_or(0);
     app.precompact_k = saved_num("precompact_k").filter(|k| (50..=1000).contains(k)).unwrap_or(0);
+    let mut pin_note: Option<String> = None;
+    if let Some(v) = saved("claude_version").filter(|v| !v.is_empty()) {
+        match app.versions_dir.as_deref().map(version::installed_in).unwrap_or_default().into_iter().find(|i| i.version == v) {
+            _ if app.launch.bin != "claude" => {} // --claude-bin names the executable
+            Some(i) => app.pin = Some(i),
+            None => pin_note = Some(format!("Claude Code {v} (pinned with /version) is not installed any more; running the default. /version lists what is")),
+        }
+    }
     if let Some(list) = saved("statusline_items") {
         app.line_items = segments::parse(&list);
     }
@@ -618,7 +632,7 @@ fn run(opts: Opts) -> io::Result<()> {
     app.history = history::sent_prompts(&app.cwd);
     app.known_models = cache_path("models.json").map(|p| read_models(&p)).unwrap_or_default();
     app.new_tab();
-    if let Some(n) = app.startup_note.take() {
+    for n in app.startup_note.take().into_iter().chain(pin_note) {
         app.sessions[0].note(n);
     }
     if let Some(id) = opts.resume {
@@ -812,6 +826,8 @@ impl App {
             settings: None,
             tabcfg: None,
             items_ui: None,
+            pin: None,
+            versions_dir: version::versions_dir(),
             line_items: segments::DEFAULT.to_vec(),
             instr: None,
             perms: None,
@@ -906,6 +922,10 @@ impl App {
     /// Launch settings for one tab: its profile's flags, then the global passthrough flags.
     fn launch_for(&self, i: usize) -> Launch {
         let mut l = self.launch.clone();
+        if let Some(p) = &self.pin {
+            l.bin = p.path.to_string_lossy().into_owned();
+            l.env.push(("DISABLE_AUTOUPDATER".into(), "1".into())); // a pinned version stays put
+        }
         let spec = profile::spec(&self.sessions[i].profile).unwrap_or_default();
         l.env.extend(spec.env);
         let mut args = spec.args;

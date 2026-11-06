@@ -1037,6 +1037,11 @@ impl Session {
     }
 
     /// Time left before the prompt cache for this conversation expires, if it has one.
+    /// The Claude Code version this tab's process reported ("" before its first start).
+    pub fn claude_version(&self) -> &str {
+        &self.version
+    }
+
     /// Idle, running, at least `min` tokens, and the cache has under `PRECOMPACT_LEAD` left: the moment to compact.
     pub fn should_precompact(&self, ttl: std::time::Duration, min: u64) -> bool {
         const PRECOMPACT_LEAD: std::time::Duration = std::time::Duration::from_secs(30);
@@ -1308,7 +1313,7 @@ impl Session {
                     self.model = v["model"].as_str().unwrap_or_default().into();
                     self.version = v["claude_code_version"].as_str().unwrap_or_default().into();
                     if newer_than_verified(&self.version) && !WARNED_VERSION.swap(true, std::sync::atomic::Ordering::Relaxed) {
-                        self.note(format!("Claude Code {} is newer than the {VERIFIED_LINE}.x line claude++ was verified on; if something looks off, run `python3 bench/contract.py`", self.version));
+                        self.note(format!("Claude Code {} is newer than the {VERIFIED_LINE}.x line claude++ was verified on; if something looks off, `/version` lists the installed versions and can pin an older one, and `python3 bench/contract.py` checks the protocol parts", self.version));
                     }
                     self.fast_mode = v["fast_mode_state"] == "on";
                     if let Some(t) = v["tools"].as_array() {
@@ -1735,7 +1740,7 @@ impl Session {
 
 /// How a foreground agent's tool result starts when its report went to Claude separately.
 /// The Claude Code line `bench/contract.py` last passed on. A newer major.minor gets one note, not a block.
-const VERIFIED_LINE: &str = "2.1";
+pub const VERIFIED_LINE: &str = "2.1";
 static WARNED_VERSION: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 fn newer_than_verified(version: &str) -> bool {
