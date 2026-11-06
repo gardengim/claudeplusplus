@@ -47,7 +47,9 @@ def run(turns, hold=0, big=False):
     t.mark = len(t.buf); os.write(t.fd, b"go"); t.drain(0.3); os.write(t.fd, b"\r")
     done = t.drain(240, b"Worked for"); t.drain(2)
     mb = footprint(tree(t.pid))
-    r = {"turns": turns, "finished": done, "mb": mb}
+    # CPU seconds the whole flood cost claude++ (ps prints m:ss.cc)
+    cpu = sum(float(x) * 60 ** i for i, x in enumerate(reversed(subprocess.run(["ps", "-o", "time=", "-p", str(t.pid)], capture_output=True, text=True).stdout.strip().split(":"))))
+    r = {"turns": turns, "finished": done, "mb": mb, "cpu_s": cpu}
     if hold:
         c0 = subprocess.run(["ps", "-o", "time=", "-p", str(t.pid)], capture_output=True, text=True).stdout.strip()
         t.drain(10)

@@ -1472,7 +1472,7 @@ impl Session {
                     match block["type"].as_str().unwrap_or("") {
                         "tool_result" => {
                             let id = block["tool_use_id"].as_str().unwrap_or_default();
-                            let text = result_text(&block["content"]);
+                            let text = capped(result_text(&block["content"]));
                             let err = block["is_error"].as_bool().unwrap_or(false);
                             if let Some(item) = self
                                 .items
@@ -1824,6 +1824,7 @@ impl Session {
     }
 
     fn set_result(&mut self, tool_id: &str, text: String, err: bool) {
+        let text = capped(text);
         if let Some(item) = self.items.iter_mut().rev().find(|i| matches!(&i.entry, Entry::Tool { id, .. } if id == tool_id)) {
             if let Entry::Tool { result, .. } = &mut item.entry {
                 *result = Some((text, err));
@@ -1903,6 +1904,22 @@ fn prompt_words(t: &str) -> String {
 fn saved_prompt(prompts: Vec<Value>, text: &str, later: usize) -> Option<Value> {
     let want = prompt_words(text);
     prompts.into_iter().filter(|v| history::user_text(v).is_some_and(|t| prompt_words(&t) == want)).nth_back(later)
+}
+
+/// The most of one tool result kept for display.
+const MAX_RESULT: usize = 512 * 1024;
+
+/// `text`, or its first `MAX_RESULT` bytes and a note. Only for showing: Claude has the whole result, and a
+/// 30 MB one would cost many times that here (the parsed line, copies, wrapped rows).
+fn capped(mut text: String) -> String {
+    if text.len() > MAX_RESULT {
+        let cut = (0..=MAX_RESULT).rev().find(|&i| text.is_char_boundary(i)).unwrap_or(0);
+        let more = text.len() - cut;
+        text.truncate(cut);
+        text.shrink_to_fit(); // truncate keeps the capacity
+        text.push_str(&format!("\n… {} KB more not kept here", more / 1024));
+    }
+    text
 }
 
 fn result_text(c: &Value) -> String {

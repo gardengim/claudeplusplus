@@ -737,3 +737,15 @@ fn a_subagent_report_is_the_agent_calls_result_whether_it_ran_in_the_background_
     );
     assert_eq!(report(&s, 2), ("Agent finished".into(), false));
 }
+
+#[test]
+fn a_huge_tool_result_is_kept_only_in_part_and_never_cut_inside_a_character() {
+    let mut s = Session::new(1, String::new());
+    s.handle(&serde_json::from_str(r#"{"type":"assistant","message":{"id":"m1","content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"x"}}]}}"#).unwrap());
+    let big = "é".repeat(MAX_RESULT); // 2 bytes each: the cut falls inside a character
+    s.set_result("t1", big, false);
+    let Entry::Tool { result: Some((r, _)), .. } = &s.items[0].entry else { panic!("no result") };
+    assert!(r.len() < MAX_RESULT + 100 && r.ends_with("KB more not kept here"), "{}", &r[r.len() - 40..]);
+    s.set_result("t1", "small".into(), false);
+    assert!(matches!(&s.items[0].entry, Entry::Tool { result: Some((r, _)), .. } if r == "small"));
+}

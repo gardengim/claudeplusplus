@@ -138,6 +138,9 @@ impl Backend {
             let mut buf = Vec::new();
             loop {
                 buf.clear();
+                if buf.capacity() > 1 << 20 {
+                    buf = Vec::new(); // one huge line must not keep its tens of megabytes for the life of the tab
+                }
                 match out.read_until(b'\n', &mut buf) {
                     Ok(0) | Err(_) => break,
                     Ok(_) => {}
