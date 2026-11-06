@@ -45,7 +45,7 @@ pub struct Outcome {
 /// Answers to the questions editors ask a terminal at start-up (device attributes, cursor position), which the
 /// emulator does not answer itself. Without them some editors wait for a timeout before they paint.
 #[derive(Default)]
-struct Replies(Vec<u8>);
+pub(crate) struct Replies(pub(crate) Vec<u8>);
 
 impl vt100::Callbacks for Replies {
     fn unhandled_csi(&mut self, screen: &mut vt100::Screen, i1: Option<u8>, _i2: Option<u8>, params: &[&[u16]], c: char) {
@@ -79,11 +79,11 @@ pub struct Pane {
     master: OwnedFd,
 }
 
-fn nz(n: u16) -> NonZeroU16 {
+pub(crate) fn nz(n: u16) -> NonZeroU16 {
     NonZeroU16::new(n.max(1)).unwrap_or(NonZeroU16::MIN)
 }
 
-fn winsize(rows: u16, cols: u16) -> libc::winsize {
+pub(crate) fn winsize(rows: u16, cols: u16) -> libc::winsize {
     libc::winsize { ws_row: rows.max(1), ws_col: cols.max(1), ws_xpixel: 0, ws_ypixel: 0 }
 }
 
@@ -156,32 +156,10 @@ impl Pane {
         })
     }
 
-    fn start(editor: &str, path: &std::path::Path, (rows, cols): (u16, u16)) -> io::Result<(Child, OwnedFd)> {
-        let (mut m, mut s) = (-1, -1);
-        let mut ws = winsize(rows, cols);
-        // SAFETY: plain libc call with valid out-pointers; the fds are wrapped right after.
-        if unsafe { libc::openpty(&mut m, &mut s, std::ptr::null_mut(), std::ptr::null_mut(), &mut ws) } != 0 {
-            return Err(io::Error::last_os_error());
-        }
-        // SAFETY: openpty just returned these descriptors and nothing else owns them.
-        let (master, slave) = unsafe { (OwnedFd::from_raw_fd(m), OwnedFd::from_raw_fd(s)) };
-        for fd in [&master, &slave] {
-            // SAFETY: fcntl on a descriptor we own. Not inherited by the editor except as its stdio.
-            unsafe { libc::fcntl(fd.as_raw_fd(), libc::F_SETFD, libc::FD_CLOEXEC) };
-        }
+    fn start(editor: &str, path: &std::path::Path, size: (u16, u16)) -> io::Result<(Child, OwnedFd)> {
         let mut cmd = Command::new("sh");
-        cmd.arg("-c").arg(format!("{editor} \"$1\"")).arg("sh").arg(path).env("TERM", "xterm-256color").env("COLORTERM", "truecolor");
-        cmd.stdin(Stdio::from(slave.try_clone()?)).stdout(Stdio::from(slave.try_clone()?)).stderr(Stdio::from(slave));
-        // SAFETY: setsid and ioctl are async-signal-safe; this makes the pty the editor's controlling terminal.
-        unsafe {
-            cmd.pre_exec(|| {
-                libc::setsid();
-                libc::ioctl(0, libc::TIOCSCTTY as _, 0);
-                Ok(())
-            });
-        }
-        let child = cmd.spawn()?;
-        Ok((child, master))
+        cmd.arg("-c").arg(format!("{editor} \"$1\"")).arg("sh").arg(path);
+        open_pty(cmd, size)
     }
 
     /// Output from the editor: draw it, answer what it asks, and release keys typed before it was ready.
@@ -291,7 +269,35 @@ impl Drop for Pane {
     }
 }
 
-fn draw_screen(screen: &vt100::Screen, buf: &mut Buffer, area: Rect) -> Option<(u16, u16)> {
+/// Run `cmd` on a new pty of this size, as its own session with the pty as controlling terminal. Returns the child and the master side.
+pub(crate) fn open_pty(mut cmd: Command, (rows, cols): (u16, u16)) -> io::Result<(Child, OwnedFd)> {
+    let (mut m, mut s) = (-1, -1);
+    let mut ws = winsize(rows, cols);
+    // SAFETY: plain libc call with valid out-pointers; the fds are wrapped right after.
+    if unsafe { libc::openpty(&mut m, &mut s, std::ptr::null_mut(), std::ptr::null_mut(), &mut ws) } != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: openpty just returned these descriptors and nothing else owns them.
+    let (master, slave) = unsafe { (OwnedFd::from_raw_fd(m), OwnedFd::from_raw_fd(s)) };
+    for fd in [&master, &slave] {
+        // SAFETY: fcntl on a descriptor we own. Not inherited by the child except as its stdio.
+        unsafe { libc::fcntl(fd.as_raw_fd(), libc::F_SETFD, libc::FD_CLOEXEC) };
+    }
+    cmd.env("TERM", "xterm-256color").env("COLORTERM", "truecolor");
+    cmd.stdin(Stdio::from(slave.try_clone()?)).stdout(Stdio::from(slave.try_clone()?)).stderr(Stdio::from(slave));
+    // SAFETY: setsid and ioctl are async-signal-safe; this makes the pty the child's controlling terminal.
+    unsafe {
+        cmd.pre_exec(|| {
+            libc::setsid();
+            libc::ioctl(0, libc::TIOCSCTTY as _, 0);
+            Ok(())
+        });
+    }
+    let child = cmd.spawn()?;
+    Ok((child, master))
+}
+
+pub(crate) fn draw_screen(screen: &vt100::Screen, buf: &mut Buffer, area: Rect) -> Option<(u16, u16)> {
     for row in 0..area.height {
         for col in 0..area.width {
             let Some(cell) = screen.cell(row, col) else { continue };

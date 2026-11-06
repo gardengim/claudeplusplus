@@ -73,6 +73,12 @@ pub const ITEMS: &[Item] = &[
         choices: &[("off", "off"), ("on", "on")],
     },
     Item {
+        key: "agent_term",
+        label: "Agent terminal",
+        help: "on: Claude gets terminals it can drive (term_open, term_send, term_screen, term_list, term_close), hosted inside claude++: a real pty per terminal, so it can use REPLs, vim, ssh, debuggers and servers it keeps watching, which its Bash tool cannot. You can watch and type in them with /term. Costs roughly 650 tokens of tool definitions per request while on, and every call goes through the usual permission prompt. Terminals you open yourself stay private until you share one in the /term list. Applies to conversations started or resumed from now on.",
+        choices: &[("off", "off"), ("on", "on")],
+    },
+    Item {
         key: "shell",
         label: "Shell for !",
         help: "login: a command after ! runs in your own shell ($SHELL: fish, nushell, zsh, bash...), so it means what it means in your terminal. sh: plain POSIX sh. A shell claude++ does not know falls back to sh. Claude's own Bash tool uses the shell Claude Code picks (bash or zsh), and the status line command stays on bash/zsh.",

@@ -141,6 +141,8 @@ pub struct Session {
     /// Shell commands Claude Code runs as tasks (`task_started` with `local_bash`): what ctrl+b
     /// backgrounds and `/tasks` lists and stops.
     pub shells: Vec<Shell>,
+    /// This tab's terminals (`/term`, and the ones Claude opens). They outlive the `claude` process behind the tab and go with it.
+    pub terms: std::sync::Arc<crate::term::Terms>,
     thinking_n: u64,
     /// `/find`: the item last jumped to, and the item the next frame should bring into view.
     pub found: Option<usize>,
@@ -324,6 +326,7 @@ impl Session {
             fork: false,
             tasks: vec![],
             shells: vec![],
+            terms: crate::term::Terms::new(std::sync::Arc::new(|| {})),
             thinking_n: 0,
             found: None,
             find_query: String::new(),

@@ -214,7 +214,7 @@ fn completion_ranks_prefix_first_and_dedupes_local_commands() {
     press(&mut app, KeyCode::Backspace);
     typed(&mut app, "m");
     // prefix matches ("memory", "mode", "model") before names that merely contain "m"; ours before theirs
-    assert_eq!(names(&app), ["memory", "mode", "model", "img", "optimize", "permissions", "resume", "swarm", "vim", "compact"]);
+    assert_eq!(names(&app), ["memory", "mode", "model", "img", "optimize", "permissions", "resume", "swarm", "term", "vim", "compact"]);
     let model = app.completions().into_iter().find(|c| c.name == "model").unwrap();
     assert_eq!(model.desc, "pick a model and effort, or switch directly", "ours wins over Claude Code's same-named command");
     assert!(names(&app).iter().filter(|n| *n == "model").count() == 1);
@@ -3090,4 +3090,46 @@ fn swarm_sends_one_message_asking_claude_to_use_parallel_subagents_and_needs_the
     app.sessions[0].tools = vec!["Bash".into(), "Read".into()];
     run_cmd(&mut app, "/swarm do a thing");
     assert!(app.flash.as_deref().is_some_and(|f| f.contains("no Agent tool")));
+}
+
+#[test]
+fn the_agent_terminal_is_offered_only_when_on_and_slash_term_drives_a_real_shell() {
+    let (mut app, _d) = fake_app("term");
+    assert!(app.launch_for(0).terms.is_none(), "off by default: no tools, no tokens");
+    app.apply_setting("agent_term", "on");
+    assert!(app.launch_for(0).terms.is_some());
+    if crate::pane::open_pty(std::process::Command::new("true"), (2, 2)).is_err() {
+        return eprintln!("skipped: no pty here");
+    }
+    run_cmd(&mut app, "/term");
+    let t = app.term_view.clone().expect("a shell opened and has the screen");
+    t.wait(0, None, Duration::from_secs(3));
+    typed(&mut app, "echo ok-$((2+3))");
+    press(&mut app, KeyCode::Enter);
+    assert!(t.wait(0, Some("ok-5"), Duration::from_secs(5)), "keys reach the shell: {}", t.text(40));
+    let rows = screen(&mut app, 100, 20);
+    assert!(rows.iter().any(|r| r.contains("ok-5")) && rows.last().unwrap().contains("private") && rows.last().unwrap().contains("ctrl+\\ back"), "{rows:#?}");
+    // ctrl+\ leaves; the shell keeps running and is in the list
+    app.on_key(KeyEvent::new(KeyCode::Char('\\'), KeyModifiers::CONTROL));
+    assert!(app.term_view.is_none() && t.exit().is_none());
+    run_cmd(&mut app, "/term");
+    assert!(app.term_ui.is_some() && app.term_view.is_none(), "with one running, /term lists");
+    let rows = screen(&mut app, 100, 20).join("\n");
+    assert!(rows.contains("yours, private") && rows.contains("running"), "{rows}");
+    // the agent cannot see it until shared
+    let terms = app.sessions[0].terms.clone();
+    let agent = |terms: &std::sync::Arc<term::Terms>| {
+        let (tx, rx) = mpsc::channel();
+        terms.handle(&serde_json::json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "term_list", "arguments": {}}}), Box::new(move |v| tx.send(v).unwrap()));
+        rx.recv_timeout(Duration::from_secs(5)).unwrap()["result"]["content"][0]["text"].as_str().unwrap().to_string()
+    };
+    assert_eq!(agent(&terms), "no terminals");
+    press(&mut app, KeyCode::Char('s'));
+    assert!(agent(&terms).starts_with("you1:"), "{}", agent(&terms));
+    press(&mut app, KeyCode::Char('x'));
+    assert_eq!(terms.all().len(), 1, "one x only arms it");
+    press(&mut app, KeyCode::Char('x'));
+    assert!(terms.all().is_empty() && app.term_ui.is_some());
+    press(&mut app, KeyCode::Esc);
+    assert!(app.term_ui.is_none());
 }

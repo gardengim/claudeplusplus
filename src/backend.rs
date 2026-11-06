@@ -53,6 +53,8 @@ pub struct Launch {
     pub cwd: Option<String>,
     /// MCP servers this process gets from claude++ instead of starting its own (see `share`): name and definition.
     pub shared: Vec<(String, crate::share::Def)>,
+    /// Terminals this tab's Claude can drive, hosted here as the MCP server `term` (see `term`).
+    pub terms: Option<Arc<crate::term::Terms>>,
 }
 
 /// A count read from the protocol (tokens, milliseconds, sizes). It comes from another process, so it is capped
@@ -76,6 +78,7 @@ impl Backend {
     ) -> io::Result<Self> {
         // Started first so they come up while claude does. One that cannot start still answers, with that error.
         let shares: HashMap<String, Result<Arc<crate::share::Server>, String>> = launch.shared.iter().map(|(n, d)| (n.clone(), crate::share::acquire(d))).collect();
+        let terms = launch.terms.clone();
         let mut cmd = Command::new(&launch.bin);
         cmd.args([
             "-p",
@@ -153,7 +156,7 @@ impl Backend {
                 let mut v = serde_json::from_str(line)
                     .unwrap_or_else(|_| json!({"type": "_raw", "text": line}));
                 if v["type"] == "control_request" && v["request"]["subtype"] == "mcp_message" {
-                    answer_mcp(&v, client, &shares, &reader_pipe);
+                    answer_mcp(&v, client, &shares, &terms, &reader_pipe);
                     continue;
                 }
                 crate::image::pre_convert(&mut v);
@@ -167,7 +170,10 @@ impl Backend {
 
         let mut b = Backend { child: Some(child), pipe, pid, next_id: 0 };
         // The servers we host are named once, here; a later `initialize` leaves them as they are.
-        let hosted: Vec<&String> = launch.shared.iter().map(|(n, _)| n).collect();
+        let mut hosted: Vec<&str> = launch.shared.iter().map(|(n, _)| n.as_str()).collect();
+        if launch.terms.is_some() {
+            hosted.push("term");
+        }
         b.control("initialize", if hosted.is_empty() { json!({}) } else { json!({"sdkMcpServers": hosted}) })?;
         Ok(b)
     }
@@ -257,7 +263,7 @@ pub fn reap(mut child: Child, group: bool) {
 static NEXT_CLIENT: AtomicU64 = AtomicU64::new(1);
 
 /// Claude asked for an MCP server we host: pass the message to the shared process and send its answer back.
-fn answer_mcp(v: &Value, client: u64, shares: &HashMap<String, Result<Arc<crate::share::Server>, String>>, pipe: &Arc<Pipe>) {
+fn answer_mcp(v: &Value, client: u64, shares: &HashMap<String, Result<Arc<crate::share::Server>, String>>, terms: &Option<Arc<crate::term::Terms>>, pipe: &Arc<Pipe>) {
     let (rid, req) = (v["request_id"].clone(), &v["request"]);
     let msg = req["message"].clone();
     let pipe = pipe.clone();
@@ -268,6 +274,9 @@ fn answer_mcp(v: &Value, client: u64, shares: &HashMap<String, Result<Arc<crate:
         }
     });
     let fail = |e: &str| json!({"jsonrpc": "2.0", "id": msg.get("id").cloned().unwrap_or(Value::Null), "error": {"code": -32000, "message": e}});
+    if let (Some(t), Some("term")) = (terms, req["server_name"].as_str()) {
+        return t.handle(&msg, reply);
+    }
     match req["server_name"].as_str().and_then(|n| shares.get(n)) {
         Some(Ok(server)) => server.route(client, msg.clone(), reply),
         Some(Err(e)) => reply(fail(e)),
@@ -355,6 +364,41 @@ echo bye >&2"#,
             Msg::Line(v) => assert_eq!(v["dir"].as_str(), launch.cwd.as_deref()),
             Msg::Exited { .. } => panic!("exited early"),
         }
+    }
+
+    #[test]
+    fn the_terminal_server_is_named_to_claude_and_answers_in_process_without_a_child() {
+        let out = std::env::temp_dir().join(format!("claude-out-term-{}", std::process::id()));
+        let _ = std::fs::remove_file(&out);
+        let mut launch = fake(
+            "term",
+            r#"while IFS= read -r line; do
+  case "$line" in
+    *sdkMcpServers*)
+      echo "$line" >> "$OUT"
+      echo '{"type":"control_request","request_id":"t1","request":{"subtype":"mcp_message","server_name":"term","message":{"jsonrpc":"2.0","id":7,"method":"tools/list"}}}';;
+    *'"type":"control_response"'*) echo "$line" >> "$OUT";;
+  esac
+done"#,
+        );
+        launch.env.push(("OUT".into(), out.to_string_lossy().into()));
+        launch.terms = Some(crate::term::Terms::new(Arc::new(|| {})));
+        let (tx, rx) = mpsc::channel();
+        let b = Backend::spawn(&launch, Resume::New, tx, |_, m| m).unwrap();
+        let text = (0..250)
+            .find_map(|_| {
+                let t = std::fs::read_to_string(&out).unwrap_or_default();
+                (t.lines().count() >= 2).then_some(t).or_else(|| {
+                    thread::sleep(Duration::from_millis(20));
+                    None
+                })
+            })
+            .expect("claude was told about the server and got its answer");
+        assert!(text.contains(r#""sdkMcpServers":["term"]"#), "{text}");
+        assert!(text.contains(r#""request_id":"t1""#) && text.contains("term_open") && text.contains("term_send") && text.contains(r#""id":7"#), "{text}");
+        assert!(rx.try_recv().is_err(), "the UI never sees these messages");
+        drop(b);
+        let _ = std::fs::remove_file(&out);
     }
 
     #[test]

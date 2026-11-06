@@ -60,8 +60,29 @@ fn draw_editor_full(f: &mut Frame, app: &mut App) {
     f.render_widget(Paragraph::new(Line::from(spans)), foot);
 }
 
+/// `/term`: the terminal takes the whole screen (a hint row stays at the bottom); the conversation keeps updating behind it.
+fn draw_term_full(f: &mut Frame, app: &mut App) {
+    let waiting = !app.sessions[app.active].pending.is_empty();
+    let [body, foot] = Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).areas(f.area());
+    let Some(t) = app.term_view.as_ref() else { return };
+    t.resize(body.height, body.width);
+    if let Some((x, y)) = t.render(f.buffer_mut(), body) {
+        f.set_cursor_position(Position::new(x, y));
+    }
+    let who = if t.by_agent { "opened by Claude" } else if t.shared.load(std::sync::atomic::Ordering::Relaxed) { "shared with Claude" } else { "private" };
+    let state = t.exit().map_or(String::new(), |s| format!(" · {s}"));
+    let mut spans = vec![Span::styled(format!(" {} · {} · {who}{state} · ctrl+\\ back (it keeps running)", t.name, truncate(&t.command, 30)), theme::dim())];
+    if waiting {
+        spans.push(Span::styled(" · ◆ Claude is waiting for you", theme::attention()));
+    }
+    f.render_widget(Paragraph::new(Line::from(spans)), foot);
+}
+
 pub fn draw(f: &mut Frame, app: &mut App) {
     app.hits = Hits::default();
+    if app.term_view.is_some() {
+        return draw_term_full(f, app);
+    }
     if app.pane.as_ref().is_some_and(|p| p.kind == crate::pane::Use::Edit) {
         return draw_editor_full(f, app);
     }
@@ -330,6 +351,9 @@ fn surface(app: &mut App, width: usize) -> Option<View> {
     }
     if let Some(ui) = &app.open_ui {
         return Some(crate::open::view(ui));
+    }
+    if let Some(ui) = &app.term_ui {
+        return Some(crate::termui::view(ui, &app.sessions[app.active].terms.all(), app.agent_term));
     }
     if let Some(ui) = &app.items_ui {
         return Some(crate::segments::view(ui, &app.line_items));

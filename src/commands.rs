@@ -128,6 +128,7 @@ impl App {
             "/version" => self.version_cmd(&arg),
             "/cd" => self.cd_cmd(&arg),
             "/worktree" | "/wt" => self.worktree_cmd(&arg),
+            "/term" => self.term_cmd(&arg),
             "/open" => {
                 let found = open::collect(&self.sessions[self.active].items, std::path::Path::new(self.cwd()));
                 if arg.is_empty() {

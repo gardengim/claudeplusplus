@@ -196,6 +196,19 @@ Release binary: ~2.3 MB.
   to N times the usage; a note says so. Refused in the `lean` profile, which has no Agent tool. Checked against real Claude Code (haiku, 3
   files): one message with 3 parallel `Agent` calls, all `isolation: "worktree"`, 3 worktrees. Two honest limits: it is a prompt, so the model
   decides whether to follow it; and each agent's work stays on its own worktree branch until you merge it (`/worktree` lists them).
+- **Terminals, for you and for Claude** (`/term [command]`): a real shell (or the command) on a pty inside claude++. It takes the whole
+  screen and gets every key; ctrl+\ goes back to the conversation and the program keeps running. `/term` again lists them: Enter opens,
+  `n` is a new shell, `x` twice closes one. With `/config` → *Agent terminal* on, Claude gets five tools hosted inside claude++ itself
+  (the in-process MCP route the shared servers use, so no extra process): `term_open`, `term_send`, `term_screen`, `term_list`,
+  `term_close`. That is what its Bash tool cannot do: a REPL, `vim`, `ssh`, a debugger, a dev server it keeps watching. `term_send`
+  types text and named keys (`Enter`, `Ctrl-C`, `Up`, `F5`...) and returns the screen once the output goes quiet, or once the text
+  in `until` appears; `lines` reaches back into 2,000 lines of history. You can watch Claude work in a terminal it opened and take over
+  its keyboard. The reverse is closed: a terminal you open is private until you press `s` in the list, and every tool call goes through the
+  usual permission prompt. Off by default, because the tool definitions cost roughly 650 tokens per request; nothing runs until a terminal
+  is opened. Terminals belong to the tab, outlive restarts of its `claude` (`/cd`, `/profile`) and end with the tab; at most six per tab.
+  Checked against real Claude Code (haiku, lean profile): it opened `python3 -q` and `sh`, ran code in both, read the output and closed them.
+  Limits: the screen is what is read, not the raw stream (a program that redraws leaves only its last picture), the viewer has no
+  scrollback of its own, and Claude's terminals are 120x40 until you look at one, which resizes it.
 - **Panels**: every interactive surface (prompts, suggestions, model picker, config, session browser) is drawn by
   one shared component at the bottom of the screen above the input, so they look and behave alike; see
   [DESIGN.md](DESIGN.md). **`/config`** (or `/setting`) lists claude++'s own settings (status line, profile for new tabs, inline images,
@@ -731,7 +744,7 @@ Run `cargo build --release` first. All use the real `claude` or none at all; non
 
 | Command | Checks | Cost |
 |---|---|---|
-| `cargo test` | 314 unit and end-to-end tests (5 more are ignored by default) (the pty ones skip themselves where no pty can be opened) against a fake `claude`; includes a light fuzz run | free, 5 s |
+| `cargo test` | 322 unit and end-to-end tests (5 more are ignored by default) (the pty ones skip themselves where no pty can be opened) against a fake `claude`; includes a light fuzz run | free, 5 s |
 | `git config core.hooksPath .githooks` | once per clone: `git push` then runs `cargo test` and `bench/budget.py` first (`git push --no-verify` skips it). The contract check calls the real `claude`, so it stays manual | free, ~2 min |
 | `FUZZ_ROUNDS=40 FUZZ_SEED=7 cargo test --release hostile_backend` | the UI against hostile backend messages (mutated real ones: wrong types, huge values, control characters), random keys, read-only panels, terminals from 1×1 to 300×4. Run it in a debug build too: that is where integer overflow shows. Found: an overflow on absurd token counts, now capped at the source (`backend::count`) | free |
 | `FUZZ_FILES=600 cargo test hostile_transcript` | resume and every history reader against corrupt transcripts (cut-off lines, invalid UTF-8, a 3 MB line) | free |

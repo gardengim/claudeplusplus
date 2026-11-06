@@ -8,6 +8,8 @@ mod screen;
 mod segments;
 mod shell;
 mod swarm;
+mod term;
+mod termui;
 mod share;
 mod trust;
 mod version;
@@ -81,6 +83,8 @@ pub enum AppEvent {
     Theme(bool),
     /// A `/worktree` add or remove finished: what to say and the folder to open in a tab, or why not.
     Worktree(Result<(String, Option<String>), String>),
+    /// A terminal of this tab (see `term.rs`) has new output or ended: redraw.
+    TermOut(u64),
 }
 
 /// `--profile lean` = this tool set, no MCP, and no user-level settings (user CLAUDE.md,
@@ -133,7 +137,7 @@ IMAGES    ctrl+v, drag a file into the window or /img <path> to attach; pictures
           inline in kitty/Ghostty (CLAUDEPP_IMAGES=on|off overrides detection)";
 
 /// Commands claude++ handles itself: (name, argument hint, description).
-const LOCAL_COMMANDS: [(&str, &str, &str); 38] = [
+const LOCAL_COMMANDS: [(&str, &str, &str); 39] = [
     ("new", "[profile]", "open a new tab"),
     ("profile", "[name] [--hard]", "show or change this tab's profile"),
     ("close", "", "close this tab"),
@@ -164,6 +168,7 @@ const LOCAL_COMMANDS: [(&str, &str, &str); 38] = [
     ("optimize", "[light|balanced|aggressive|off|now]", "trim this project's start-up context from evidence (reversible)"),
     ("permissions", "", "saved allow/ask/deny rules from your settings files: add and delete"),
     ("instructions", "", "tick CLAUDE.md files and sections in or out of new sessions"),
+    ("term", "[command]", "a terminal in claude++ (a shell, or the command); Claude can drive terminals too: /config → Agent terminal"),
     ("swarm", "[2-8] <goal>", "have Claude split a goal into parallel subagents, each in its own worktree"),
     ("worktree", "[add <name> | rm <name>]", "list, add and remove git worktrees, each can have its own tab (also /wt)"),
     ("open", "[n|link|path]", "open a link or file from this conversation (also: click it)"),
@@ -299,6 +304,11 @@ pub struct App {
     pub queue_on: bool,
     /// Tabs share one copy of each stdio MCP server (`share_mcp`, see `share.rs`).
     pub share_mcp: bool,
+    /// Claude gets terminals to drive (`term_open`, `term_send`, ...), hosted by claude++ (see `term.rs`).
+    pub agent_term: bool,
+    /// `/term`: the list of this tab's terminals, and the one on screen.
+    pub term_ui: Option<termui::Ui>,
+    pub term_view: Option<std::sync::Arc<term::Term>>,
     /// ctrl+g was pressed: the main loop opens the editor.
     edit_request: bool,
     /// Input mode "editor": the message box is your editor, running in a pane; quitting it sends the message.
@@ -640,6 +650,7 @@ fn run(opts: Opts) -> io::Result<()> {
     app.autocopy = saved("autocopy").as_deref() == Some("on");
     app.queue_on = saved("queue").as_deref() != Some("off");
     app.share_mcp = saved("share_mcp").as_deref() == Some("on");
+    app.agent_term = saved("agent_term").as_deref() == Some("on");
     if let Some(n) = saved("notify").filter(|n| ["off", "bell", "desktop"].contains(&n.as_str())) {
         app.notify = n;
     }
@@ -733,6 +744,7 @@ fn run(opts: Opts) -> io::Result<()> {
 
     let res = (|| -> io::Result<()> {
         while !app.quit {
+            app.sync_term_watch();
             term.draw(|f| ui::draw(f, &mut app))?;
             app.sync_title();
             let wait = if app.sessions.iter().any(|s| s.busy) { 100 } else { 1000 };
@@ -862,6 +874,9 @@ impl App {
             vim: Default::default(),
             queue_on: true,
             share_mcp: false,
+            agent_term: false,
+            term_ui: None,
+            term_view: None,
             edit_request: false,
             editor_mode: false,
             pane: None,
@@ -984,13 +999,17 @@ impl App {
         }
         l.args = args;
         l.cwd = self.sessions[i].cwd.clone();
+        if self.agent_term {
+            self.sessions[i].terms.set_cwd(&cwd);
+            l.terms = Some(self.sessions[i].terms.clone());
+        }
         l
     }
 
     /// Directory of the tab in front: what `@`, the status line and history are relative to.
     /// Some panel owns the keyboard (the input box is not the focus).
     fn overlay_open(&self) -> bool {
-        self.explorer.is_some() || self.model_picker.is_some() || self.color_picker.is_some() || self.rewind.is_some() || self.settings.is_some() || self.items_ui.is_some() || self.open_ui.is_some() || self.wt_ui.is_some() || self.tabcfg.is_some() || self.instr.is_some() || self.perms.is_some() || self.opt.is_some() || self.usage_open || self.ctx_ui.is_some() || self.lanes.is_some() || self.queue_ui.is_some() || self.sched_ui.is_some() || self.search.is_some()
+        self.explorer.is_some() || self.model_picker.is_some() || self.color_picker.is_some() || self.rewind.is_some() || self.settings.is_some() || self.items_ui.is_some() || self.open_ui.is_some() || self.wt_ui.is_some() || self.term_ui.is_some() || self.term_view.is_some() || self.tabcfg.is_some() || self.instr.is_some() || self.perms.is_some() || self.opt.is_some() || self.usage_open || self.ctx_ui.is_some() || self.lanes.is_some() || self.queue_ui.is_some() || self.sched_ui.is_some() || self.search.is_some()
     }
 
     fn cwd(&self) -> &str {
@@ -1015,6 +1034,8 @@ impl App {
             s.profile = p;
         }
         s.cache_ttl = self.cache_ttl;
+        let (tx, sid) = (self.tx.clone(), self.next_id);
+        s.terms = term::Terms::new(std::sync::Arc::new(move || drop(tx.send(AppEvent::TermOut(sid)))));
         // Shown until claude reports the real mode, so a new tab does not claim "manual" by mistake.
         let flag = self.launch.args.iter().position(|a| a == "--permission-mode").and_then(|i| self.launch.args.get(i + 1));
         s.mode = flag.cloned().unwrap_or_else(|| permissions::default_mode(&self.cwd));
@@ -1198,6 +1219,9 @@ impl App {
                 self.on_paste(p)
             }
             AppEvent::Term(Event::Mouse(m)) => {
+                if self.term_view.is_some() {
+                    return; // the terminal on screen has no conversation to click
+                }
                 let p = (m.column, m.row);
                 match m.kind {
                     MouseEventKind::Down(MouseButton::Left) => {
@@ -1242,6 +1266,7 @@ impl App {
                     _ => {}
                 }
             }
+            AppEvent::TermOut(_) => {} // the redraw after any event is the whole job
             AppEvent::Worktree(res) => match res {
                 Ok((msg, open)) => {
                     self.flash(msg);
@@ -1433,6 +1458,9 @@ impl App {
     }
 
     fn on_paste(&mut self, p: String) {
+        if let Some(t) = &self.term_view {
+            return t.paste(&p);
+        }
         if self.pane_has_keyboard() {
             self.pane_typed = true;
             if self.pane.as_ref().is_some_and(|p| p.kind == pane::Use::Send) {
@@ -1608,6 +1636,9 @@ impl App {
     }
 
     fn on_key(&mut self, k: KeyEvent) {
+        if self.term_view.is_some() {
+            return self.term_view_key(k);
+        }
         if self.pane_has_keyboard() {
             let send = self.pane.as_ref().is_some_and(|p| p.kind == pane::Use::Send);
             let Some(app) = send.then(|| self.app_key(k)).flatten() else { return self.pane_key(k) };
@@ -2241,6 +2272,9 @@ impl App {
         }
         if self.wt_ui.is_some() {
             return self.wt_key(k);
+        }
+        if self.term_ui.is_some() {
+            return self.term_key(k);
         }
         if self.tabcfg.is_some() {
             return self.tabcfg_key(k);
