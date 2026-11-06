@@ -214,7 +214,7 @@ fn completion_ranks_prefix_first_and_dedupes_local_commands() {
     press(&mut app, KeyCode::Backspace);
     typed(&mut app, "m");
     // prefix matches ("memory", "mode", "model") before names that merely contain "m"; ours before theirs
-    assert_eq!(names(&app), ["memory", "mode", "model", "img", "optimize", "permissions", "resume", "vim", "compact"]);
+    assert_eq!(names(&app), ["memory", "mode", "model", "img", "optimize", "permissions", "resume", "swarm", "vim", "compact"]);
     let model = app.completions().into_iter().find(|c| c.name == "model").unwrap();
     assert_eq!(model.desc, "pick a model and effort, or switch directly", "ours wins over Claude Code's same-named command");
     assert!(names(&app).iter().filter(|n| *n == "model").count() == 1);
@@ -3068,4 +3068,26 @@ fn worktree_adds_opens_a_tab_in_the_new_folder_lists_and_removes_it_after_a_seco
     press(&mut app, KeyCode::Enter);
     assert!(app.flash.as_deref().is_some_and(|f| f.contains("not a usable name")));
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn swarm_sends_one_message_asking_claude_to_use_parallel_subagents_and_needs_the_agent_tool() {
+    let (mut app, _d) = fake_app("swarm");
+    app.sessions[0].profile = "lean".into();
+    run_cmd(&mut app, "/swarm 4 port the parser");
+    assert!(app.flash.as_deref().is_some_and(|f| f.contains("no Agent tool")) && app.sessions[0].items.is_empty(), "nothing is sent to a tab without Agent");
+    app.sessions[0].profile = "full".into();
+    run_cmd(&mut app, "/swarm");
+    assert!(app.flash.as_deref().is_some_and(|f| f.contains("usage")));
+    run_cmd(&mut app, "/swarm 4 port the parser");
+    let said: Vec<String> = app.sessions[0].items.iter().filter_map(|i| match &i.entry { session::Entry::User(t) => Some(t.clone()), session::Entry::Note(t) => Some(format!("NOTE {t}")), _ => None }).collect();
+    assert!(said[0].starts_with("NOTE swarm: up to 4 subagents inside this one claude process"), "{said:?}");
+    assert!(said[1].contains("at most 4 parts") && said[1].contains("Goal: port the parser") && !said[1].starts_with('/'), "{said:?}");
+    assert!(app.sessions[0].busy, "and it went out like any message");
+    assert_eq!(app.history.last().map(String::as_str), Some("/swarm 4 port the parser"), "history keeps what you typed");
+    // a tab that has reported its tools: Agent decides
+    app.sessions[0].busy = false;
+    app.sessions[0].tools = vec!["Bash".into(), "Read".into()];
+    run_cmd(&mut app, "/swarm do a thing");
+    assert!(app.flash.as_deref().is_some_and(|f| f.contains("no Agent tool")));
 }

@@ -7,6 +7,7 @@ mod mcp;
 mod screen;
 mod segments;
 mod shell;
+mod swarm;
 mod share;
 mod trust;
 mod version;
@@ -132,7 +133,7 @@ IMAGES    ctrl+v, drag a file into the window or /img <path> to attach; pictures
           inline in kitty/Ghostty (CLAUDEPP_IMAGES=on|off overrides detection)";
 
 /// Commands claude++ handles itself: (name, argument hint, description).
-const LOCAL_COMMANDS: [(&str, &str, &str); 37] = [
+const LOCAL_COMMANDS: [(&str, &str, &str); 38] = [
     ("new", "[profile]", "open a new tab"),
     ("profile", "[name] [--hard]", "show or change this tab's profile"),
     ("close", "", "close this tab"),
@@ -163,6 +164,7 @@ const LOCAL_COMMANDS: [(&str, &str, &str); 37] = [
     ("optimize", "[light|balanced|aggressive|off|now]", "trim this project's start-up context from evidence (reversible)"),
     ("permissions", "", "saved allow/ask/deny rules from your settings files: add and delete"),
     ("instructions", "", "tick CLAUDE.md files and sections in or out of new sessions"),
+    ("swarm", "[2-8] <goal>", "have Claude split a goal into parallel subagents, each in its own worktree"),
     ("worktree", "[add <name> | rm <name>]", "list, add and remove git worktrees, each can have its own tab (also /wt)"),
     ("open", "[n|link|path]", "open a link or file from this conversation (also: click it)"),
     ("cd", "[path|-]", "work in another folder from the next message on (this conversation goes with you)"),

@@ -43,6 +43,14 @@ impl App {
             });
             return;
         }
+        // `/swarm` sends one message that has Claude use its own Agent tool; from here on it is an ordinary message.
+        let text = match text.trim().strip_prefix("/swarm").filter(|r| r.is_empty() || r.starts_with(' ')) {
+            Some(rest) => match self.swarm_text(rest) {
+                Ok(t) => t,
+                Err(e) => return self.flash(e),
+            },
+            None => text,
+        };
         let (cmd, arg) = text.trim().split_once(' ').unwrap_or((text.trim(), ""));
         let arg = arg.trim().to_string();
         match cmd {
@@ -412,5 +420,17 @@ impl App {
             let res = worktree::remove(&cwd, &path).map(|()| (format!("worktree removed: {}", ui::tilde(&path)), None));
             let _ = tx.send(AppEvent::Worktree(res));
         });
+    }
+    /// The message `/swarm` sends. Refused where Claude has no `Agent` tool (the `lean` profile).
+    fn swarm_text(&mut self, arg: &str) -> Result<String, String> {
+        let (n, goal) = swarm::parse(arg)?;
+        let s = &self.sessions[self.active];
+        let has_agent = if s.tools.is_empty() { s.profile != "lean" } else { s.tools.iter().any(|t| t == "Agent" || t == "Task") };
+        if !has_agent {
+            return Err("this tab has no Agent tool (the lean profile leaves it out): /profile full, or a profile with Agent added".into());
+        }
+        let msg = format!("swarm: up to {n} subagents inside this one claude process (about 4 MB each); every agent bills its own tokens, so expect up to ~{n}x the usage. /tasks shows them working.");
+        self.s().note(msg);
+        Ok(swarm::prompt(n, &goal))
     }
 }
