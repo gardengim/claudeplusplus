@@ -4,6 +4,7 @@ mod explorer;
 mod jobs;
 mod lanes;
 mod mcp;
+mod screen;
 mod share;
 mod trust;
 mod commands;
@@ -405,8 +406,10 @@ fn editor_command() -> String {
     ["VISUAL", "EDITOR"].iter().filter_map(|k| std::env::var(k).ok()).find(|v| !v.trim().is_empty()).unwrap_or_else(|| "vi".into())
 }
 
+type Term = ratatui::Terminal<ratatui::backend::CrosstermBackend<screen::Frames<io::Stdout>>>;
+
 /// Give the terminal to a program (the editor) for the length of `f`, then take it back and repaint.
-fn with_terminal_lent<T>(term: &mut ratatui::DefaultTerminal, app: &mut App, f: impl FnOnce() -> T) -> T {
+fn with_terminal_lent<T>(term: &mut Term, app: &mut App, f: impl FnOnce() -> T) -> T {
     EDITING.store(true, Ordering::Relaxed);
     thread::sleep(Duration::from_millis(120)); // the reader thread is out of its read by now
     let mut out = io::stdout();
@@ -436,7 +439,7 @@ fn with_terminal_lent<T>(term: &mut ratatui::DefaultTerminal, app: &mut App, f: 
 }
 
 /// ctrl+g: hand the terminal to the editor with the message in it, take the result back into the box.
-fn edit_in_editor(term: &mut ratatui::DefaultTerminal, app: &mut App) {
+fn edit_in_editor(term: &mut Term, app: &mut App) {
     let editor = app.editor();
     let old = (app.input.clone(), app.cursor);
     // Preferably inside claude++ (the conversation keeps updating); the terminal is only lent when that cannot start.
@@ -460,7 +463,7 @@ fn edit_in_editor(term: &mut ratatui::DefaultTerminal, app: &mut App) {
 }
 
 /// `/memory`: edit a CLAUDE.md in place. Claude Code watches it, so the next turn reads the change.
-fn edit_file_in_editor(term: &mut ratatui::DefaultTerminal, app: &mut App, path: &std::path::Path) {
+fn edit_file_in_editor(term: &mut Term, app: &mut App, path: &std::path::Path) {
     let editor = app.editor();
     let status = with_terminal_lent(term, app, || std::process::Command::new("sh").arg("-c").arg(format!("{editor} \"$1\"")).arg("sh").arg(path).status());
     match status {
@@ -626,7 +629,10 @@ fn run(opts: Opts) -> io::Result<()> {
             }
         });
     }
-    let mut term = ratatui::init();
+    // What `ratatui::init()` does, with the frame-at-a-time output (see screen.rs) and without its panic hook.
+    let _ = terminal::enable_raw_mode();
+    let _ = execute!(io::stdout(), terminal::EnterAlternateScreen);
+    let mut term = ratatui::Terminal::new(ratatui::backend::CrosstermBackend::new(screen::Frames::new(io::stdout())))?;
     theme::set_mode(saved("theme").as_deref().unwrap_or("auto"));
     if let Some(light) = theme::query_light_background() {
         theme::set_light(light);
