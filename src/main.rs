@@ -290,6 +290,8 @@ pub struct App {
     stable_prompt: bool,
     /// `--autocompact <n>k` for backends started from now (0: Claude Code's own, about 967k).
     autocompact_k: u64,
+    /// Send `/compact` to an idle tab at least this many k tokens big just before its prompt cache expires (0: never).
+    precompact_k: u64,
     /// Nothing has been sent to the editor since it opened: ↑ ↓ ← and Esc are still claude++'s.
     pane_typed: bool,
     /// `editor` in config.json: a command that overrides $VISUAL and $EDITOR.
@@ -580,6 +582,7 @@ fn run(opts: Opts) -> io::Result<()> {
     }
     app.cache_ttl = Duration::from_secs(opts.cache_ttl_min.or(saved_num("cache_ttl_min")).unwrap_or(60) * 60);
     app.autocompact_k = saved_num("autocompact_k").filter(|k| (100..=1000).contains(k)).unwrap_or(0);
+    app.precompact_k = saved_num("precompact_k").filter(|k| (50..=1000).contains(k)).unwrap_or(0);
     app.stable_prompt = saved("stable_prompt").as_deref() != Some("off");
     image::set_mode(&saved("images").unwrap_or_default());
     if let Some(p) = config_path.as_deref() {
@@ -817,6 +820,7 @@ impl App {
             pane_failed: false,
             stable_prompt: true,
             autocompact_k: 0,
+            precompact_k: 0,
             pane_typed: false,
             editor_cmd: None,
             clear_request: false,
@@ -1262,6 +1266,7 @@ impl App {
         if self.flash.is_some() && self.flash_at.elapsed() > Duration::from_secs(4) {
             self.flash = None;
         }
+        self.precompact();
         let ttl = self.cache_ttl;
         for s in &mut self.sessions {
             if s.cache_left(ttl).is_some_and(|l| l.is_zero()) && !s.cold_noted {
@@ -2430,6 +2435,25 @@ impl App {
             Some(d) => format!("scheduled for {} · alt+q to manage", queue::clock(d)),
             None => format!("queued ({n}) · alt+q to manage"),
         });
+    }
+
+    /// A tab whose prompt cache is about to expire and whose conversation is big gets `/compact` now, while
+    /// the cache still serves the read: the next message then re-caches a summary, not the whole conversation.
+    fn precompact(&mut self) {
+        if self.precompact_k == 0 {
+            return;
+        }
+        let (min, ttl, typing) = (self.precompact_k * 1000, self.cache_ttl, !self.input.is_empty());
+        for i in 0..self.sessions.len() {
+            let s = &mut self.sessions[i];
+            if !s.should_precompact(ttl, min) || (i == self.active && typing) {
+                continue;
+            }
+            s.precompacted = true;
+            let left = s.cache_left(ttl).map_or(0, |l| l.as_secs());
+            s.note(format!("{}k tokens and the prompt cache expires in {left}s: compacting now, while it is still warm, so your next message re-caches a summary instead", s.ctx_tokens / 1000));
+            self.send_queued(i, session::Queued { text: "/compact".into(), atts: vec![], due: None });
+        }
     }
 
     /// Send the next waiting message of every tab that is free to take one.

@@ -61,6 +61,12 @@ pub const ITEMS: &[Item] = &[
         choices: &[("0", "Claude Code's own (~967k)"), ("150", "150k"), ("200", "200k"), ("300", "300k"), ("400", "400k"), ("600", "600k")],
     },
     Item {
+        key: "precompact_k",
+        label: "Compact before the cache expires",
+        help: "When a tab sits idle with a conversation at least this big and its prompt cache is about to expire, claude++ sends /compact while the cache is still warm. The summary is then read from the warm cache at a tenth of the price, and your next message re-caches only the summary instead of the whole conversation (1.25x to 2x the price per token). The cost is working from a summary, and a compaction wasted if you come back in the last seconds. Off by default; a tab you are typing in is left alone.",
+        choices: &[("0", "off"), ("100", "100k"), ("200", "200k"), ("300", "300k"), ("400", "400k")],
+    },
+    Item {
         key: "share_mcp",
         label: "Share MCP servers",
         help: "off: every tab starts its own copy of each MCP server you defined (codegraph alone is four processes, 13 to 92 MB per server). on: tabs in the same folder share one copy, started by claude++ and stopped with the last tab. In this mode a tab loads only the servers in your own config files, so MCP servers from plugins and claude.ai connectors are left out; a shared server cannot send progress or list-changed notices; one that keeps state per conversation should not be shared. Applies to conversations started or resumed from now on.",

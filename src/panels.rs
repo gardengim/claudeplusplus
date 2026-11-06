@@ -320,6 +320,7 @@ impl App {
             "cache_ttl_min" => (self.cache_ttl.as_secs() / 60).to_string(),
             "idle_suspend_s" => self.idle_suspend.as_secs().to_string(),
             "autocompact_k" => self.autocompact_k.to_string(),
+            "precompact_k" => self.precompact_k.to_string(),
             "mem_budget_mb" => (self.mem_budget_kb / 1024).to_string(),
             "notify" => self.notify.clone(),
             "mouse" => if self.mouse { "on" } else { "off" }.to_string(),
@@ -357,6 +358,7 @@ impl App {
             }
             "idle_suspend_s" => self.idle_suspend = Duration::from_secs(num),
             "autocompact_k" => self.autocompact_k = num,
+            "precompact_k" => self.precompact_k = num,
             "mem_budget_mb" => self.mem_budget_kb = num * 1024,
             "mouse" => self.set_mouse(value != "off"),
             "autocopy" => self.autocopy = value == "on",

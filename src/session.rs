@@ -196,6 +196,8 @@ pub struct Session {
     /// When the last API response arrived; the prompt cache's lifetime is measured from here.
     pub last_api: Option<Instant>,
     pub cold_noted: bool,
+    /// `/compact` was sent for this cache window (see `App::precompact`).
+    pub precompacted: bool,
     /// Launch with `--system-prompt-snapshot off` so this tab's prompt follows its profile instead of
     /// the one pinned when the conversation started. Costs a full re-cache when first applied.
     pub unpinned: bool,
@@ -359,6 +361,7 @@ impl Session {
             profile: String::new(),
             last_api: None,
             cold_noted: false,
+            precompacted: false,
             unpinned: false,
             scroll: 0,
             attachments: Vec::new(),
@@ -1034,6 +1037,19 @@ impl Session {
     }
 
     /// Time left before the prompt cache for this conversation expires, if it has one.
+    /// Idle, running, at least `min` tokens, and the cache has under `PRECOMPACT_LEAD` left: the moment to compact.
+    pub fn should_precompact(&self, ttl: std::time::Duration, min: u64) -> bool {
+        const PRECOMPACT_LEAD: std::time::Duration = std::time::Duration::from_secs(30);
+        !self.precompacted
+            && self.backend.is_some()
+            && !self.busy
+            && !self.rewinding
+            && self.pending.is_empty()
+            && self.queue.is_empty()
+            && self.ctx_tokens >= min
+            && self.cache_left(ttl).is_some_and(|l| !l.is_zero() && l <= PRECOMPACT_LEAD)
+    }
+
     pub fn cache_left(&self, ttl: std::time::Duration) -> Option<std::time::Duration> {
         let t = self.last_api?;
         (self.ctx_tokens > 0).then(|| ttl.saturating_sub(t.elapsed()))
@@ -1164,6 +1180,7 @@ impl Session {
         self.ctx_tokens = 0;
         self.last_api = None;
         self.cold_noted = false;
+        self.precompacted = false;
         self.scroll = 0;
         self.mem_kb = 0;
         // A new conversation starts its counters over (Claude Code resets the cost on /clear too).
@@ -1441,6 +1458,7 @@ impl Session {
                         self.ctx_tokens = ctx;
                         self.last_api = Some(Instant::now());
                         self.cold_noted = false;
+                        self.precompacted = false;
                         if self.req_id != id {
                             self.req_id = id.clone();
                             self.account_request(n("cache_read_input_tokens"), n("cache_creation_input_tokens"));

@@ -2796,3 +2796,35 @@ fn the_editor_pane_draws_at_any_terminal_size() {
         }
     }
 }
+
+#[test]
+fn a_big_idle_conversation_is_compacted_in_the_last_seconds_of_its_cache_but_not_while_you_type() {
+    let (mut app, _d) = fake_app("precompact");
+    let (launch, tx) = (app.launch.clone(), app.tx.clone());
+    let sent = |a: &App| a.sessions[0].items.iter().filter(|i| matches!(&i.entry, session::Entry::User(t) if t == "/compact")).count();
+    let ttl = app.cache_ttl;
+    let age = |s: u64| Instant::now().checked_sub(ttl - Duration::from_secs(s));
+    app.sessions[0].warm(&launch, &tx);
+    app.sessions[0].ctx_tokens = 150_000;
+    app.sessions[0].last_api = age(20);
+    app.tick();
+    assert_eq!(sent(&app), 0, "off by default");
+    app.apply_setting("precompact_k", "200");
+    app.tick();
+    assert_eq!(sent(&app), 0, "a conversation under the size is left alone");
+    app.apply_setting("precompact_k", "100");
+    app.sessions[0].last_api = age(300);
+    app.tick();
+    assert_eq!(sent(&app), 0, "the cache has minutes left: the user may come back");
+    app.sessions[0].last_api = age(20);
+    app.input = "half a thought".into();
+    app.tick();
+    assert_eq!(sent(&app), 0, "the tab being typed in is not interrupted");
+    app.input.clear();
+    app.tick();
+    assert_eq!(sent(&app), 1, "idle, big, cache about to expire");
+    assert!(app.sessions[0].busy && app.sessions[0].precompacted);
+    app.sessions[0].busy = false;
+    app.tick();
+    assert_eq!(sent(&app), 1, "once per cache window");
+}
