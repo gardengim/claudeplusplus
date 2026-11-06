@@ -73,6 +73,12 @@ pub const ITEMS: &[Item] = &[
         choices: &[("off", "off"), ("on", "on")],
     },
     Item {
+        key: "shell",
+        label: "Shell for !",
+        help: "login: a command after ! runs in your own shell ($SHELL: fish, nushell, zsh, bash...), so it means what it means in your terminal. sh: plain POSIX sh. A shell claude++ does not know falls back to sh. Claude's own Bash tool uses the shell Claude Code picks (bash or zsh), and the status line command stays on bash/zsh.",
+        choices: &[("login", "login shell"), ("sh", "sh")],
+    },
+    Item {
         key: "notify",
         label: "Background tabs",
         help: "How a tab you are not looking at gets your attention when it finishes a turn or needs an answer. bell: the terminal bell. desktop: a desktop notification (terminals that support OSC 9, such as iTerm2, Ghostty and WezTerm). off: tab marker only.",

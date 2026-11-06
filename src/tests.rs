@@ -210,7 +210,7 @@ fn completion_ranks_prefix_first_and_dedupes_local_commands() {
     let (mut app, _d) = fake_app("comp");
     app.known_commands = vec![cmd("compact", "[focus]", "summarize"), cmd("model", "", "theirs"), cmd("context", "", "c")];
     typed(&mut app, "/c");
-    assert_eq!(names(&app), ["clear", "close", "color", "config", "context", "copy", "compact", "instructions", "schedule", "search"]);
+    assert_eq!(names(&app), ["cd", "clear", "close", "color", "config", "context", "copy", "compact", "instructions", "schedule", "search"]);
     press(&mut app, KeyCode::Backspace);
     typed(&mut app, "m");
     // prefix matches ("memory", "mode", "model") before names that merely contain "m"; ours before theirs
@@ -2916,4 +2916,49 @@ fn version_lists_what_is_installed_and_pins_one_for_new_and_restarted_tabs() {
     app.launch.bin = "/opt/my-claude".into();
     run_cmd(&mut app, "/version 2.1.5");
     assert!(app.pin.is_none() && app.flash.as_deref().is_some_and(|f| f.contains("--claude-bin")), "an explicit executable wins");
+}
+
+#[test]
+fn cd_moves_the_tab_to_another_folder_and_its_backend_restarts_there() {
+    let (mut app, d) = fake_app("cd");
+    let (a, b) = (d.join("a"), d.join("b"));
+    std::fs::create_dir_all(&a).unwrap();
+    std::fs::create_dir_all(b.join("sub")).unwrap();
+    std::fs::write(d.join("file.txt"), "x").unwrap();
+    let canon = |p: &std::path::Path| std::fs::canonicalize(p).unwrap().to_string_lossy().into_owned();
+    app.sessions[0].cwd = Some(canon(&a));
+    let (launch, tx) = (app.launch.clone(), app.tx.clone());
+    app.sessions[0].warm(&launch, &tx);
+    assert!(app.sessions[0].backend.is_some());
+
+    run_cmd(&mut app, &format!("/cd {}", b.display()));
+    assert_eq!(app.cwd(), canon(&b));
+    assert!(app.sessions[0].backend.is_none(), "restarted so the next message resumes in the new folder");
+    assert_eq!(app.launch_for(0).cwd.as_deref(), Some(canon(&b).as_str()));
+    run_cmd(&mut app, "/cd sub");
+    assert_eq!(app.cwd(), canon(&b.join("sub")), "relative to where the tab is");
+    run_cmd(&mut app, "/cd ..");
+    assert_eq!(app.cwd(), canon(&b));
+    run_cmd(&mut app, "/cd -");
+    assert_eq!(app.cwd(), canon(&b.join("sub")), "- goes back");
+    run_cmd(&mut app, "/cd nope");
+    assert!(app.flash.as_deref().is_some_and(|f| f.contains("not a folder")) && app.cwd() == canon(&b.join("sub")));
+    run_cmd(&mut app, &format!("/cd {}", d.join("file.txt").display()));
+    assert!(app.flash.as_deref().is_some_and(|f| f.contains("not a folder")), "a file is not a folder");
+    app.sessions[0].busy = true;
+    run_cmd(&mut app, &format!("/cd {}", a.display()));
+    assert_eq!(app.cwd(), canon(&b.join("sub")), "a tab mid-turn stays where it is");
+    app.sessions[0].busy = false;
+    run_cmd(&mut app, "/cd");
+    assert!(matches!(&app.sessions[0].items.last().unwrap().entry, session::Entry::Note(t) if t.contains("working folder:")));
+}
+
+#[test]
+fn the_shell_setting_picks_login_or_sh() {
+    let (mut app, _d) = fake_app("shell");
+    assert_eq!(app.setting_value("shell"), "login");
+    app.apply_setting("shell", "sh");
+    assert!(!app.shell_login && app.setting_value("shell") == "sh");
+    app.apply_setting("shell", "login");
+    assert!(app.shell_login);
 }

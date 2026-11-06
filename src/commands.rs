@@ -35,9 +35,10 @@ impl App {
             let (cmd, sid, tx) = (cmd.to_string(), self.sessions[self.active].id, self.tx.clone());
             let dir = self.sessions[self.active].cwd.clone().unwrap_or_else(|| self.cwd.clone());
             let id = self.s().start_shell(&cmd);
+            let login = std::env::var("SHELL").ok().filter(|_| self.shell_login);
             // ponytail: no timeout or cancel; a command that never ends just never reports (the UI stays free).
             std::thread::spawn(move || {
-                let out = std::process::Command::new("sh").args(["-c", &cmd]).current_dir(dir).stdin(std::process::Stdio::null()).output();
+                let out = shell::command(login.as_deref(), &cmd).current_dir(dir).stdin(std::process::Stdio::null()).output();
                 let _ = tx.send(AppEvent::Shell(sid, id, cmd, out));
             });
             return;
@@ -117,6 +118,7 @@ impl App {
                 }
             }
             "/version" => self.version_cmd(&arg),
+            "/cd" => self.cd_cmd(&arg),
             "/statusline" if arg == "items" => self.items_ui = Some(segments::Ui::default()),
             "/statusline" => match statusline::Mode::parse(&arg).filter(|m| !matches!(m, statusline::Mode::Command(_))) {
                 None if arg.is_empty() => {
@@ -308,5 +310,48 @@ impl App {
             (m, s) => format!("; {m} idle tab(s) switch on their next message, {s} busy one(s) keep their version until they are restarted"),
         };
         self.s().note(format!("{now}{tabs}"));
+    }
+    /// `/cd <path>`: this tab works in another folder from its next message. The conversation goes with it: Claude
+    /// Code resumes it from the new folder (tools run there, its CLAUDE.md and settings load), and the transcript stays
+    /// where it was. `/cd` alone says where the tab is, `/cd -` goes back, `~` and relative paths work.
+    fn cd_cmd(&mut self, arg: &str) {
+        let here = self.cwd().to_string();
+        let arg = arg.trim().trim_matches(['"', '\'']);
+        if arg.is_empty() {
+            return self.s().note(format!("working folder: {}  (/cd <path> changes it, /cd - goes back)", ui::tilde(&here)));
+        }
+        let want = if arg == "-" {
+            match self.sessions[self.active].prev_cwd.clone() {
+                Some(p) => p,
+                None => return self.flash("no earlier folder in this tab"),
+            }
+        } else if arg == "~" || arg.starts_with("~/") {
+            match std::env::home_dir() {
+                Some(h) => h.join(arg.trim_start_matches('~').trim_start_matches('/')).to_string_lossy().into_owned(),
+                None => return self.flash("no home folder to resolve ~"),
+            }
+        } else {
+            std::path::Path::new(&here).join(arg).to_string_lossy().into_owned()
+        };
+        let Ok(dir) = std::fs::canonicalize(&want).and_then(|p| if p.is_dir() { Ok(p) } else { Err(std::io::ErrorKind::NotADirectory.into()) }) else {
+            return self.flash(format!("not a folder: {}", ui::tilde(&want)));
+        };
+        let dir = dir.to_string_lossy().into_owned();
+        if dir == here {
+            return self.flash("already there");
+        }
+        if let Err(e) = self.s().restart_later() {
+            return self.flash(e);
+        }
+        if !self.profile_forced && let Some(p) = project_profile(&dir) {
+            self.s().profile = p;
+        }
+        let started = self.s().ctx_tokens > 0;
+        let s = self.s();
+        s.prev_cwd = Some(here);
+        s.cwd = Some(dir.clone());
+        self.files_at = None;
+        let more = if started { "; the conversation continues from there on your next message (the prompt cache is normally kept)" } else { "" };
+        self.s().note(format!("working folder → {}{more}", ui::tilde(&dir)));
     }
 }

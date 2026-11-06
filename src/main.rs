@@ -6,6 +6,7 @@ mod lanes;
 mod mcp;
 mod screen;
 mod segments;
+mod shell;
 mod share;
 mod trust;
 mod version;
@@ -127,7 +128,7 @@ IMAGES    ctrl+v, drag a file into the window or /img <path> to attach; pictures
           inline in kitty/Ghostty (CLAUDEPP_IMAGES=on|off overrides detection)";
 
 /// Commands claude++ handles itself: (name, argument hint, description).
-const LOCAL_COMMANDS: [(&str, &str, &str); 34] = [
+const LOCAL_COMMANDS: [(&str, &str, &str); 35] = [
     ("new", "[profile]", "open a new tab"),
     ("profile", "[name] [--hard]", "show or change this tab's profile"),
     ("close", "", "close this tab"),
@@ -158,6 +159,7 @@ const LOCAL_COMMANDS: [(&str, &str, &str); 34] = [
     ("optimize", "[light|balanced|aggressive|off|now]", "trim this project's start-up context from evidence (reversible)"),
     ("permissions", "", "saved allow/ask/deny rules from your settings files: add and delete"),
     ("instructions", "", "tick CLAUDE.md files and sections in or out of new sessions"),
+    ("cd", "[path|-]", "work in another folder from the next message on (this conversation goes with you)"),
     ("version", "[x.y.z|default]", "list the installed Claude Code versions, or pin the one claude++ runs"),
     ("statusline", "[claude|builtin|items]", "choose which status line to show, or which parts of claude++'s own"),
     ("help", "", "keys and commands"),
@@ -258,6 +260,8 @@ pub struct App {
     pub items_ui: Option<segments::Ui>,
     /// The installed Claude Code that new and restarted tabs run instead of the `claude` on PATH (`/version`).
     pin: Option<version::Installed>,
+    /// `!command` runs in your login shell (`$SHELL`) rather than `sh`.
+    shell_login: bool,
     /// Where installed Claude Code versions are kept (a field so tests can point it at a folder of their own).
     versions_dir: Option<std::path::PathBuf>,
     pub line_items: Vec<&'static str>,
@@ -604,6 +608,7 @@ fn run(opts: Opts) -> io::Result<()> {
             None => pin_note = Some(format!("Claude Code {v} (pinned with /version) is not installed any more; running the default. /version lists what is")),
         }
     }
+    app.shell_login = saved("shell").as_deref() != Some("sh");
     if let Some(list) = saved("statusline_items") {
         app.line_items = segments::parse(&list);
     }
@@ -827,6 +832,7 @@ impl App {
             tabcfg: None,
             items_ui: None,
             pin: None,
+            shell_login: true,
             versions_dir: version::versions_dir(),
             line_items: segments::DEFAULT.to_vec(),
             instr: None,

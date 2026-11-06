@@ -356,6 +356,7 @@ impl App {
             "theme" => theme::mode_name().to_string(),
             "queue" => if self.queue_on { "on" } else { "off" }.to_string(),
             "share_mcp" => if self.share_mcp { "on" } else { "off" }.to_string(),
+            "shell" => if self.shell_login { "login" } else { "sh" }.to_string(),
             _ => String::new(),
         }
     }
@@ -401,6 +402,7 @@ impl App {
             }
             "queue" => self.queue_on = value == "on",
             "share_mcp" => self.share_mcp = value == "on",
+            "shell" => self.shell_login = value != "sh",
             "side_panel" => {
                 self.dock_mode = value == "on";
                 if !self.dock_mode {

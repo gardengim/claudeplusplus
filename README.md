@@ -171,6 +171,14 @@ Release binary: ~2.3 MB.
   not touched, nothing is downloaded (`claude install <x.y.z>` fetches a version), and `--claude-bin` wins over a pin. Saved as
   `claude_version`. An npm or Homebrew install keeps no such folder, so there is nothing to list or pin. `/statusline items` can show
   the running version as `cc 2.1.317`. Verified end to end against the installed 2.1.317 (the process on disk and the tab both report it).
+- **`/cd <path>`** moves the tab to another folder (`~`, relative paths and `/cd -` work; `/cd` alone says where it is). The conversation
+  goes along: from the next message Claude Code resumes it in the new folder, so tools run there and that folder's CLAUDE.md and
+  settings load, while the transcript stays where it was. Refused mid-turn. Checked against the real thing: after `/cd` the
+  next turn's `pwd` was the new folder and Claude still remembered what it was told in the first. Folders with their own
+  commands still need `/trust`, as for any new folder.
+- **`!command` runs in your login shell** (`$SHELL`: fish, nushell, zsh, bash, ksh, tcsh, elvish, xonsh, PowerShell), so it means what it
+  means in your terminal; `/config` → "Shell for !" pins plain `sh` instead, and a shell claude++ does not know falls back to
+  `sh`. The status line command stays on bash/zsh (those scripts are bash), and Claude's own Bash tool uses the shell Claude Code picks.
 - **Panels**: every interactive surface (prompts, suggestions, model picker, config, session browser) is drawn by
   one shared component at the bottom of the screen above the input, so they look and behave alike; see
   [DESIGN.md](DESIGN.md). **`/config`** (or `/setting`) lists claude++'s own settings (status line, profile for new tabs, inline images,
@@ -706,7 +714,7 @@ Run `cargo build --release` first. All use the real `claude` or none at all; non
 
 | Command | Checks | Cost |
 |---|---|---|
-| `cargo test` | 300 unit and end-to-end tests (5 more are ignored by default) (the pty ones skip themselves where no pty can be opened) against a fake `claude`; includes a light fuzz run | free, 5 s |
+| `cargo test` | 303 unit and end-to-end tests (5 more are ignored by default) (the pty ones skip themselves where no pty can be opened) against a fake `claude`; includes a light fuzz run | free, 5 s |
 | `git config core.hooksPath .githooks` | once per clone: `git push` then runs `cargo test` and `bench/budget.py` first (`git push --no-verify` skips it). The contract check calls the real `claude`, so it stays manual | free, ~2 min |
 | `FUZZ_ROUNDS=40 FUZZ_SEED=7 cargo test --release hostile_backend` | the UI against hostile backend messages (mutated real ones: wrong types, huge values, control characters), random keys, read-only panels, terminals from 1×1 to 300×4. Run it in a debug build too: that is where integer overflow shows. Found: an overflow on absurd token counts, now capped at the source (`backend::count`) | free |
 | `FUZZ_FILES=600 cargo test hostile_transcript` | resume and every history reader against corrupt transcripts (cut-off lines, invalid UTF-8, a 3 MB line) | free |

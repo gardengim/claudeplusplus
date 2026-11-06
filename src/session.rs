@@ -132,6 +132,8 @@ pub struct Session {
     pub backend: Option<Backend>,
     /// Directory this tab works in; `None` follows the directory claude++ started in.
     pub cwd: Option<String>,
+    /// The folder before the last `/cd`, for `/cd -`.
+    pub prev_cwd: Option<String>,
     /// Resume as a copy: the first spawn adds `--fork-session`.
     pub fork: bool,
     /// The agent's task list (TaskCreate / TaskUpdate): (id, subject, status), shown above the input.
@@ -318,6 +320,7 @@ impl Session {
             color: None,
             backend: None,
             cwd: None,
+            prev_cwd: None,
             fork: false,
             tasks: vec![],
             shells: vec![],
