@@ -157,6 +157,13 @@ Release binary: ~2.3 MB.
   its report becomes that call's result, whether it ran in the foreground or in the background (headless Claude
   Code runs agents in the background: the turn ends, the agent keeps working, and its report starts a new turn).
   A finished agent folds its steps into a count under its report; ctrl+o lists them.
+- **Compacting before the cache runs out** (`/config` → "Compact before the cache expires", off by default): a tab that is idle
+  with a conversation of at least the chosen size (100k to 400k) and under 30 s of prompt cache left gets `/compact` sent, while
+  the cache can still serve the read at a tenth of the price. Your next message then re-caches a summary (plus the ~33k
+  of system prompt) instead of the whole conversation at 1.25x (5-minute cache) or 2x (1-hour cache) the price. It costs
+  working from a summary, and a compaction wasted if you were about to come back. A tab you are typing in, or one
+  that is busy, asking, or stopped, is left alone. A claude++ that is not running cannot do it: nothing compacts while
+  the terminal is closed.
 - **Panels**: every interactive surface (prompts, suggestions, model picker, config, session browser) is drawn by
   one shared component at the bottom of the screen above the input, so they look and behave alike; see
   [DESIGN.md](DESIGN.md). **`/config`** (or `/setting`) lists claude++'s own settings (status line, profile for new tabs, inline images,
@@ -213,8 +220,11 @@ Release binary: ~2.3 MB.
   (the default) is claude++'s own single line and never spawns anything. `claude` runs your Claude Code status
   line: richer, at the price of a short-lived process per refresh (a Python script measured ~27 ms and ~17 MB each
   time). If `claude` is chosen but Claude Code has none configured, claude++ says so and shows its own line.
-  The config file is a flat JSON object; unknown keys are kept when claude++ saves one. Customising the builtin
-  line is not built yet.
+  The config file is a flat JSON object; unknown keys are kept when claude++ saves one.
+  **`/statusline items`** edits the builtin line: a panel lists its parts (profile, model, context, cache hit, cache clock,
+  cost, usage limits, memory, plus folder, git branch and clock, which are off by default); space shows or hides one,
+  alt+↑↓ reorders, `r` resets, and the line under the message box changes as you go. The permission mode always comes first.
+  Saved as `statusline_items` (a comma list in display order). The branch is read from `.git/HEAD`, no `git` process.
 - **Your Claude Code status line, run the way Claude Code runs it** (per its
   [status line docs](https://code.claude.com/docs/en/statusline)) when `claude` is chosen. claude++ finds the `statusLine` setting with
   Claude Code's precedence (managed > project-local > project > user settings; `CLAUDE_CONFIG_DIR` honored),
@@ -689,7 +699,7 @@ Run `cargo build --release` first. All use the real `claude` or none at all; non
 
 | Command | Checks | Cost |
 |---|---|---|
-| `cargo test` | 289 unit and end-to-end tests (the pty ones skip themselves where no pty can be opened) against a fake `claude`; includes a light fuzz run | free, 5 s |
+| `cargo test` | 296 unit and end-to-end tests (5 more are ignored by default) (the pty ones skip themselves where no pty can be opened) against a fake `claude`; includes a light fuzz run | free, 5 s |
 | `git config core.hooksPath .githooks` | once per clone: `git push` then runs `cargo test` and `bench/budget.py` first (`git push --no-verify` skips it). The contract check calls the real `claude`, so it stays manual | free, ~2 min |
 | `FUZZ_ROUNDS=40 FUZZ_SEED=7 cargo test --release hostile_backend` | the UI against hostile backend messages (mutated real ones: wrong types, huge values, control characters), random keys, read-only panels, terminals from 1×1 to 300×4. Run it in a debug build too: that is where integer overflow shows. Found: an overflow on absurd token counts, now capped at the source (`backend::count`) | free |
 | `FUZZ_FILES=600 cargo test hostile_transcript` | resume and every history reader against corrupt transcripts (cut-off lines, invalid UTF-8, a 3 MB line) | free |

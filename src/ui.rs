@@ -322,6 +322,9 @@ fn surface(app: &mut App, width: usize) -> Option<View> {
     if let Some(ui) = &app.settings {
         return Some(settings::view(ui, width, |k| app.setting_value(k)));
     }
+    if let Some(ui) = &app.items_ui {
+        return Some(crate::segments::view(ui, &app.line_items));
+    }
     let rows = app.completions();
     (!rows.is_empty()).then(|| suggest_view(&rows, app.sel, width))
 }
@@ -1083,6 +1086,39 @@ fn spinner_line(s: &Session, width: usize) -> Line<'static> {
     if line.width() > width { Line::from(line.spans[..2].to_vec()) } else { line }
 }
 
+/// One part of claude++'s own status line (`segments::ALL`), or nothing when it has nothing to say yet.
+fn segment(app: &App, s: &Session, id: &str, ext: bool) -> Option<(String, Style)> {
+    Some(match id {
+        "profile" if !s.profile.is_empty() && s.profile != "full" => (s.profile.clone(), theme::mode("acceptEdits")),
+        "model" if !s.model.is_empty() && !ext => {
+            let base = if s.effort.is_empty() { s.model.clone() } else { format!("{} {}", s.model, s.effort) };
+            (if s.fast_mode { format!("{base} ↯") } else { base }, theme::accent())
+        }
+        "ctx" if s.ctx_tokens > 0 && !ext => {
+            // the context filling up is the one number worth a warning colour
+            let hot = s.ctx_tokens * 100 >= s.ctx_window.max(200_000) * 85;
+            // as a share of the window once claude has reported its size, like Claude Code's own line
+            let pct = (s.ctx_tokens * 100).checked_div(s.ctx_window).map_or(String::new(), |p| format!(" {p}%"));
+            (format!("ctx {}{pct}", crate::usage::tokens(s.ctx_tokens)), if hot { theme::danger() } else { theme::dim() })
+        }
+        "hit" if s.prompt_total > 0 => (format!("hit {:.0}%", 100.0 * s.cache_read as f64 / s.prompt_total as f64), theme::ok()),
+        "cache" => {
+            let left = s.cache_left(app.cache_ttl)?;
+            if left.is_zero() { ("◷ cold".into(), theme::danger()) } else { (format!("◷ {}m", left.as_secs().div_ceil(60)), theme::dim()) }
+        }
+        "cost" if s.cost > 0.0 && !ext => (format!("${:.3}", s.cost), theme::ok()),
+        "limits" if !s.rate.is_empty() && !ext => (s.rate.clone(), theme::dim()),
+        "mem" => {
+            let backends: u64 = app.sessions.iter().map(|s| s.mem_kb).sum();
+            (format!("mem {}M+{}M", backends / 1024, app.ui_mem_kb / 1024), theme::dim())
+        }
+        "dir" => (tilde(s.cwd.as_deref().unwrap_or(&app.cwd)), theme::dim()),
+        "branch" => (format!("⎇ {}", crate::segments::branch(s.cwd.as_deref().unwrap_or(&app.cwd))?), theme::dim()),
+        "clock" => (crate::queue::clock(std::time::SystemTime::now()), theme::dim()),
+        _ => return None,
+    })
+}
+
 fn status_line(app: &App, f_height: u16) -> Line<'static> {
     let s = &app.sessions[app.active];
     // With the user's status line showing, ours keeps only what theirs cannot know: no model, context,
@@ -1102,35 +1138,7 @@ fn status_line(app: &App, f_height: u16) -> Line<'static> {
     };
     spans.push(Span::styled(mode.to_string(), mode_style.add_modifier(Modifier::BOLD)));
     spans.push(Span::styled(format!(" {}  ", theme::key_glyph("shift+tab")), theme::dim()));
-    let mut parts: Vec<(String, Style)> = vec![];
-    if !s.model.is_empty() && !ext {
-        let base = if s.effort.is_empty() { s.model.clone() } else { format!("{} {}", s.model, s.effort) };
-        parts.push((if s.fast_mode { format!("{base} ↯") } else { base }, theme::accent()));
-    }
-    if s.ctx_tokens > 0 && !ext {
-        // the context filling up is the one number worth a warning colour
-        let hot = s.ctx_tokens * 100 >= s.ctx_window.max(200_000) * 85;
-        // as a share of the window once claude has reported its size, like Claude Code's own line
-        let pct = (s.ctx_tokens * 100).checked_div(s.ctx_window).map_or(String::new(), |p| format!(" {p}%"));
-        parts.push((format!("ctx {}{pct}", crate::usage::tokens(s.ctx_tokens)), if hot { theme::danger() } else { theme::dim() }));
-    }
-    if s.prompt_total > 0 {
-        parts.push((format!("hit {:.0}%", 100.0 * s.cache_read as f64 / s.prompt_total as f64), theme::ok()));
-    }
-    if let Some(left) = s.cache_left(app.cache_ttl) {
-        parts.push(if left.is_zero() { ("◷ cold".into(), theme::danger()) } else { (format!("◷ {}m", left.as_secs().div_ceil(60)), theme::dim()) });
-    }
-    if !s.profile.is_empty() && s.profile != "full" {
-        parts.insert(0, (s.profile.clone(), theme::mode("acceptEdits")));
-    }
-    if s.cost > 0.0 && !ext {
-        parts.push((format!("${:.3}", s.cost), theme::ok()));
-    }
-    if !s.rate.is_empty() && !ext {
-        parts.push((s.rate.clone(), theme::dim()));
-    }
-    let backends: u64 = app.sessions.iter().map(|s| s.mem_kb).sum();
-    parts.push((format!("mem {}M+{}M", backends / 1024, app.ui_mem_kb / 1024), theme::dim()));
+    let parts: Vec<(String, Style)> = app.line_items.iter().filter_map(|id| segment(app, s, id, ext)).collect();
     if let Some(msg) = &app.flash {
         spans.insert(0, Span::styled(format!("{msg}  "), theme::accent()));
     }

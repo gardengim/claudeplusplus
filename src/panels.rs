@@ -303,6 +303,32 @@ impl App {
         self.settings = Some(ui);
     }
 
+    pub(crate) fn items_key(&mut self, k: KeyEvent) {
+        let Some(mut ui) = self.items_ui.take() else { return };
+        let (ctrl, alt) = (k.modifiers.contains(KeyModifiers::CONTROL), k.modifiers.contains(KeyModifiers::ALT));
+        let mut changed = true;
+        match k.code {
+            KeyCode::Esc => return, // closed
+            KeyCode::Char('c') if ctrl => return,
+            KeyCode::Up if alt => ui.shift(&mut self.line_items, -1),
+            KeyCode::Down if alt => ui.shift(&mut self.line_items, 1),
+            KeyCode::Up | KeyCode::Down => {
+                ui.step(if k.code == KeyCode::Up { -1 } else { 1 });
+                changed = false;
+            }
+            KeyCode::Char(' ') | KeyCode::Enter | KeyCode::Right | KeyCode::Left => ui.toggle(&mut self.line_items),
+            KeyCode::Char('r') => {
+                self.line_items = segments::DEFAULT.to_vec();
+                ui.sel = 0;
+            }
+            _ => changed = false,
+        }
+        if changed && let Some(p) = &self.config_path {
+            let _ = config::set_str(p, "statusline_items", &self.line_items.join(","));
+        }
+        self.items_ui = Some(ui);
+    }
+
     /// Colours changed: drop every rendered line that baked the old ones in, and repaint the whole screen.
     pub(crate) fn restyle(&mut self) {
         for s in &mut self.sessions {

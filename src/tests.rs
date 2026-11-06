@@ -1046,6 +1046,10 @@ fn every_panel_sits_at_the_bottom_above_the_input_with_the_same_frame() {
     check(&mut app, "config", "Config", "⎋ close");
     press(&mut app, KeyCode::Esc);
 
+    run_cmd(&mut app, "/statusline items");
+    check(&mut app, "status line items", "Status line", "⎋ close");
+    press(&mut app, KeyCode::Esc);
+
     run_cmd(&mut app, "/session");
     check(&mut app, "session config", "Session", "⎋ close");
     press(&mut app, KeyCode::Esc);
@@ -1062,7 +1066,7 @@ fn every_panel_sits_at_the_bottom_above_the_input_with_the_same_frame() {
     press(&mut app, KeyCode::Esc);
     app.sessions[0].handle(&serde_json::from_str(r#"{"type":"control_request","request_id":"p1","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"ls"},"permission_suggestions":[]}}"#).unwrap());
     check(&mut app, "permission", "Permission", "⎋ deny");
-    assert_eq!(cases.len(), 7, "all seven panels were checked (the session list is full screen, checked above)");
+    assert_eq!(cases.len(), 8, "all eight panels were checked (the session list is full screen, checked above)");
 }
 
 #[test]
@@ -2827,4 +2831,46 @@ fn a_big_idle_conversation_is_compacted_in_the_last_seconds_of_its_cache_but_not
     app.sessions[0].busy = false;
     app.tick();
     assert_eq!(sent(&app), 1, "once per cache window");
+}
+
+#[test]
+fn the_builtin_status_line_shows_the_parts_you_chose_in_the_order_you_chose_and_remembers_them() {
+    let (mut app, d) = fake_app("items");
+    let cfg = d.join("config.json");
+    app.config_path = Some(cfg.clone());
+    app.sessions[0].ctx_tokens = 5000;
+    let line = |app: &mut App| screen(app, 120, 20).into_iter().rev().find(|r| r.contains("mem ")).unwrap_or_default();
+    let l = line(&mut app);
+    assert!(l.find("ctx 5").unwrap() < l.find("mem ").unwrap(), "default order: {l:?}");
+
+    run_cmd(&mut app, "/statusline items");
+    assert!(app.items_ui.is_some());
+    // ctx is row 2 (profile, model, ctx): hide it, then move mem (now row 6) to the front.
+    press(&mut app, KeyCode::Down);
+    press(&mut app, KeyCode::Down);
+    press(&mut app, KeyCode::Char(' '));
+    assert!(!line(&mut app).contains("ctx 5"), "hidden at once: {:?}", line(&mut app));
+    assert_eq!(config::get_str(&cfg, "statusline_items").as_deref(), Some("profile,model,hit,cache,cost,limits,mem"));
+    app.items_ui.as_mut().unwrap().sel = 6;
+    for _ in 0..6 {
+        app.on_key(KeyEvent::new(KeyCode::Up, KeyModifiers::ALT));
+    }
+    assert_eq!(app.line_items[0], "mem");
+    app.items_ui.as_mut().unwrap().sel = rows_of(&app).iter().position(|r| *r == "clock").unwrap();
+    press(&mut app, KeyCode::Char(' '));
+    assert!(app.line_items.contains(&"clock") && line(&mut app).contains(':'), "a part that is off by default can be added");
+    press(&mut app, KeyCode::Esc);
+    assert!(app.items_ui.is_none());
+    assert!(config::get_str(&cfg, "statusline_items").unwrap().starts_with("mem,profile,model"));
+
+    // what was saved comes back; `r` in the panel resets to the default
+    app.line_items = segments::parse(&config::get_str(&cfg, "statusline_items").unwrap());
+    assert_eq!(app.line_items[0], "mem");
+    run_cmd(&mut app, "/statusline items");
+    press(&mut app, KeyCode::Char('r'));
+    assert_eq!(app.line_items, segments::DEFAULT);
+}
+
+fn rows_of(app: &App) -> Vec<&'static str> {
+    segments::rows(&app.line_items)
 }

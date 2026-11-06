@@ -129,3 +129,7 @@ Rows are grouped under headings; Tab cycles *by state* (◆ needs you, ◐ worki
 The permission mode is always in the status line (◇ manual, ⏵⏵ accept edits, ◈ plan, ✦ auto), with ⇧⇥ to cycle it.
 
 Both lists show the newest 200 conversations of every folder, named or not (an unnamed one is titled by its first prompt), so a conversation closed anywhere can be reopened; other folders' rows carry the folder name and open in that folder. Titles are cached per transcript (path, mtime, size), so the side panel's periodic refresh does not re-read unchanged files.
+- Frames (`screen.rs`) go to the terminal whole inside a synchronized update (`CSI ? 2026`) with the cursor hidden first. That ends the
+  cursor jumping about mid-redraw in terminals that honour it (kitty, Ghostty, iTerm2, WezTerm, Alacritty, foot, tmux 3.4+); in one
+  that ignores it the cursor is still hidden while the frame is written, but the frame can be painted in pieces. The effect was checked
+  from the bytes (every frame wrapped, repeats dropped), not by eye: no screen recording was made.

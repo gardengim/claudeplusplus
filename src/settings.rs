@@ -21,7 +21,7 @@ pub const ITEMS: &[Item] = &[
     Item {
         key: "statusline",
         label: "Status line",
-        help: "builtin: claude++'s own line, nothing is spawned. claude: run the status line from your Claude Code settings (richer, one short-lived process per refresh).",
+        help: "builtin: claude++'s own line, nothing is spawned. claude: run the status line from your Claude Code settings (richer, one short-lived process per refresh). /statusline items chooses what the builtin line shows and in what order.",
         choices: &[("builtin", "builtin"), ("claude", "claude")],
     },
     Item {

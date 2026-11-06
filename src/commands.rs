@@ -116,6 +116,7 @@ impl App {
                     (None, None) => self.s().note(format!("no session with an id starting {arg:?} or named so; /resume lists them")),
                 }
             }
+            "/statusline" if arg == "items" => self.items_ui = Some(segments::Ui::default()),
             "/statusline" => match statusline::Mode::parse(&arg).filter(|m| !matches!(m, statusline::Mode::Command(_))) {
                 None if arg.is_empty() => {
                     let claude = statusline::lookup(std::path::Path::new(self.cwd()), &self.claude_paths).found;
@@ -125,9 +126,9 @@ impl App {
                         statusline::Mode::Claude => format!("claude: running {theirs}"),
                         statusline::Mode::Command(c) => format!("command (from --statusline, not saved): `{c}`"),
                     };
-                    self.s().note(format!("status line → {now}\nClaude Code's would be: {theirs}\n/statusline claude | builtin switches and remembers the choice"));
+                    self.s().note(format!("status line → {now}\nClaude Code's would be: {theirs}\n/statusline claude | builtin switches and remembers the choice; /statusline items picks the parts of the builtin line"));
                 }
-                None => self.flash("usage: /statusline [claude|builtin]"),
+                None => self.flash("usage: /statusline [claude|builtin|items]"),
                 Some(mode) => {
                     let name = mode.name().to_string();
                     let note = self.apply_statusline_mode(mode);

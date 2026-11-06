@@ -5,6 +5,7 @@ mod jobs;
 mod lanes;
 mod mcp;
 mod screen;
+mod segments;
 mod share;
 mod trust;
 mod commands;
@@ -115,7 +116,7 @@ KEYS  enter send · shift+enter, alt+enter or ctrl+j newline · esc/ctrl+c inter
       ctrl+r search the messages you sent · ← at the start of the input: earlier sessions · tab completes a /command or an @file (↑↓ to pick, esc hides)
       ctrl+v paste an image as [Image #N] at the cursor (delete the token to drop it)
 COMMANDS  /usage (/cost /status) /memory [user] /export [file] /tasks /context /queue /schedule /search /vim /find /session /new [profile] /profile [name] [--hard] /close /clear /resume [id] /model [m] /effort [level] /mode <m>
-          /config (/setting) /statusline [claude|builtin] /img <path> /quit
+          /config (/setting) /statusline [claude|builtin|items] /img <path> /quit
           anything else starting with / goes to Claude Code (e.g. /compact)
           !<command> runs a shell command here (no model turn); its output goes with your next message
 @FILES    type @ to pick a file or folder; Claude Code reads what you mention (images included)
@@ -156,7 +157,7 @@ const LOCAL_COMMANDS: [(&str, &str, &str); 33] = [
     ("optimize", "[light|balanced|aggressive|off|now]", "trim this project's start-up context from evidence (reversible)"),
     ("permissions", "", "saved allow/ask/deny rules from your settings files: add and delete"),
     ("instructions", "", "tick CLAUDE.md files and sections in or out of new sessions"),
-    ("statusline", "[claude|builtin]", "choose which status line to show"),
+    ("statusline", "[claude|builtin|items]", "choose which status line to show, or which parts of claude++'s own"),
     ("help", "", "keys and commands"),
     ("quit", "", "leave claude++"),
 ];
@@ -251,6 +252,9 @@ pub struct App {
     /// First Esc of a double-Esc rewind.
     esc_armed: Option<Instant>,
     pub settings: Option<settings::Ui>,
+    /// `/statusline items`: which parts of our own status line show, and in what order.
+    pub items_ui: Option<segments::Ui>,
+    pub line_items: Vec<&'static str>,
     pub tabcfg: Option<tabcfg::Ui>,
     pub instr: Option<instructions::Ui>,
     pub perms: Option<permissions::Ui>,
@@ -586,6 +590,9 @@ fn run(opts: Opts) -> io::Result<()> {
     app.cache_ttl = Duration::from_secs(opts.cache_ttl_min.or(saved_num("cache_ttl_min")).unwrap_or(60) * 60);
     app.autocompact_k = saved_num("autocompact_k").filter(|k| (100..=1000).contains(k)).unwrap_or(0);
     app.precompact_k = saved_num("precompact_k").filter(|k| (50..=1000).contains(k)).unwrap_or(0);
+    if let Some(list) = saved("statusline_items") {
+        app.line_items = segments::parse(&list);
+    }
     app.stable_prompt = saved("stable_prompt").as_deref() != Some("off");
     image::set_mode(&saved("images").unwrap_or_default());
     if let Some(p) = config_path.as_deref() {
@@ -804,6 +811,8 @@ impl App {
             esc_armed: None,
             settings: None,
             tabcfg: None,
+            items_ui: None,
+            line_items: segments::DEFAULT.to_vec(),
             instr: None,
             perms: None,
             opt: None,
@@ -941,7 +950,7 @@ impl App {
     /// Directory of the tab in front: what `@`, the status line and history are relative to.
     /// Some panel owns the keyboard (the input box is not the focus).
     fn overlay_open(&self) -> bool {
-        self.explorer.is_some() || self.model_picker.is_some() || self.color_picker.is_some() || self.rewind.is_some() || self.settings.is_some() || self.tabcfg.is_some() || self.instr.is_some() || self.perms.is_some() || self.opt.is_some() || self.usage_open || self.ctx_ui.is_some() || self.lanes.is_some() || self.queue_ui.is_some() || self.sched_ui.is_some() || self.search.is_some()
+        self.explorer.is_some() || self.model_picker.is_some() || self.color_picker.is_some() || self.rewind.is_some() || self.settings.is_some() || self.items_ui.is_some() || self.tabcfg.is_some() || self.instr.is_some() || self.perms.is_some() || self.opt.is_some() || self.usage_open || self.ctx_ui.is_some() || self.lanes.is_some() || self.queue_ui.is_some() || self.sched_ui.is_some() || self.search.is_some()
     }
 
     fn cwd(&self) -> &str {
@@ -2109,6 +2118,9 @@ impl App {
         }
         if self.settings.is_some() {
             return self.settings_key(k);
+        }
+        if self.items_ui.is_some() {
+            return self.items_key(k);
         }
         if self.tabcfg.is_some() {
             return self.tabcfg_key(k);
