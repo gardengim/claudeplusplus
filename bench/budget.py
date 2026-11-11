@@ -8,7 +8,8 @@ os.makedirs(W, exist_ok=True)
 BUDGET = {"binary_mb": 3.0, "resting_mb": 8.0, "first_paint_ms": 150, "idle_cpu_s_per_10s": 0.1}
 
 size = os.path.getsize(CPP) / 1048576
-t = Term([CPP, "--model", "haiku"])
+# Its own supervisor directory: the one your real windows use must not decide (or be replaced by) this measurement.
+t = Term([CPP, "--model", "haiku"], env_extra={"CLAUDEPP_SUP_DIR": W + "/sup"})
 t0 = time.time(); paint = None
 while paint is None and time.time() - t0 < 5:
     if select.select([t.fd], [], [], 0.002)[0]:
