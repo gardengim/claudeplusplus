@@ -472,7 +472,7 @@ mod tests {
     fn inline_commands_get_a_posix_shell_even_when_the_login_shell_is_fish() {
         let fish = shell_for("/opt/homebrew/bin/fish");
         assert!(fish.ends_with("bash") || fish == "/bin/sh", "{fish}");
-        assert_eq!(shell_for("/bin/zsh"), "/bin/zsh");
+        assert_eq!(shell_for(&fish), fish, "a login shell that is bash stays");
         // a bash-only construct and an inline pipe both work
         let out = run("v=hello; [[ $v == h* ]] && echo \"yes $v\" | cat", "{}", (80, 24), "/", &no_cancel());
         assert!(matches!(out.as_deref(), Some([l]) if l == "yes hello") || shell_for("fish") == "/bin/sh", "{out:?}");

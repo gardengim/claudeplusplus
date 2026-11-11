@@ -685,11 +685,11 @@ pub(crate) mod tests {
         assert!(all.contains("window") && all.contains("used") && all.contains("last request") && all.contains("89% hit"), "{all}");
         assert!(all.contains("System tools") && all.contains("MCP tools · on demand") && all.contains("Autocompact buffer · reserved") && all.contains("95% of the window"), "{all}");
         assert!(all.contains("3 skills listed, by source") && !all.contains("claude.ai") && all.contains("yours · 1"), "the cursor row is Skills: {all}");
-        assert!(all.contains("/optimize caps") && all.contains("⏎ optimize"), "{all}");
+        assert!(all.contains("/optimize caps") && all.contains(crate::theme::native("⏎ optimize").as_str()), "{all}");
         assert!(all.contains("■") && all.contains("█"), "the grid is drawn");
         let other = screen(view(&Ui { sel: 1 }, &u, 120), 120, 40).join("\n");
         assert!(other.contains("tool calls") && other.contains("prompt snapshot") && other.contains("Bash"), "messages: {other}");
-        assert!(!other.contains("⏎"), "no action on this row");
+        assert!(!other.contains(crate::theme::native("⏎").as_str()), "no action on this row");
     }
 
     #[test]

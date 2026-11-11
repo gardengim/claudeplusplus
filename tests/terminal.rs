@@ -458,8 +458,10 @@ fn a_long_tool_heavy_session_opens_fast_stays_small_and_answers_keys_at_once() {
     }
     let after_use = rss_mb(pid);
     eprintln!("BIG turns={turns} file={:.1}MB open={open:.2}s rss_open={after_open:.0}MB rss_after={after_use:.0}MB key_worst={:.0}ms pageup_worst={:.0}ms", body.len() as f64 / 1e6, worst * 1e3, scroll * 1e3);
-    // Measured at 1500 turns: open 0.5 s, 14 MB, keys 35 ms. Several times that is still a regression worth stopping on.
-    assert!(open < 8.0 && after_use < 150.0 && worst < 0.5 && scroll < 0.5, "slow or large on a long session");
+    // Measured at 1500 turns, alone: open 0.9 s, 14 MB, keys and PageUp 38 ms. Beside the other pty tests on a busy machine
+    // a latency reaches 0.8 s now and then, so the limits are far above that and far below what a redraw that grows with the
+    // session would cost (seconds): a regression worth stopping on, not a slow minute.
+    assert!(open < 8.0 && after_use < 150.0 && worst < 2.0 && scroll < 2.0, "slow or large on a long session");
     unsafe { libc::kill(pid, libc::SIGTERM) };
     pump(&fd, &mut term, 1.5);
     let mut status = 0;
@@ -527,7 +529,8 @@ fn over_the_budget_the_supervisor_has_the_window_stop_a_background_tab_and_the_t
     let _reap = Reap(pid, Some(home.clone()));
     let _kill_fakes = KillAll(home.clone());
     let mut term = emulator();
-    pump(&fd, &mut term, 1.0);
+    // Keys sent before the first frame are lost (the terminal is not raw yet): wait for the prompt, not for a time.
+    until(&fd, &mut term, "❯", 30.0).expect("the window never drew its prompt");
     // Typing starts the tab's process (it is ready when you send); nothing has been sent, so it may be stopped.
     unsafe { libc::write(std::os::fd::AsRawFd::as_raw_fd(&fd), b"x".as_ptr().cast(), 1) };
     let t = Instant::now();

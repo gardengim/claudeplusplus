@@ -696,13 +696,13 @@ mod tests {
         press(&mut ui, &qs, KeyCode::Char('1'));
         assert!(text(&ui.question_view(&qs, 60)).iter().any(|l| l.contains("☑ 1. Lint")));
         let footer: String = ui.question_view(&qs, 60).footer.spans.iter().map(|s| s.content.as_ref()).collect();
-        assert!(footer.contains("␣ toggle") && footer.contains("⇥ next menu") && footer.contains("⎋ decline"), "{footer}");
+        assert!(footer.contains(crate::theme::native("␣ toggle").as_str()) && footer.contains(crate::theme::native("⇥ next menu").as_str()) && footer.contains(crate::theme::native("⎋ decline").as_str()), "{footer}");
         // typing shows the text with the cursor, and the hints change
         typed(&mut ui, &qs, "hey");
         let v = ui.question_view(&qs, 60);
         assert!(text(&v).iter().any(|l| l.contains("✎ 4. Other: hey")));
         let footer: String = v.footer.spans.iter().map(|s| s.content.as_ref()).collect();
-        assert!(footer.contains("⎋ stop typing"), "{footer}");
+        assert!(footer.contains(crate::theme::native("⎋ stop typing").as_str()), "{footer}");
     }
 
     #[test]

@@ -262,13 +262,13 @@ mod tests {
     #[test]
     fn every_view_is_a_rule_a_title_the_content_and_the_footer_with_no_box() {
         let rows = draw(View::new("Things", lines(2), 0, theme::hints(&[("esc", "close")])), 40, 12);
-        assert_eq!(rows[11], " ⎋ close", "the footer is the last row: anchored to the bottom edge");
+        assert_eq!(rows[11], crate::theme::native(" ⎋ close"), "the footer is the last row: anchored to the bottom edge");
         assert_eq!(rows[5], "─".repeat(40), "a rule across the top: 5 rows of chrome and 2 of content");
         assert_eq!((rows[6].as_str(), rows[7].as_str()), (" Things", ""), "the title, then air");
         assert!(rows[8].contains("row 0") && rows[9].contains("row 1") && rows[10].is_empty(), "{rows:?}");
         assert!(rows.iter().all(|r| !r.contains(['┌', '└', '│', '┐', '┘'])), "no box: {rows:?}");
         let bare = draw(View::new("", lines(2), 0, theme::hints(&[("esc", "close")])), 40, 12);
-        assert_eq!((bare[8].as_str(), bare[11].as_str()), ("─".repeat(40).as_str(), " ⎋ close"), "without a title: rule, rows, footer");
+        assert_eq!((bare[8].as_str(), bare[11].as_str()), ("─".repeat(40).as_str(), crate::theme::native(" ⎋ close").as_str()), "without a title: rule, rows, footer");
     }
 
     #[test]
@@ -307,7 +307,7 @@ mod tests {
         t.draw(|f| render_full(f, f.area(), v)).unwrap();
         let b = t.backend().buffer().clone();
         let row = |y: u16| (0..120).map(|x| b[(x, y)].symbol().to_string()).collect::<String>();
-        assert!(row(0).starts_with(" Everything") && row(9).contains("⎋ close"));
+        assert!(row(0).starts_with(" Everything") && row(9).contains(crate::theme::native("⎋ close").as_str()));
         assert!((0..10).all(|y| !row(y).contains('┌') && !row(y).contains('│') || row(y).contains("DETAIL") || !row(y).starts_with("│")));
         assert!(row(1).contains("row 0") && (0..10).any(|y| row(y).contains("DETAIL")), "body and the wide detail pane use the screen");
     }

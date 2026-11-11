@@ -608,7 +608,7 @@ fn current_model_prefers_the_pick_and_picker_fits_a_short_terminal() {
     let mut t = ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 16)).unwrap();
     t.draw(|f| ui::draw(f, &mut app)).unwrap();
     let text: String = t.backend().buffer().content().iter().map(|c| c.symbol()).collect();
-    assert!(text.contains("M19") && text.contains("effort") && text.contains("⏎ apply"), "selected row and effort row both visible");
+    assert!(text.contains("M19") && text.contains("effort") && text.contains(crate::theme::native("⏎ apply").as_str()), "selected row and effort row both visible");
     assert!(text.contains("fast") && text.contains("not available"), "the fast row is there even for a model without it");
 }
 
@@ -1070,49 +1070,49 @@ fn every_panel_sits_at_the_bottom_above_the_input_with_the_same_frame() {
     };
 
     typed(&mut app, "/comp");
-    check(&mut app, "command suggestions", "", "⇥ complete");
+    check(&mut app, "command suggestions", "", crate::theme::native("⇥ complete").as_str());
     app.set_input("@".into());
     app.refresh_files();
-    check(&mut app, "file suggestions", "", "⇥ complete");
+    check(&mut app, "file suggestions", "", crate::theme::native("⇥ complete").as_str());
     app.set_input(String::new());
     app.refresh_files();
 
     run_cmd(&mut app, "/model");
-    check(&mut app, "model picker", "Model, effort & fast mode", "⎋ cancel");
+    check(&mut app, "model picker", "Model, effort & fast mode", crate::theme::native("⎋ cancel").as_str());
     press(&mut app, KeyCode::Esc);
 
     run_cmd(&mut app, "/config");
-    check(&mut app, "config", "Config", "⎋ close");
+    check(&mut app, "config", "Config", crate::theme::native("⎋ close").as_str());
     press(&mut app, KeyCode::Esc);
 
     run_cmd(&mut app, "/statusline items");
-    check(&mut app, "status line items", "Status line", "⎋ close");
+    check(&mut app, "status line items", "Status line", crate::theme::native("⎋ close").as_str());
     press(&mut app, KeyCode::Esc);
 
     app.wt_ui = Some(worktree::Ui { list: vec![worktree::Wt { path: "/a/app".into(), branch: Some("main".into()), head: "abc1234".into(), bare: false, locked: false, prunable: false }], ..Default::default() });
-    check(&mut app, "worktrees", "Worktrees", "⎋ close");
+    check(&mut app, "worktrees", "Worktrees", crate::theme::native("⎋ close").as_str());
     press(&mut app, KeyCode::Esc);
 
     app.open_ui = Some(open::Ui { sel: 0, found: vec![open::Found { target: open::Target::Url("https://example.com".into()), line: None }] });
-    check(&mut app, "open", "Open", "⎋ close");
+    check(&mut app, "open", "Open", crate::theme::native("⎋ close").as_str());
     press(&mut app, KeyCode::Esc);
 
     run_cmd(&mut app, "/session");
-    check(&mut app, "session config", "Session", "⎋ close");
+    check(&mut app, "session config", "Session", crate::theme::native("⎋ close").as_str());
     press(&mut app, KeyCode::Esc);
 
     app.explorer = Some(explorer::Explorer::for_bench(vec![history::Summary { id: "abcdef12-0000".into(), title: "a session".into(), prompt: "p".into(), modified: std::time::SystemTime::now(), size: 10, cwd: String::new() }]));
     let rows = screen(&mut app, 100, 30);
     assert!(rows[0].starts_with(" Sessions 1/1"), "title on the first row: {:?}", rows[0]);
-    assert!(rows[29].contains("⎋ close"), "hints on the last row: {:?}", rows[29]);
+    assert!(rows[29].contains(crate::theme::native("⎋ close").as_str()), "hints on the last row: {:?}", rows[29]);
     assert!(!rows.iter().any(|r| r.contains('┌') || r.contains('└') || r.starts_with("───")), "full screen has no frame, tabs or input\n{}", rows.join("\n"));
     app.explorer = None;
 
     ask(&mut app, QUESTIONS);
-    check(&mut app, "question", "Question 1/2", "⎋ decline");
+    check(&mut app, "question", "Question 1/2", crate::theme::native("⎋ decline").as_str());
     press(&mut app, KeyCode::Esc);
     app.sessions[0].handle(&serde_json::from_str(r#"{"type":"control_request","request_id":"p1","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"ls"},"permission_suggestions":[]}}"#).unwrap());
-    check(&mut app, "permission", "Permission", "⎋ deny");
+    check(&mut app, "permission", "Permission", crate::theme::native("⎋ deny").as_str());
     assert_eq!(cases.len(), 10, "all ten panels were checked (the session list is full screen, checked above)");
 }
 
@@ -1458,7 +1458,7 @@ fn usage_asks_claude_code_shows_its_answers_and_closes() {
     let rows = screen(&mut app, 100, 30);
     let text = rows.join("\n");
     assert!(rows.iter().any(|r| r.starts_with(" Usage")) && text.contains("5-hour") && text.contains("Skills") && text.contains("17.8k of 1.0M"), "{text}");
-    assert!(rows.iter().any(|r| r.contains("⎋ close")));
+    assert!(rows.iter().any(|r| r.contains(crate::theme::native("⎋ close").as_str())));
     press(&mut app, KeyCode::Esc);
     assert!(!app.usage_open);
 }
@@ -1474,12 +1474,12 @@ fn context_draws_the_window_from_the_reply_moves_refreshes_acts_and_closes() {
     app.on_event(AppEvent::Backend(sid, pid, Msg::Line(json!({"type": "control_response", "response": {"subtype": "success", "request_id": "x", "response": context::tests::reply()}}))));
     let text = screen(&mut app, 120, 40).join("\n");
     assert!(text.contains(" Context") && text.contains("20.2k of 1.0M") && text.contains("System tools") && text.contains("last request"), "{text}");
-    assert!(!text.contains("⏎ optimize"), "the first row (system tools) has no action");
+    assert!(!text.contains(crate::theme::native("⏎ optimize").as_str()), "the first row (system tools) has no action");
     for _ in 0..3 {
         press(&mut app, KeyCode::Down);
     }
     let text = screen(&mut app, 120, 40).join("\n");
-    assert!(text.contains("3 skills listed") && text.contains("⏎ optimize"), "the cursor moved to Skills: {text}");
+    assert!(text.contains("3 skills listed") && text.contains(crate::theme::native("⏎ optimize").as_str()), "the cursor moved to Skills: {text}");
     press(&mut app, KeyCode::Char('r'));
     assert!(app.ctx_ui.is_some() && app.sessions[0].usage.ctx.is_none(), "refresh asks again and waits for the answer");
     app.on_event(AppEvent::Backend(sid, pid, Msg::Line(json!({"type": "control_response", "response": {"subtype": "success", "request_id": "y", "response": context::tests::reply()}}))));
@@ -3334,8 +3334,9 @@ fn each_frame_is_one_update_and_the_cursor_only_ever_rests_in_the_input() {
     let sink = Sink(Arc::new(Mutex::new(vec![])));
     let (mut app, _d) = fake_app("cursortrace");
     let frames = crate::screen::Frames::new(sink.clone());
-    let mut term = ratatui::Terminal::new(ratatui::backend::CrosstermBackend::new(frames.clone())).unwrap();
-    term.resize(ratatui::layout::Rect::new(0, 0, 100, 30)).unwrap();
+    // A fixed viewport: `Terminal::new` asks the OS for the window size, and a CI runner has no terminal.
+    let area = ratatui::layout::Rect::new(0, 0, 100, 30);
+    let mut term = ratatui::Terminal::with_options(ratatui::backend::CrosstermBackend::new(frames.clone()), ratatui::TerminalOptions { viewport: ratatui::Viewport::Fixed(area) }).unwrap();
     let mut parser = vt100::Parser::new(std::num::NonZero::new(30).unwrap(), std::num::NonZero::new(100).unwrap(), 0);
     app.input = "hello".into();
     app.cursor = 5;

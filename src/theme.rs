@@ -355,6 +355,12 @@ pub fn key_glyph(key: &str) -> String {
     glyph(key, MAC)
 }
 
+/// Test expectations are written with the Mac glyphs; this gives them as this platform draws them.
+#[cfg(test)]
+pub fn native(s: &str) -> String {
+    [("⎋", "esc"), ("⏎", "enter"), ("␣", "space"), ("⇥", "tab")].iter().fold(s.to_string(), |s, (g, w)| s.replace(g, &key_glyph(w)))
+}
+
 fn glyph(key: &str, mac_keys: bool) -> String {
     let combo = key.contains('+');
     let word = |w: &str| -> String {
@@ -504,10 +510,10 @@ mod tests {
     fn narrow_footers_keep_the_first_and_last_hint() {
         let full = hints(&[("↑↓", "move"), ("enter", "choose"), ("1-9", "pick"), ("esc", "decline")]);
         let text = |l: &Line| l.spans.iter().map(|s| s.content.as_ref()).collect::<String>();
-        assert_eq!(text(&fit_hints(full.clone(), 80)), " ↑↓ move · ⏎ choose · 1-9 pick · ⎋ decline");
-        assert_eq!(text(&fit_hints(full.clone(), 38)), " ↑↓ move · ⏎ choose · ⎋ decline");
-        assert_eq!(text(&fit_hints(full.clone(), 20)), " ↑↓ move · ⎋ decline");
-        assert_eq!(text(&fit_hints(full, 5)), " ↑↓ move · ⎋ decline", "never fewer than two; the renderer clips the rest");
+        assert_eq!(text(&fit_hints(full.clone(), 80)), native(" ↑↓ move · ⏎ choose · 1-9 pick · ⎋ decline"));
+        assert_eq!(text(&fit_hints(full.clone(), 38)), native(" ↑↓ move · ⏎ choose · ⎋ decline"));
+        assert_eq!(text(&fit_hints(full.clone(), 20)), native(" ↑↓ move · ⎋ decline"));
+        assert_eq!(text(&fit_hints(full, 5)), native(" ↑↓ move · ⎋ decline"), "never fewer than two; the renderer clips the rest");
     }
 
     /// The consistency rule, enforced: surfaces name roles ("selected", "dim", "attention"), never colours.
@@ -541,7 +547,7 @@ mod tests {
     fn hints_have_one_shape() {
         let l = hints(&[("↑↓", "move"), ("enter", "choose"), ("esc", "back")]);
         let text: String = l.spans.iter().map(|s| s.content.as_ref()).collect();
-        assert_eq!(text, " ↑↓ move · ⏎ choose · ⎋ back");
+        assert_eq!(text, native(" ↑↓ move · ⏎ choose · ⎋ back"));
         assert!(l.spans[1].style.add_modifier.contains(Modifier::BOLD), "keys are bold");
         assert_eq!(l.spans[2].style.fg, Some(Color::DarkGray), "actions recede");
     }
