@@ -737,20 +737,21 @@ just switched to or that started working). It has these jobs:
 - *Measuring.* It runs `footprint` (or `ps`) for all windows at once, every 6 s while any window set a budget and every 18 s otherwise:
   each tab's `claude` process with its children, and each window itself. The numbers come back to every window with the peers message,
   and are what the `mem` segment of the status line, `/procs` and the hints show. A window runs no `ps` or `footprint` of its own.
-- *One memory budget for all windows.* `--mem-budget` (or `/config`) covers all windows together: when they hold more than the **smallest** budget any window asked for, the supervisor asks the window that owns
+- *One memory budget and one idle limit for all windows.* `--mem-budget` and `--idle-suspend` (or `/config`) are settings of the
+  supervisor, not of a window: one value for everyone, saved in the config file, and a flag sets it for as long as the supervisor
+  runs. When all windows together hold more than the budget, the supervisor asks the window that owns
   the longest-idle tab that is safe to stop (same rules as before: never the tab in front, a busy one, one with a prompt or background
   work) to stop its `claude`; it resumes on the next message, which re-caches the conversation. One tab per check (every 6 s), so the
-  next memory sample shows the effect before another goes. A window that set no budget counts towards the total and is never asked
-  to stop anything. The owning window has the last word and refuses a tab you have just switched to or that started working. When the total is over
-  the budget and no tab is safe to stop, the supervisor tells the windows that asked for the budget (at most once a minute).
+  next memory sample shows the effect before another goes. The owning window has the last word and refuses a tab you have just switched to or that started working. When the total is over
+  the budget and no tab is safe to stop, the supervisor tells every window (at most once a minute).
 - *Idle tabs, and the window you are in versus the ones you left.* A tab that is not in front is asked to stop once it has been idle for
-  its window's `--idle-suspend`. The tab in front of the window you are working in is asked to stop after five times as long with no
+  the idle limit (`--idle-suspend`, default 120 s). The tab in front of the window you are working in is asked to stop after five times as long with no
   input. The tab in front of a window you left is treated like a background tab. Each window tells the supervisor
-  whether its terminal has focus (terminals that report it), how long since its last key, and its `--idle-suspend`. The supervisor
+  whether its terminal has focus (terminals that report it) and how long since its last key. The supervisor
   decides which window is in front: the one whose terminal has focus, else the one with the most recent input (and any other within a
-  minute of it). Every other window's front tab is then as stoppable as a background tab: it is asked to stop once idle for that window's
-  `--idle-suspend`, **with or without a memory budget**, and the budget picks from those tabs too. The owning window refuses when its
-  terminal has focus or you typed in the last 30 s. A window that reports nothing (an older build) counts as in front. Measured with `bench/multi.py`
+  minute of it). Every other window's front tab is then as stoppable as a background tab: it is asked to stop once idle for the idle
+  limit, **with or without a memory budget**, and the budget picks from those tabs too. The owning window refuses when its
+  terminal has focus (unless you have been away five times the idle limit) or you typed in the last 30 s. A window that reports nothing (an older build) counts as in front. Measured with `bench/multi.py`
   (`sep-active`: three separate windows, typing only in the third, haiku): 453 MB with all three running, **167 MB** after two minutes,
   against 447 → 434 MB with the supervisor off; the two stopped windows answered their next message 1.6–2 s later than the one in use.
   A window you left is stopped 60–90 s after you start working elsewhere at the earliest (the 60 s margin plus the 30 s reporting step),

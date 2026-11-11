@@ -1,0 +1,260 @@
+[
+ {
+  "scenario": "sep-active",
+  "arm": "claude++/opt",
+  "rep": 0,
+  "load": 13.6,
+  "first_paint_s": 0.166,
+  "S0": {
+   "mb": 18.2,
+   "procs": 4,
+   "names": {
+    "claudeplusplus": 4
+   },
+   "cpu_s": 0.28,
+   "t": 1794381016.02936
+  },
+  "S1": {
+   "mb": 412.6,
+   "procs": 7,
+   "names": {
+    "claudeplusplus": 4,
+    "claude": 3
+   },
+   "cpu_s": 3.0,
+   "t": 1794381030.0697842
+  },
+  "turn1": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 1.66,
+    "pre_model_s": 0.03,
+    "model_s": 1.4
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 1.39,
+    "pre_model_s": 0.02,
+    "model_s": 1.2
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 1.45,
+    "pre_model_s": 0.02,
+    "model_s": 1.29
+   }
+  ],
+  "turn1_wall_s": 2.61,
+  "S2": {
+   "mb": 451.4,
+   "procs": 7,
+   "names": {
+    "claudeplusplus": 4,
+    "claude": 3
+   },
+   "cpu_s": 3.65,
+   "t": 1794381036.401463
+  },
+  "S3mid": {
+   "mb": 446.3,
+   "procs": 7,
+   "names": {
+    "claudeplusplus": 4,
+    "claude": 3
+   },
+   "cpu_s": 5.11,
+   "t": 1794381108.570556
+  },
+  "S3": {
+   "mb": 154.1,
+   "procs": 5,
+   "names": {
+    "claudeplusplus": 4,
+    "claude": 1
+   },
+   "cpu_s": 2.4,
+   "t": 1794381159.9837282
+  },
+  "turn2": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 2.63,
+    "pre_model_s": 0.62,
+    "model_s": 1.52
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 2.42,
+    "pre_model_s": 0.47,
+    "model_s": 1.61
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 1.85,
+    "pre_model_s": 0.02,
+    "model_s": 1.48
+   }
+  ],
+  "turn2_wall_s": 3.0,
+  "S4": {
+   "mb": 459.4,
+   "procs": 7,
+   "names": {
+    "claudeplusplus": 4,
+    "claude": 3
+   },
+   "cpu_s": 4.77,
+   "t": 1794381166.857744
+  },
+  "screen_tail": null,
+  "died": [
+   null,
+   null,
+   null
+  ],
+  "leaked_procs": 1,
+  "usage": {
+   "requests": 6,
+   "input": 12,
+   "cache_write": 87103,
+   "cache_read": 56134,
+   "output": 30
+  },
+  "claude_record": null
+ },
+ {
+  "scenario": "sep-active",
+  "arm": "claude++/opt-nosup",
+  "rep": 0,
+  "load": 20.5,
+  "first_paint_s": 0.016,
+  "S0": {
+   "mb": 16.8,
+   "procs": 3,
+   "names": {
+    "claudeplusplus": 3
+   },
+   "cpu_s": 0.26,
+   "t": 1794381191.356002
+  },
+  "S1": {
+   "mb": 402.9,
+   "procs": 6,
+   "names": {
+    "claude": 3,
+    "claudeplusplus": 3
+   },
+   "cpu_s": 4.22,
+   "t": 1794381205.8253078
+  },
+  "turn1": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 2.14,
+    "pre_model_s": 0.11,
+    "model_s": 1.89
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 1.77,
+    "pre_model_s": 0.06,
+    "model_s": 1.57
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 2.16,
+    "pre_model_s": 0.06,
+    "model_s": 1.94
+   }
+  ],
+  "turn1_wall_s": 3.33,
+  "S2": {
+   "mb": 443.6,
+   "procs": 6,
+   "names": {
+    "claude": 3,
+    "claudeplusplus": 3
+   },
+   "cpu_s": 5.49,
+   "t": 1794381213.238065
+  },
+  "S3mid": {
+   "mb": 440.5,
+   "procs": 6,
+   "names": {
+    "claude": 3,
+    "claudeplusplus": 3
+   },
+   "cpu_s": 7.02,
+   "t": 1794381285.351131
+  },
+  "S3": {
+   "mb": 412.6,
+   "procs": 6,
+   "names": {
+    "claude": 3,
+    "claudeplusplus": 3
+   },
+   "cpu_s": 8.15,
+   "t": 1794381336.8754969
+  },
+  "turn2": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 1.92,
+    "pre_model_s": 0.07,
+    "model_s": 1.7
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 2.03,
+    "pre_model_s": 0.04,
+    "model_s": 1.84
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 2.12,
+    "pre_model_s": 0.05,
+    "model_s": 1.91
+   }
+  ],
+  "turn2_wall_s": 3.28,
+  "S4": {
+   "mb": 435.6,
+   "procs": 6,
+   "names": {
+    "claude": 3,
+    "claudeplusplus": 3
+   },
+   "cpu_s": 8.97,
+   "t": 1794381344.084685
+  },
+  "screen_tail": null,
+  "died": [
+   null,
+   null,
+   null
+  ],
+  "leaked_procs": 0,
+  "usage": {
+   "requests": 6,
+   "input": 12,
+   "cache_write": 33067,
+   "cache_read": 110547,
+   "output": 208
+  },
+  "claude_record": null
+ }
+]

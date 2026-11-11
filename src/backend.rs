@@ -336,7 +336,8 @@ echo bye >&2"#,
         let mut b = Backend::spawn(&launch, Resume::New, tx, |_, m| m).unwrap();
         let t = Instant::now();
         b.user(json!("x".repeat(2_000_000))).unwrap(); // far more than a pipe buffer holds
-        assert!(t.elapsed() < Duration::from_millis(500), "{:?}", t.elapsed());
+        // A blocked sender would wait for the child, 30 s here; the margin is for a loaded machine.
+        assert!(t.elapsed() < Duration::from_secs(3), "{:?}", t.elapsed());
     }
 
     #[test]

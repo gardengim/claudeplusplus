@@ -251,6 +251,11 @@ fn dragging_in_the_conversation_highlights_as_the_pointer_moves_and_copies_with_
         let mut seen = Vec::new();
         for step in 1..=9u16 {
             mouse(&fd, &mut parser, "drag", shift, col + step, row);
+            // Each step shows at once on an idle machine; on a busy one, give the frame time rather than fail on timing.
+            let t = Instant::now();
+            while marked(&parser, row) != step as usize + 1 && t.elapsed() < Duration::from_secs(3) {
+                pump(&fd, &mut parser, 0.05);
+            }
             seen.push(marked(&parser, row));
         }
         assert_eq!(seen, (2..=10).collect::<Vec<_>>(), "the highlight grows with every step of the pointer (shift: {shift})");
@@ -562,5 +567,59 @@ impl Drop for KillAll {
             // SAFETY: a signal to a process this test started.
             unsafe { libc::kill(p, libc::SIGKILL) };
         }
+    }
+}
+
+/// What the supervisor says its settings are, asked over its socket.
+fn supervisor_settings(home: &std::path::Path) -> Option<serde_json::Value> {
+    use std::io::{BufRead, Write};
+    let mut s = std::os::unix::net::UnixStream::connect(home.join("sup/sup.sock")).ok()?;
+    s.set_read_timeout(Some(Duration::from_secs(2))).ok()?;
+    writeln!(s, r#"{{"t":"hello","v":1,"pid":{}}}"#, std::process::id()).ok()?;
+    writeln!(s, r#"{{"t":"status"}}"#).ok()?;
+    for line in std::io::BufReader::new(s).lines() {
+        let v: serde_json::Value = serde_json::from_str(&line.ok()?).ok()?;
+        if v["t"] == "status" {
+            return Some(v["settings"].clone());
+        }
+    }
+    None
+}
+
+#[test]
+fn the_supervisor_takes_the_saved_budget_and_idle_limit_and_a_flag_changes_them_for_everyone() {
+    let home = session_home("cfg");
+    std::fs::create_dir_all(home.join("claude++")).unwrap();
+    std::fs::write(home.join("claude++/config.json"), r#"{"mem_budget_mb":"77","idle_suspend_s":"45"}"#).unwrap();
+    let (fd, pid) = spawn(&home, &[]);
+    let _reap = Reap(pid, Some(home.clone()));
+    let mut term = emulator();
+    let t = Instant::now();
+    let settings = loop {
+        pump(&fd, &mut term, 0.2);
+        if let Some(s) = supervisor_settings(&home) {
+            break s;
+        }
+        assert!(t.elapsed() < Duration::from_secs(20), "no supervisor answered");
+    };
+    assert_eq!((settings["budget_mb"].clone(), settings["idle_s"].clone()), (serde_json::json!(77), serde_json::json!(45)), "what /config saved");
+    // A second window with flags sets the value the supervisor holds, for every window.
+    let (fd2, pid2) = spawn_with(&home, &["--mem-budget", "5000", "--idle-suspend", "90"], &[]);
+    let _reap2 = Reap(pid2, None);
+    let mut term2 = emulator();
+    let t = Instant::now();
+    loop {
+        pump(&fd2, &mut term2, 0.2);
+        let s = supervisor_settings(&home).unwrap();
+        if s["budget_mb"] == 5000 && s["idle_s"] == 90 {
+            break;
+        }
+        assert!(t.elapsed() < Duration::from_secs(20), "the flags never reached the supervisor: {s}");
+    }
+    for (fd, pid, term) in [(&fd2, pid2, &mut term2), (&fd, pid, &mut term)] {
+        unsafe { libc::kill(pid, libc::SIGTERM) };
+        pump(fd, term, 1.5);
+        let mut status = 0;
+        unsafe { libc::waitpid(pid, &mut status, 0) };
     }
 }

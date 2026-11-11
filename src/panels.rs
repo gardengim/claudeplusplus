@@ -661,10 +661,10 @@ impl App {
             "images" => image::mode().to_string(),
             "spinner" | "progress" | "motion" => motion::look().raw(key).to_string(),
             "cache_ttl_min" => (self.cache_ttl.as_secs() / 60).to_string(),
-            "idle_suspend_s" => self.idle_suspend.as_secs().to_string(),
+            "idle_suspend_s" => self.limit(1, key, 120).to_string(),
             "autocompact_k" => self.autocompact_k.to_string(),
             "precompact_k" => self.precompact_k.to_string(),
-            "mem_budget_mb" => (self.mem_budget_kb / 1024).to_string(),
+            "mem_budget_mb" => self.limit(0, key, 0).to_string(),
             "notify" => self.notify.clone(),
             "mouse" => if self.mouse { "on" } else { "off" }.to_string(),
             "side_panel" => if self.dock_mode { "on" } else { "off" }.to_string(),
@@ -703,10 +703,16 @@ impl App {
                 let ttl = self.cache_ttl;
                 self.sessions.iter_mut().for_each(|s| s.cache_ttl = ttl);
             }
-            "idle_suspend_s" => self.idle_suspend = Duration::from_secs(num),
+            "idle_suspend_s" => {
+                self.limits.1 = Some(num);
+                self.send_limits();
+            }
             "autocompact_k" => self.autocompact_k = num,
             "precompact_k" => self.precompact_k = num,
-            "mem_budget_mb" => self.mem_budget_kb = num * 1024,
+            "mem_budget_mb" => {
+                self.limits.0 = Some(num);
+                self.send_limits();
+            }
             "notify" => self.notify = value.into(),
             "mouse" => self.set_mouse(value != "off"),
             "theme" => {

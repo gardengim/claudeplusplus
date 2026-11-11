@@ -31,8 +31,26 @@ impl App {
             });
         }
         let Some(c) = &self.sup else { return };
-        c.window(self.focus, self.last_input.elapsed().as_secs().min(3600) / 30 * 30, self.idle_suspend.as_secs());
-        c.tabs(self.tab_report(), self.sessions.iter().filter_map(|s| s.backend.as_ref().map(|b| b.pid)).collect(), self.mem_budget_kb / 1024);
+        c.window(self.focus, self.last_input.elapsed().as_secs().min(3600) / 30 * 30);
+        c.tabs(self.tab_report(), self.sessions.iter().filter_map(|s| s.backend.as_ref().map(|b| b.pid)).collect());
+    }
+
+    /// The memory budget (`which` 0) or the idle limit (1): the value this run set (a flag, or `/config` here), else what
+    /// `/config` saved, else `default`. The supervisor holds the value that counts; this is what to show for it.
+    pub(crate) fn limit(&self, which: usize, key: &str, default: u64) -> u64 {
+        let set = if which == 0 { self.limits.0 } else { self.limits.1 };
+        set.or_else(|| self.config_path.as_deref().and_then(|p| config::get_str(p, key)).and_then(|v| v.parse().ok())).unwrap_or(default)
+    }
+
+    /// Hand the supervisor the budget and the idle limit this run set, if it did (it reads the saved ones itself).
+    pub(crate) fn send_limits(&self) {
+        let Some(c) = self.sup.as_ref().filter(|c| c.alive() && c.manages()) else { return };
+        if let Some(mb) = self.limits.0 {
+            c.set("budget_mb", &mb.to_string());
+        }
+        if let Some(s) = self.limits.1 {
+            c.set("idle_s", &s.to_string());
+        }
     }
 
     /// What each tab is, for the supervisor to judge: its process, whether it is busy, how long it has been idle (in 30 s
@@ -52,7 +70,7 @@ impl App {
 
     /// The supervisor's memory budget covers every claude++ window, so it decides which tab goes; this window only
     /// says no when the tab is not stoppable any more (you switched to it, or it started working).
-    pub(crate) fn suspend_for_budget(&mut self, tab: u64, why: &str, front: bool) {
+    pub(crate) fn suspend_for_budget(&mut self, tab: u64, why: &str, front: bool, limit_s: u64) {
         let Some(i) = self.sessions.iter().position(|s| s.id == tab) else { return };
         if i == self.active {
             // The tab in front goes only when the supervisor found this window to be in the background, and nothing here
@@ -60,7 +78,7 @@ impl App {
             // The report is up to ~40 s old (30 s steps plus the heartbeat): the tab must still be quiet, not only have been.
             let quiet = Duration::from_secs(30);
             // A terminal that has focus keeps it unless you have been away five times the idle time (as the supervisor judged).
-            let here = self.focus == Some(true) && self.last_input.elapsed() < self.idle_suspend * 5;
+            let here = self.focus == Some(true) && self.last_input.elapsed() < Duration::from_secs(limit_s * 5);
             if !front || here || self.last_input.elapsed() < quiet || self.sessions[i].last_active.elapsed() < quiet {
                 return;
             }
@@ -119,13 +137,9 @@ pub(crate) fn spare_hint_once_a_day(tx: &Sender<AppEvent>) {
 /// Footprint (KB) per root pid including its child processes. macOS `footprint` reports what the
 /// process really holds (RSS overstated it ~2x in our measurements); elsewhere falls back to RSS.
 pub(crate) fn tree_mem_kb(roots: &[u32]) -> Vec<(u32, u64)> {
-    let ps = std::process::Command::new("ps").args(["-A", "-o", "pid=,ppid="]).output();
     let mut kids: std::collections::HashMap<u32, Vec<u32>> = Default::default();
-    for l in String::from_utf8_lossy(&ps.map(|o| o.stdout).unwrap_or_default()).lines() {
-        let mut it = l.split_whitespace().filter_map(|x| x.parse::<u32>().ok());
-        if let (Some(p), Some(pp)) = (it.next(), it.next()) {
-            kids.entry(pp).or_default().push(p);
-        }
+    for p in procs::snapshot() {
+        kids.entry(p.ppid).or_default().push(p.pid);
     }
     let trees: Vec<(u32, Vec<u32>)> = roots
         .iter()

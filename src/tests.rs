@@ -110,7 +110,7 @@ fn fake_app(tag: &str) -> (App, std::path::PathBuf) {
     let launch = Launch { bin: script.to_string_lossy().into(), ..Default::default() };
     let (tx, _rx) = mpsc::channel();
     std::mem::forget(_rx); // keep the channel open for reader threads
-    let mut app = App::new(launch, "/".into(), tx, Duration::ZERO);
+    let mut app = App::new(launch, "/".into(), tx);
     app.new_tab();
     (app, dir)
 }
@@ -377,7 +377,7 @@ fn the_message_is_sent_with_text_and_pictures_in_the_order_written() {
     std::process::Command::new("chmod").arg("+x").arg(&script).status().unwrap();
     let launch = Launch { bin: script.to_string_lossy().into(), ..Default::default() };
     let (tx, rx) = mpsc::channel();
-    let mut app = App::new(launch, "/".into(), tx, Duration::ZERO);
+    let mut app = App::new(launch, "/".into(), tx);
     app.new_tab();
 
     typed(&mut app, "this is text sample");
@@ -421,7 +421,7 @@ fn a_bang_command_runs_here_without_a_turn_and_its_output_goes_with_the_next_mes
     std::process::Command::new("chmod").arg("+x").arg(&script).status().unwrap();
     let launch = Launch { bin: script.to_string_lossy().into(), ..Default::default() };
     let (tx, rx) = mpsc::channel();
-    let mut app = App::new(launch, dir.to_string_lossy().into(), tx, Duration::ZERO);
+    let mut app = App::new(launch, dir.to_string_lossy().into(), tx);
     app.new_tab();
 
     typed(&mut app, "!echo hi; pwd");
@@ -715,7 +715,7 @@ fn status_app(tag: &str, interval: Option<u64>) -> (App, mpsc::Receiver<AppEvent
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let (tx, rx) = mpsc::channel();
-    let mut app = App::new(Launch::default(), dir.to_string_lossy().into(), tx, Duration::ZERO);
+    let mut app = App::new(Launch::default(), dir.to_string_lossy().into(), tx);
     app.new_tab();
     let command = format!("cat > {d}/last.json; echo x >> {d}/runs; echo 'line one'; echo 'line two'", d = dir.display());
     app.statusline = Some(statusline::Config { command, interval: interval.map(Duration::from_secs), padding: 0, source: statusline::Source::Flag });
@@ -938,7 +938,7 @@ fn logging_app(tag: &str) -> (App, std::path::PathBuf) {
     std::process::Command::new("chmod").arg("+x").arg(&script).status().unwrap();
     let (tx, rx) = mpsc::channel();
     std::mem::forget(rx);
-    let mut app = App::new(Launch { bin: script.to_string_lossy().into(), ..Default::default() }, "/".into(), tx.clone(), Duration::ZERO);
+    let mut app = App::new(Launch { bin: script.to_string_lossy().into(), ..Default::default() }, "/".into(), tx.clone());
     app.new_tab();
     let launch = app.launch_for(0);
     app.sessions[0].warm(&launch, &tx);
@@ -1180,12 +1180,13 @@ fn config_applies_at_once_persists_and_keeps_the_keyboard() {
     for _ in 0..3 {
         press(&mut app, KeyCode::Down);
     }
-    press(&mut app, KeyCode::Right); // never (the fake app's value) -> 2 min
-    assert_eq!(app.idle_suspend, Duration::from_secs(120));
-    assert_eq!(config::get_str(&cfg, "idle_suspend_s").as_deref(), Some("120"));
+    assert_eq!(app.setting_value("idle_suspend_s"), "120", "2 min until chosen otherwise");
+    press(&mut app, KeyCode::Right); // 2 min -> 5 min
+    assert_eq!(app.setting_value("idle_suspend_s"), "300");
+    assert_eq!(config::get_str(&cfg, "idle_suspend_s").as_deref(), Some("300"));
     press(&mut app, KeyCode::Down);
     press(&mut app, KeyCode::Right); // off -> 500 MB
-    assert_eq!(app.mem_budget_kb, 500 * 1024);
+    assert_eq!(app.setting_value("mem_budget_mb"), "500");
     assert_eq!(config::get_str(&cfg, "mem_budget_mb").as_deref(), Some("500"));
 
     // Appearance, row 4: images (a process-wide mode; put it back so other tests are unaffected)
@@ -1769,7 +1770,7 @@ fn redraw_cost_stays_flat_on_a_long_transcript() {
     use ratatui::{Terminal, backend::TestBackend};
     let (tx, _rx) = mpsc::channel();
     std::mem::forget(_rx);
-    let mut app = App::new(Launch::default(), "/".into(), tx, Duration::ZERO);
+    let mut app = App::new(Launch::default(), "/".into(), tx);
     app.new_tab();
     let text = "lorem ipsum dolor sit amet ".repeat(20);
     for i in 0..1500 {
@@ -2597,7 +2598,7 @@ fn the_first_message_waits_for_mcp_servers_still_connecting_and_esc_drops_it() {
     std::process::Command::new("chmod").arg("+x").arg(&script).status().unwrap();
     let launch = Launch { bin: script.to_string_lossy().into(), ..Default::default() };
     let (tx, _rx) = mpsc::channel();
-    let mut app = App::new(launch.clone(), "/".into(), tx.clone(), Duration::ZERO);
+    let mut app = App::new(launch.clone(), "/".into(), tx.clone());
     app.new_tab();
     let stdin = || std::fs::read_to_string(dir.join("stdin")).unwrap_or_default();
     let users = || stdin().lines().filter(|l| l.contains(r#""type":"user""#)).count();
@@ -2841,7 +2842,7 @@ fn hostile_backend_messages_and_keys_never_panic_the_ui() {
 
 fn pane_app(editor: &str) -> (App, mpsc::Receiver<AppEvent>) {
     let (tx, rx) = mpsc::channel();
-    let mut app = App::new(Launch::default(), "/".into(), tx, Duration::ZERO);
+    let mut app = App::new(Launch::default(), "/".into(), tx);
     app.new_tab();
     app.editor_cmd = Some(editor.into());
     (app, rx)
@@ -3215,7 +3216,7 @@ fn worktree_adds_opens_a_tab_in_the_new_folder_lists_and_removes_it_after_a_seco
     g(&["commit", "-q", "-m", "one"]);
     let repo = std::fs::canonicalize(&repo).unwrap();
     let (tx, rx) = mpsc::channel();
-    let mut app = App::new(Launch::default(), repo.to_string_lossy().into(), tx, Duration::ZERO);
+    let mut app = App::new(Launch::default(), repo.to_string_lossy().into(), tx);
     app.new_tab();
     let next = |app: &mut App| {
         let ev = (0..50).find_map(|_| rx.recv_timeout(Duration::from_millis(200)).ok().filter(|e| matches!(e, AppEvent::Worktree(_)))).expect("the git call finished");
@@ -3387,7 +3388,7 @@ fn btw_asks_mid_turn_without_touching_the_turn_the_input_or_the_conversation() {
     std::fs::write(&script, format!("#!/bin/sh\ncase \"$*\" in *--fork-session*) echo \"$@\" > {d}/args; cat > {d}/question; echo '{{\"result\":\"because of **X**\",\"total_cost_usd\":0.0042,\"is_error\":false}}';; *) cat > /dev/null;; esac\n")).unwrap();
     std::process::Command::new("chmod").arg("+x").arg(&script).status().unwrap();
     let (tx, rx) = mpsc::channel();
-    let mut app = App::new(Launch { bin: script.to_string_lossy().into(), ..Default::default() }, dir.to_string_lossy().into(), tx, Duration::ZERO);
+    let mut app = App::new(Launch { bin: script.to_string_lossy().into(), ..Default::default() }, dir.to_string_lossy().into(), tx);
     app.new_tab();
     app.s().session_id = Some("sid-1".into());
     app.s().busy = true; // Claude is mid-turn
@@ -3463,8 +3464,7 @@ fn the_tab_in_front_goes_only_when_the_supervisor_found_the_window_left_and_noth
     let (mut app, _d) = three_tabs_with_backends("sup-front");
     let front = app.active;
     let tab = app.sessions[front].id;
-    let ask = |app: &mut App, front: bool| app.on_event(AppEvent::Sup(supervisor::Msg::Suspend { tab, why: "the tab was idle 600 s".into(), front }));
-    app.idle_suspend = Duration::from_secs(120);
+    let ask = |app: &mut App, front: bool| app.on_event(AppEvent::Sup(supervisor::Msg::Suspend { tab, why: "the tab was idle 600 s".into(), front, limit_s: 120 }));
     app.last_input = Instant::now() - Duration::from_secs(300);
     app.sessions[front].last_active = Instant::now() - Duration::from_secs(600);
     ask(&mut app, false);
@@ -3547,7 +3547,7 @@ fn the_supervisor_picks_the_tab_and_this_window_only_refuses_one_it_cannot_stop(
     let (mut app, _d) = three_tabs_with_backends("sup-suspend");
     let ask = |app: &mut App, i: usize| {
         let tab = app.sessions[i].id;
-        app.on_event(AppEvent::Sup(supervisor::Msg::Suspend { tab, why: "all claude++ windows hold 900 MB, budget 500 MB".into(), front: false }));
+        app.on_event(AppEvent::Sup(supervisor::Msg::Suspend { tab, why: "all claude++ windows hold 900 MB, budget 500 MB".into(), front: false, limit_s: 120 }));
     };
     ask(&mut app, 2);
     assert!(app.sessions[2].backend.is_some(), "the tab in front is never stopped");
@@ -3556,7 +3556,7 @@ fn the_supervisor_picks_the_tab_and_this_window_only_refuses_one_it_cannot_stop(
     assert!(app.sessions[0].backend.is_some(), "a tab that started working since is refused");
     ask(&mut app, 1);
     assert!(app.sessions[1].backend.is_none(), "an idle tab in the background goes");
-    app.on_event(AppEvent::Sup(supervisor::Msg::Suspend { tab: 424242, why: String::new(), front: false })); // a tab closed meanwhile
+    app.on_event(AppEvent::Sup(supervisor::Msg::Suspend { tab: 424242, why: String::new(), front: false, limit_s: 120 })); // a tab closed meanwhile
 }
 
 /// Seconds since the epoch, `ahead` from now: when a plan window resets.

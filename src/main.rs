@@ -153,8 +153,8 @@ pub struct App {
     pub flash: Option<String>,
     flash_at: Instant,
     pub ui_mem_kb: u64,
-    idle_suspend: Duration,
-    mem_budget_kb: u64,
+    /// The budget and the idle limit, when this run set them (a flag, or `/config` here): the supervisor holds the value.
+    limits: (Option<u64>, Option<u64>),
     pub explorer: Option<explorer::Explorer>,
     /// Config "sessions = panel": ← opens a docked list first, a second ← the full screen.
     pub dock_mode: bool,
@@ -435,10 +435,9 @@ fn configure(opts: &Opts, tx: &Sender<AppEvent>, cwd: String) -> (App, Option<St
     let config_path = config::path();
     let saved = |key: &str| config_path.as_deref().and_then(|p| config::get_str(p, key));
     let saved_num = |key: &str| saved(key).and_then(|v| v.parse::<u64>().ok());
-    let idle = opts.idle.or(saved_num("idle_suspend_s")).unwrap_or(120);
-    let mut app = App::new(opts.launch.clone(), cwd, tx.clone(), Duration::from_secs(idle));
+    let mut app = App::new(opts.launch.clone(), cwd, tx.clone());
     app.config_path = config_path.clone();
-    app.mem_budget_kb = opts.mem_budget_mb.or(saved_num("mem_budget_mb")).unwrap_or(0) * 1024;
+    app.limits = (opts.mem_budget_mb, opts.idle);
     app.profile_forced = !opts.profile.is_empty();
     let profile = Some(opts.profile.clone()).filter(|p| !p.is_empty()).or_else(|| saved("profile").filter(|p| profile_args(p).is_ok()));
     if let Some(p) = profile {
@@ -632,7 +631,7 @@ fn run(opts: Opts) -> io::Result<()> {
 }
 
 impl App {
-    fn new(launch: Launch, cwd: String, tx: Sender<AppEvent>, idle_suspend: Duration) -> Self {
+    fn new(launch: Launch, cwd: String, tx: Sender<AppEvent>) -> Self {
         App {
             sessions: vec![],
             active: 0,
@@ -657,8 +656,7 @@ impl App {
             flash: None,
             flash_at: Instant::now(),
             ui_mem_kb: 0,
-            idle_suspend,
-            mem_budget_kb: 0,
+            limits: (None, None),
             explorer: None,
             dock_mode: false,
             profile_forced: false,
@@ -938,6 +936,7 @@ impl App {
                     // Shared MCP servers (`share_mcp`) run in the supervisor while there is one.
                     share::set_hub(c.as_ref().map(supervisor::Client::hub));
                     self.sup = c;
+                    self.send_limits();
                 }
             }
             AppEvent::Sup(supervisor::Msg::Peers(p)) => {
@@ -950,7 +949,7 @@ impl App {
                     ui.answered(v);
                 }
             }
-            AppEvent::Sup(supervisor::Msg::Suspend { tab, why, front }) => self.suspend_for_budget(tab, &why, front),
+            AppEvent::Sup(supervisor::Msg::Suspend { tab, why, front, limit_s }) => self.suspend_for_budget(tab, &why, front, limit_s),
             AppEvent::Hint(n) => {
                 if let Some(s) = self.sessions.first_mut() {
                     s.note(n);

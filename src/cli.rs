@@ -17,10 +17,11 @@ USAGE: claude++ [options] [-- <extra claude args>]
   --permission-mode <m> default | acceptEdits | plan | auto | ...
   -c, --continue        continue the latest conversation in this directory
   -r, --resume <id>     resume a session by id
-  --idle-suspend <s>    stop idle background tabs' claude after s seconds (0 = never, default 120)
-  --mem-budget <MB>     when all claude processes together exceed this footprint, stop the least
-                        recently used idle tab (0 = off, default). Busy/focused tabs are never stopped.
-                        With the supervisor running it counts every claude++ window: see README
+  --idle-suspend <s>    stop idle background tabs' claude after s seconds (0 = never, default 120);
+                        the supervisor holds one value for all windows, and this sets it
+  --mem-budget <MB>     when all claude processes of all claude++ windows exceed this footprint, stop the
+                        least recently used idle tab (0 = off, default). Busy/focused tabs are never
+                        stopped. One value for all windows, like --idle-suspend: see README
   --cache-ttl <min>     prompt-cache lifetime used for the status-line countdown (default 60; use 5
                         if your account only gets the short cache)
   --statusline <v>      which status line to show: `claude` runs the `statusLine` command from your Claude Code

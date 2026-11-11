@@ -5,11 +5,11 @@
 //! disappears without saying goodbye (killed, crashed), the processes in its ledger that are still running are
 //! stopped: they belong to nobody now.
 //!
-//! It also keeps the machine's claude++ windows under one memory budget: when they together hold more than the
-//! smallest budget any window asked for (`/config`, `--mem-budget`), it asks the window that owns the
-//! longest-idle stoppable tab to stop that tab's `claude` (it resumes on the next message). Only windows that
-//! set a budget are asked; a window without one counts towards the total and is never touched. The owner makes
-//! the final call: it refuses a tab you have just switched to or that started working.
+//! It measures what every window and tab holds, and decides who stops: an idle tab past the idle limit, and,
+//! when the windows together hold more than the memory budget, the longest-idle stoppable tab (it resumes on the
+//! next message). The budget and the idle limit are its own settings, one value for all windows (`/config`, or
+//! `--mem-budget` / `--idle-suspend` for this run). The owning window makes the final call: it refuses a tab you
+//! have just switched to or that started working.
 //!
 //! What it never does: touch a process that claude++ did not start. Interactive `claude`, Claude Code's own
 //! daemon and anything else are only listed (`/procs`). A process is stopped only when all of this holds: an
@@ -24,9 +24,9 @@
 //! frontend works without it; a missing or refusing supervisor changes nothing on screen.
 //!
 //! Wire format: one JSON object per line over a Unix socket (mode 0600, in a directory only you can enter).
-//!   client → `{"t":"hello","v":1,"pid":N}`, `{"t":"status"}`, `{"t":"set","key":"grace_s|cleanup|budget","value":".."}`,
-//!            `{"t":"mcp_restart","key":".."}`, `{"t":"shutdown"}`, `{"t":"tabs","tabs":[{..}],"owned":[pids],"budget_mb":N,"ui_mb":N}`, `{"t":"bye"}`
-//!   server → `{"t":"welcome","v":1,"instances":[..],"features":["mcp","manage"],"pid":N}`, `{"t":"status",..}`, `{"t":"peers","instances":[..]}`,
+//!   client → `{"t":"hello","v":1,"pid":N}`, `{"t":"status"}`, `{"t":"set","key":"grace_s|cleanup|budget|budget_mb|idle_s","value":".."}`,
+//!            `{"t":"mcp_restart","key":".."}`, `{"t":"shutdown"}`, `{"t":"tabs","tabs":[{..}],"owned":[pids],"win":{"focus":..,"input_idle_s":N}}`, `{"t":"bye"}`
+//!   server → `{"t":"welcome","v":1,"instances":[..],"features":["mcp","manage","measure"],"pid":N}`, `{"t":"status",..}`, `{"t":"peers","instances":[..]}`,
 //!            `{"t":"refuse","why":".."}`, `{"t":"suspend","tab":N,"why":".."}`
 //! Shared MCP servers (`share_mcp`): a window may hand one JSON-RPC message of such a server to the supervisor, which
 //! runs the process once for all windows (`share.rs`) and answers with the reply. The process ends when the last
@@ -117,6 +117,10 @@ pub struct Config {
     pub enforce: bool,
     /// Measure what the windows' processes hold (the tests of the budget say their own numbers instead).
     pub measure: bool,
+    /// The memory budget for all windows together, in MB (0: none), and how long a tab may idle before it is
+    /// stopped, in seconds (0: never). Settings of the supervisor, not of a window: one value for everyone.
+    pub budget_mb: u64,
+    pub idle_s: u64,
 }
 
 /// How long it stays after the last window, as `/config`-style values: seconds, or `always`.
@@ -136,6 +140,9 @@ impl Config {
             c.grace = get("supervisor_grace_s").and_then(|v| parse_grace(&v)).unwrap_or(c.grace);
             c.cleanup = get("supervisor_cleanup").as_deref() != Some("off");
             c.enforce = get("supervisor_budget").as_deref() != Some("paused");
+            // The same keys `/config` saves them under ("Memory budget", "Stop idle tabs after").
+            c.budget_mb = get("mem_budget_mb").and_then(|v| v.parse().ok()).unwrap_or(c.budget_mb);
+            c.idle_s = get("idle_suspend_s").and_then(|v| v.parse().ok()).unwrap_or(c.idle_s);
         }
         c
     }
@@ -143,7 +150,7 @@ impl Config {
 
 impl Default for Config {
     fn default() -> Config {
-        Config { grace: Duration::from_secs(20), reap_after: Duration::from_secs(10), kill_after: Duration::from_secs(3), budget_every: Duration::from_secs(6), cleanup: true, enforce: true, measure: true }
+        Config { grace: Duration::from_secs(20), reap_after: Duration::from_secs(10), kill_after: Duration::from_secs(3), budget_every: Duration::from_secs(6), cleanup: true, enforce: true, measure: true, budget_mb: 0, idle_s: 120 }
     }
 }
 
@@ -176,10 +183,9 @@ struct Inst {
     tabs: Vec<Value>,
     owned: Vec<(u32, u64)>,
     bye: bool,
-    /// Memory budget this window asked for (0: none, and its tabs are never asked to stop) and what its UI holds.
-    budget_mb: u64,
+    /// What the window itself holds, as measured.
     ui_mb: u64,
-    /// What the window says about itself: `{"focus": true|false|null, "input_idle_s": N, "idle_limit_s": N}`. Null from an older build.
+    /// What the window says about itself: `{"focus": true|false|null, "input_idle_s": N}`. Null from an older build.
     win: Value,
     out: Out,
 }
@@ -197,6 +203,9 @@ struct State {
     grace: Duration,
     cleanup: bool,
     enforce: bool,
+    /// The memory budget (MB; 0: none) and the idle limit (s; 0: never), for all windows.
+    budget_mb: u64,
+    idle_s: u64,
     /// A window asked it to leave.
     quit: bool,
     started: Option<Instant>,
@@ -212,7 +221,7 @@ struct State {
 
 impl State {
     fn new(cfg: &Config) -> State {
-        State { grace: cfg.grace, cleanup: cfg.cleanup, enforce: cfg.enforce, started: Some(Instant::now()), exe_mtime: exe_mtime(), ..State::default() }
+        State { grace: cfg.grace, cleanup: cfg.cleanup, enforce: cfg.enforce, budget_mb: cfg.budget_mb, idle_s: cfg.idle_s, started: Some(Instant::now()), exe_mtime: exe_mtime(), ..State::default() }
     }
 }
 
@@ -252,17 +261,16 @@ fn mcp_rows() -> Vec<Value> {
 /// Everything `/supervisor` shows.
 fn status(s: &State, paths: &Paths, mcp: Vec<Value>) -> Value {
     let mb = |t: &Value| t["mb"].as_u64().unwrap_or(0);
-    let windows: Vec<Value> = s.insts.values().map(|i| json!({"pid": i.pid, "tabs": i.tabs, "owned": i.owned.len(), "mb": i.ui_mb + i.tabs.iter().map(mb).sum::<u64>(), "budget_mb": i.budget_mb})).collect();
+    let windows: Vec<Value> = s.insts.values().map(|i| json!({"pid": i.pid, "tabs": i.tabs, "owned": i.owned.len(), "mb": i.ui_mb + i.tabs.iter().map(mb).sum::<u64>()})).collect();
     let total: u64 = windows.iter().map(|w| w["mb"].as_u64().unwrap_or(0)).sum();
-    let budget = s.insts.values().map(|i| i.budget_mb).filter(|&b| b > 0).min().unwrap_or(0);
     let log = fs::read_to_string(paths.log_file()).unwrap_or_default();
     let log: Vec<&str> = log.lines().rev().take(8).collect::<Vec<_>>().into_iter().rev().collect();
     json!({
         "t": "status", "pid": std::process::id(), "v": VERSION, "exe_mtime": s.exe_mtime,
         "up_s": s.started.map_or(0, |t| t.elapsed().as_secs()),
-        "settings": {"grace_s": if s.grace.as_secs() > 365 * 86400 { json!("always") } else { json!(s.grace.as_secs()) }, "cleanup": s.cleanup, "budget": s.enforce},
+        "settings": {"grace_s": if s.grace.as_secs() > 365 * 86400 { json!("always") } else { json!(s.grace.as_secs()) }, "cleanup": s.cleanup, "budget": s.enforce, "budget_mb": s.budget_mb, "idle_s": s.idle_s},
         "counts": {"windows_ever": s.next, "suspended": s.suspended, "reaped": s.reaped, "mcp_msgs": s.mcp_msgs},
-        "reaping": s.reaping, "budget_mb": budget, "total_mb": total, "windows": windows, "mcp": mcp, "log": log,
+        "reaping": s.reaping, "budget_mb": s.budget_mb, "total_mb": total, "windows": windows, "mcp": mcp, "log": log,
     })
 }
 
@@ -296,7 +304,6 @@ fn broadcast(s: &mut State) {
 /// One window as the budget sees it.
 struct Row<'a> {
     conn: u64,
-    budget_mb: u64,
     ui_mb: u64,
     tabs: &'a [Value],
 }
@@ -338,21 +345,20 @@ fn effective_tabs(tabs: &[Value], front: bool) -> Vec<Value> {
         .collect()
 }
 
-/// Tabs to stop with no memory budget involved, from the idle time each window reports for its tabs and its own
-/// `idle_limit_s` (its `--idle-suspend`; 0: never):
+/// Tabs to stop with no memory budget involved, from the idle time each window reports for its tabs and the idle
+/// limit `limit` (0: never):
 /// - a tab that is not in front, once it has been idle that long;
 /// - the tab in front, in a window you are not working in (see `fronts`), once it has been idle that long;
 /// - the tab in front of the window you are working in, once you have not typed for five times as long.
 ///
 /// The owner has the last word (`Msg::Suspend` says why), so a report a little old does no harm.
-fn idle_asks(insts: &[(u64, &Value, &[Value])]) -> Vec<(u64, u64, String)> {
+fn idle_asks(insts: &[(u64, &Value, &[Value])], limit: u64) -> Vec<(u64, u64, String)> {
+    if limit == 0 {
+        return vec![];
+    }
     let fr = fronts(&insts.iter().map(|&(c, w, _)| (c, w)).collect::<Vec<_>>());
     let mut asks = vec![];
     for &(c, w, tabs) in insts {
-        let limit = w["idle_limit_s"].as_u64().unwrap_or(0);
-        if limit == 0 {
-            continue;
-        }
         let away = fr.get(&c) == Some(&false) || w["input_idle_s"].as_u64().unwrap_or(0) >= limit * 5;
         for t in tabs.iter().filter(|t| t["pid"].is_u64() && t["idle_s"].as_u64().unwrap_or(0) >= limit) {
             let idle = t["idle_s"].as_u64().unwrap_or(0);
@@ -373,20 +379,21 @@ fn tab_mb(t: &Value) -> u64 {
     t["mb"].as_u64().unwrap_or(0)
 }
 
-/// What all windows hold against the smallest budget any of them asked for: `(held, budget)` in MB, when it is over.
-fn over_budget(rows: &[Row]) -> Option<(u64, u64)> {
-    let budget_mb = rows.iter().map(|r| r.budget_mb).filter(|&b| b > 0).min()?;
+/// What all windows hold against the budget (0: none): `(held, budget)` in MB, when it is over.
+fn over_budget(rows: &[Row], budget_mb: u64) -> Option<(u64, u64)> {
+    if budget_mb == 0 {
+        return None;
+    }
     let total_mb: u64 = rows.iter().map(|r| r.ui_mb + r.tabs.iter().map(tab_mb).sum::<u64>()).sum();
     (total_mb > budget_mb).then_some((total_mb, budget_mb))
 }
 
 /// Over budget? Then the stoppable tab (it has a process, and its owner says it is safe to stop) that has been idle
-/// longest, among windows that asked for a budget. Ties go to the bigger one.
-fn pick_victim(rows: &[Row]) -> Option<Pick> {
-    let (total_mb, budget_mb) = over_budget(rows)?;
+/// longest. Ties go to the bigger one.
+fn pick_victim(rows: &[Row], budget_mb: u64) -> Option<Pick> {
+    let (total_mb, budget_mb) = over_budget(rows, budget_mb)?;
     let mb = tab_mb;
     rows.iter()
-        .filter(|r| r.budget_mb > 0)
         .flat_map(|r| r.tabs.iter().map(move |t| (r.conn, t)))
         .filter(|(_, t)| t["safe"] == true && t["pid"].is_u64())
         .max_by_key(|(_, t)| (t["idle_s"].as_u64().unwrap_or(0), mb(t)))
@@ -438,10 +445,10 @@ fn step(state: &Arc<Mutex<State>>, paths: &Paths, cfg: &Config, pace: &mut Pace)
         let fr = fronts(&wins);
         let eff: Vec<(u64, Vec<Value>)> = s.insts.iter().map(|(&c, i)| (c, effective_tabs(&i.tabs, fr.get(&c).copied().unwrap_or(true)))).collect();
         let (pick, over) = {
-            let rows: Vec<Row> = s.insts.iter().map(|(&conn, i)| Row { conn, budget_mb: i.budget_mb, ui_mb: i.ui_mb, tabs: &eff.iter().find(|e| e.0 == conn).unwrap().1 }).collect();
-            (pick_victim(&rows), over_budget(&rows))
+            let rows: Vec<Row> = s.insts.iter().map(|(&conn, i)| Row { conn, ui_mb: i.ui_mb, tabs: &eff.iter().find(|e| e.0 == conn).unwrap().1 }).collect();
+            (pick_victim(&rows, s.budget_mb), over_budget(&rows, s.budget_mb))
         };
-        let mut asks = idle_asks(&s.insts.iter().map(|(&c, i)| (c, &i.win, &i.tabs[..])).collect::<Vec<_>>());
+        let mut asks = idle_asks(&s.insts.iter().map(|(&c, i)| (c, &i.win, &i.tabs[..])).collect::<Vec<_>>(), s.idle_s);
         // The budget's one tab per check: when the sweep is already stopping tabs, the next sample shows what that freed.
         if asks.is_empty() {
             match (pick, over) {
@@ -449,21 +456,21 @@ fn step(state: &Arc<Mutex<State>>, paths: &Paths, cfg: &Config, pace: &mut Pace)
                 (None, Some((held, budget))) if pace.noticed.is_none_or(|t| t.elapsed() > Duration::from_secs(60)) => {
                     pace.noticed = Some(Instant::now());
                     let text = json!({"t": "notice", "text": format!("over the memory budget ({held} MB held, {budget} MB allowed) and no tab is safe to stop")});
-                    s.insts.values().filter(|i| i.budget_mb > 0).for_each(|i| {
+                    s.insts.values().for_each(|i| {
                         send_out(&i.out, &text);
                     });
                 }
                 _ => {}
             }
         }
-        let again = cfg.budget_every * 5;
+        let (again, idle_s) = (cfg.budget_every * 5, s.idle_s);
         s.asked.retain(|_, at| at.elapsed() < again.max(Duration::from_secs(300)));
         asks.retain(|(c, t, _)| s.asked.get(&(*c, *t)).is_none_or(|at| at.elapsed() >= again));
         for (conn, tab, why) in asks {
             let Some(i) = s.insts.get(&conn) else { continue };
             let front = i.tabs.iter().any(|t| t["id"].as_u64() == Some(tab) && t["safe"] != true && t["safe_front"] == true);
             paths.log(&format!("asking instance {} to stop tab {}{}: {why}", i.pid, tab, if front { " (in front)" } else { "" }));
-            send_out(&i.out, &json!({"t": "suspend", "tab": tab, "why": why, "front": front}));
+            send_out(&i.out, &json!({"t": "suspend", "tab": tab, "why": why, "front": front, "limit_s": idle_s}));
             s.suspended += 1;
             s.asked.insert((conn, tab), Instant::now());
         }
@@ -482,7 +489,7 @@ fn step(state: &Arc<Mutex<State>>, paths: &Paths, cfg: &Config, pace: &mut Pace)
 /// here, for every window at once, so no window runs `ps` and `footprint` of its own. `ps` and `footprint` take
 /// 20–90 ms, so not under the lock. Windows hear about it in the next `peers` message.
 fn measure(state: &Arc<Mutex<State>>, cfg: &Config, pace: &mut Pace) {
-    let every = if state.lock().unwrap().insts.values().any(|i| i.budget_mb > 0) { cfg.budget_every } else { cfg.budget_every * 3 };
+    let every = if state.lock().unwrap().budget_mb > 0 { cfg.budget_every } else { cfg.budget_every * 3 };
     if !cfg.measure || pace.measure.elapsed() < every {
         return;
     }
@@ -535,7 +542,7 @@ fn serve(stream: UnixStream, state: Arc<Mutex<State>>, paths: &Paths, cfg: &Conf
                 s.next += 1;
                 id = Some(s.next);
                 let key = s.next;
-                s.insts.insert(key, Inst { pid, stamp: stamp(pid), tabs: vec![], owned: vec![], bye: false, budget_mb: 0, ui_mb: 0, win: Value::Null, out: out.clone() });
+                s.insts.insert(key, Inst { pid, stamp: stamp(pid), tabs: vec![], owned: vec![], bye: false, ui_mb: 0, win: Value::Null, out: out.clone() });
                 send_out(&out, &json!({"t": "welcome", "v": VERSION, "instances": instances(&s), "features": ["mcp", "manage", "measure"], "pid": std::process::id(), "exe_mtime": s.exe_mtime}));
                 broadcast(&mut s);
                 paths.log(&format!("instance {pid} connected"));
@@ -557,7 +564,6 @@ fn serve(stream: UnixStream, state: Arc<Mutex<State>>, paths: &Paths, cfg: &Conf
                     }
                 }
                 let changed = i.tabs != tabs;
-                i.budget_mb = v["budget_mb"].as_u64().unwrap_or(0);
                 i.win = v["win"].clone();
                 (i.tabs, i.owned) = (tabs, keep);
                 if changed {
@@ -576,6 +582,8 @@ fn serve(stream: UnixStream, state: Arc<Mutex<State>>, paths: &Paths, cfg: &Conf
                     "grace_s" => s.grace = parse_grace(value).unwrap_or(s.grace),
                     "cleanup" => s.cleanup = value != "off",
                     "budget" => s.enforce = value != "paused",
+                    "budget_mb" => s.budget_mb = value.parse().unwrap_or(s.budget_mb),
+                    "idle_s" => s.idle_s = value.parse().unwrap_or(s.idle_s),
                     _ => {}
                 }
                 paths.log(&format!("{key} = {value}"));
@@ -698,7 +706,7 @@ pub enum Msg {
     Peers(Vec<Peer>),
     /// The memory budget is exceeded and this tab is the one to stop, if its owner still finds it safe to.
     /// `front`: the tab is the one in front in a window the supervisor found to be in the background.
-    Suspend { tab: u64, why: String, front: bool },
+    Suspend { tab: u64, why: String, front: bool, limit_s: u64 },
     /// Something the supervisor wants said in the window (a line for the status flash).
     Notice(String),
     /// Its state, answering `ask_status` or `set` (see `/supervisor`).
@@ -823,7 +831,7 @@ impl Client {
                     Some("peers") => Msg::Peers(parse_peers(&v)),
                     Some("status") => Msg::Status(v),
                     Some("notice") => Msg::Notice(v["text"].as_str().unwrap_or("").into()),
-                    Some("suspend") => Msg::Suspend { tab: v["tab"].as_u64().unwrap_or(0), why: v["why"].as_str().unwrap_or("").into(), front: v["front"].as_bool().unwrap_or(false) },
+                    Some("suspend") => Msg::Suspend { tab: v["tab"].as_u64().unwrap_or(0), why: v["why"].as_str().unwrap_or("").into(), front: v["front"].as_bool().unwrap_or(false), limit_s: v["limit_s"].as_u64().unwrap_or(0) },
                     _ => continue,
                 };
                 if tx.send(wrap(msg)).is_err() {
@@ -913,9 +921,9 @@ impl Client {
     /// What this instance's tabs are doing, the pids of the processes it started, the memory budget it asked for
     /// (0: none). The supervisor measures what they hold. Sent when it changed, and
     /// every 10 s regardless so the supervisor can tell a quiet instance from a gone one.
-    pub fn tabs(&self, tabs: Vec<Value>, owned: Vec<u32>, budget_mb: u64) {
+    pub fn tabs(&self, tabs: Vec<Value>, owned: Vec<u32>) {
         let win = self.win.lock_ok().clone();
-        let msg = json!({"t": "tabs", "tabs": tabs, "owned": owned, "budget_mb": budget_mb, "win": win});
+        let msg = json!({"t": "tabs", "tabs": tabs, "owned": owned, "win": win});
         let mut last = self.last.lock().unwrap();
         if last.0 == msg && last.1.elapsed() < Duration::from_secs(10) {
             return;
@@ -925,10 +933,9 @@ impl Client {
     }
 
     /// Say what this window is doing as a whole: `focus` (its terminal has focus; `None`: the terminal does not say),
-    /// `input_idle_s` (since the last key, in 30 s steps) and `idle_limit_s` (its `--idle-suspend`; 0: never).
-    /// Goes out with the next `tabs`.
-    pub fn window(&self, focus: Option<bool>, input_idle_s: u64, idle_limit_s: u64) {
-        *self.win.lock_ok() = json!({"focus": focus, "input_idle_s": input_idle_s, "idle_limit_s": idle_limit_s});
+    /// `input_idle_s` (since the last key, in 30 s steps). Goes out with the next `tabs`.
+    pub fn window(&self, focus: Option<bool>, input_idle_s: u64) {
+        *self.win.lock_ok() = json!({"focus": focus, "input_idle_s": input_idle_s});
     }
 
     /// Hand one message of a shared MCP server to the supervisor; `reply` gets the answer (or an error if the
@@ -1046,7 +1053,7 @@ mod tests {
     }
 
     fn fast() -> Config {
-        Config { grace: Duration::from_millis(300), reap_after: Duration::from_millis(200), kill_after: Duration::from_millis(500), budget_every: Duration::from_millis(200), cleanup: true, enforce: true, measure: false }
+        Config { grace: Duration::from_millis(300), reap_after: Duration::from_millis(200), kill_after: Duration::from_millis(500), budget_every: Duration::from_millis(200), cleanup: true, enforce: true, measure: false, budget_mb: 0, idle_s: 0 }
     }
 
     fn serve_in_background(p: &Paths, cfg: Config) -> mpsc::Receiver<()> {
@@ -1082,7 +1089,7 @@ mod tests {
         wait_for("the socket", || p.sock().exists());
         let (a, _ra) = client(&p, std::process::id());
         let (b, rb) = client(&p, std::process::id());
-        a.tabs(vec![json!({"id": 1, "pid": 4242, "busy": true, "mb": 190, "cwd": "/x"})], vec![], 0);
+        a.tabs(vec![json!({"id": 1, "pid": 4242, "busy": true, "mb": 190, "cwd": "/x"})], vec![]);
         let seen = loop {
             if let Msg::Peers(peers) = rb.recv_timeout(Duration::from_secs(5)).expect("a peers message")
                 && peers.iter().any(|i| !i.tabs.is_empty())
@@ -1149,7 +1156,7 @@ mod tests {
     /// An instance that dies without a goodbye: `fake` stands in for it (a real, short-lived process).
     fn vanish(p: &Paths, fake: &mut Child, owned: &Child, say_bye: bool) {
         let (c, _r) = client(p, fake.id());
-        c.tabs(vec![json!({"id": 1})], vec![owned.id()], 0);
+        c.tabs(vec![json!({"id": 1})], vec![owned.id()]);
         // Let the supervisor read the report before the "instance" goes away.
         thread::sleep(Duration::from_millis(300));
         fake.kill().unwrap();
@@ -1185,7 +1192,7 @@ mod tests {
         wait_for("the socket", || p.sock().exists());
         let (mut fake, mut backend) = (sleeper(), sleeper());
         let (c, _r) = client(&p, fake.id());
-        c.tabs(vec![json!({"id": 1})], vec![backend.id()], 0);
+        c.tabs(vec![json!({"id": 1})], vec![backend.id()]);
         thread::sleep(Duration::from_millis(300));
         drop(c); // the connection ends, the "instance" (fake) keeps running
         thread::sleep(Duration::from_millis(1200));
@@ -1209,52 +1216,50 @@ mod tests {
     }
 
     #[test]
-    fn over_the_smallest_budget_the_longest_idle_stoppable_tab_of_an_opted_in_window_goes() {
-        let (a, b, c) = (vec![tab(1, 100, 600, true), tab(2, 100, 30, true)], vec![tab(3, 100, 900, true)], vec![tab(4, 100, 5000, true)]);
-        let rows = |budget_b: u64| [Row { conn: 1, budget_mb: 400, ui_mb: 10, tabs: &a }, Row { conn: 2, budget_mb: budget_b, ui_mb: 10, tabs: &b }, Row { conn: 3, budget_mb: 0, ui_mb: 10, tabs: &c }];
-        // 430 MB in all. Window 3 asked for no budget: it counts, and its tab (idle longest of all) is never picked.
-        assert_eq!(pick_victim(&rows(0)), Some(Pick { conn: 1, tab: 1, total_mb: 430, budget_mb: 400 }), "only window 1 may be asked");
-        let p = pick_victim(&rows(300)).unwrap();
-        assert_eq!((p.conn, p.tab, p.budget_mb), (2, 3, 300), "the smaller budget applies, and tab 3 is idle longer than tabs 1 and 2");
-        assert_eq!(pick_victim(&rows(500)).map(|p| p.budget_mb), Some(400), "again the smaller of the two");
-        let big = [Row { conn: 1, budget_mb: 431, ui_mb: 10, tabs: &a }, Row { conn: 2, budget_mb: 0, ui_mb: 10, tabs: &b }, Row { conn: 3, budget_mb: 0, ui_mb: 10, tabs: &c }];
-        assert_eq!(pick_victim(&big), None, "430 MB is within a 431 MB budget");
+    fn over_the_budget_the_longest_idle_stoppable_tab_of_any_window_goes() {
+        let (a, b, c) = (vec![tab(1, 100, 600, true), tab(2, 100, 30, true)], vec![tab(3, 100, 900, true)], vec![tab(4, 100, 5000, false)]);
+        let rows = [Row { conn: 1, ui_mb: 10, tabs: &a }, Row { conn: 2, ui_mb: 10, tabs: &b }, Row { conn: 3, ui_mb: 10, tabs: &c }];
+        // 430 MB in all. Tab 4 is idle longest of all but its owner says it cannot be stopped.
+        assert_eq!(pick_victim(&rows, 400), Some(Pick { conn: 2, tab: 3, total_mb: 430, budget_mb: 400 }), "tab 3: idle longer than tabs 1 and 2, and stoppable unlike tab 4");
+        assert_eq!(pick_victim(&rows, 431), None, "430 MB is within a 431 MB budget");
+        assert_eq!(pick_victim(&rows, 0), None, "no budget, nothing to enforce");
+        assert_eq!(over_budget(&rows, 400), Some((430, 400)));
     }
 
     #[test]
     fn tabs_that_cannot_be_stopped_are_never_picked() {
         let tabs = vec![tab(1, 300, 9000, false), json!({"id": 2, "pid": null, "mb": 0, "idle_s": 9000, "safe": true}), tab(3, 300, 10, true)];
-        let rows = [Row { conn: 1, budget_mb: 100, ui_mb: 0, tabs: &tabs }];
-        assert_eq!(pick_victim(&rows).map(|p| p.tab), Some(3), "not tab 1 (owner says unsafe) and not tab 2 (no process)");
+        let rows = [Row { conn: 1, ui_mb: 0, tabs: &tabs }];
+        assert_eq!(pick_victim(&rows, 100).map(|p| p.tab), Some(3), "not tab 1 (owner says unsafe) and not tab 2 (no process)");
         let none = vec![tab(1, 300, 9000, false)];
-        assert_eq!(pick_victim(&[Row { conn: 1, budget_mb: 100, ui_mb: 0, tabs: &none }]), None);
-        assert_eq!(pick_victim(&[]), None);
+        assert_eq!(pick_victim(&[Row { conn: 1, ui_mb: 0, tabs: &none }], 100), None);
+        assert_eq!(pick_victim(&[], 100), None);
     }
 
     #[test]
     fn the_window_that_owns_the_tab_is_asked_and_nobody_is_asked_once_it_is_under_budget() {
         let p = paths("budget");
-        let _ = serve_in_background(&p, fast());
+        let _ = serve_in_background(&p, Config { budget_mb: 200, ..fast() });
         wait_for("the socket", || p.sock().exists());
         let (a, ra) = client(&p, std::process::id());
         let (b, rb) = client(&p, std::process::id());
-        // A holds 150 MB in two tabs against a 200 MB budget; B (no budget) holds 120 MB: 270 MB in all.
-        a.tabs(vec![tab(1, 80, 600, true), tab(2, 70, 30, true)], vec![], 200);
-        b.tabs(vec![tab(9, 120, 99999, true)], vec![], 0);
+        // A holds 150 MB in two tabs and B 120 MB in one, against a 200 MB budget: 270 MB in all.
+        a.tabs(vec![tab(1, 80, 600, true), tab(2, 70, 30, true)], vec![]);
+        b.tabs(vec![tab(9, 120, 99999, true)], vec![]);
         let ask = loop {
-            if let Msg::Suspend { tab, why, .. } = ra.recv_timeout(Duration::from_secs(5)).expect("a request to A") {
+            if let Msg::Suspend { tab, why, .. } = rb.recv_timeout(Duration::from_secs(5)).expect("a request to B") {
                 break (tab, why);
             }
         };
-        assert_eq!(ask.0, 1, "A's longest-idle tab, not B's (B asked for no budget)");
+        assert_eq!(ask.0, 9, "the longest-idle tab of all windows, which is B's");
         assert!(ask.1.contains("270 MB") && ask.1.contains("200 MB"), "{}", ask.1);
-        assert!(!std::iter::from_fn(|| rb.try_recv().ok()).any(|m| matches!(m, Msg::Suspend { .. })), "B is never asked");
-        // A stops tab 1 and reports: 70 + 120 = 190 MB, under budget.
-        a.tabs(vec![json!({"id": 1, "pid": null, "mb": 0, "idle_s": 600, "safe": false}), tab(2, 70, 30, true)], vec![], 200);
+        assert!(!std::iter::from_fn(|| ra.try_recv().ok()).any(|m| matches!(m, Msg::Suspend { .. })), "A is not asked while B's tab is the one to go");
+        // B stops tab 9 and reports: 150 MB in all, under budget.
+        b.tabs(vec![json!({"id": 9, "pid": null, "mb": 0, "idle_s": 99999, "safe": false})], vec![]);
         thread::sleep(Duration::from_millis(100));
-        while ra.try_recv().is_ok() {}
+        while ra.try_recv().is_ok() || rb.try_recv().is_ok() {}
         thread::sleep(Duration::from_millis(700));
-        assert!(!std::iter::from_fn(|| ra.try_recv().ok()).any(|m| matches!(m, Msg::Suspend { .. })), "under budget: no more requests");
+        assert!(!std::iter::from_fn(|| ra.try_recv().ok().or(rb.try_recv().ok())).any(|m| matches!(m, Msg::Suspend { .. })), "under budget: no more requests");
     }
 
     fn mcp_ask(c: &Client, def: &Def, client: u64, msg: Value) -> Value {
@@ -1360,11 +1365,11 @@ mod tests {
     #[test]
     fn it_reports_its_state_changes_its_settings_and_leaves_when_asked() {
         let p = paths("manage");
-        let done = serve_in_background(&p, Config { grace: Duration::from_secs(60), ..fast() });
+        let done = serve_in_background(&p, Config { grace: Duration::from_secs(60), budget_mb: 2000, ..fast() });
         wait_for("the socket", || p.sock().exists());
         let (c, rx) = client(&p, std::process::id());
         assert!(c.manages() && c.pid() == Some(std::process::id()), "it says so, and who it is");
-        c.tabs(vec![json!({"id": 1, "pid": null, "busy": false, "mb": 120, "cwd": "/x", "idle_s": 0, "safe": false})], vec![], 2000);
+        c.tabs(vec![json!({"id": 1, "pid": null, "busy": false, "mb": 120, "cwd": "/x", "idle_s": 0, "safe": false})], vec![]);
         let status = |rx: &mpsc::Receiver<Msg>| loop {
             if let Msg::Status(v) = rx.recv_timeout(Duration::from_secs(5)).expect("a status") {
                 break v;
@@ -1436,19 +1441,19 @@ mod tests {
     }
 
     #[test]
-    fn the_idle_sweep_stops_tabs_past_their_own_windows_limit_and_the_front_tab_only_when_you_are_away() {
-        let (here, away, unfocused) = (json!({"focus": null, "input_idle_s": 0, "idle_limit_s": 120}), json!({"focus": null, "input_idle_s": 600, "idle_limit_s": 120}), json!({"focus": false, "input_idle_s": 0, "idle_limit_s": 0}));
-        let (t_here, t_fresh, t_old, t_never) = (vec![front_tab(1, 900)], vec![front_tab(2, 60)], vec![front_tab(3, 120)], vec![front_tab(4, 9000)]);
-        let left = json!({"focus": false, "input_idle_s": 0, "idle_limit_s": 120});
+    fn the_idle_sweep_stops_tabs_past_the_limit_and_the_front_tab_only_when_you_are_away() {
+        let (here, away, left) = (json!({"focus": null, "input_idle_s": 0}), json!({"focus": null, "input_idle_s": 600}), json!({"focus": false, "input_idle_s": 0}));
+        let (t_here, t_fresh, t_old) = (vec![front_tab(1, 900)], vec![front_tab(2, 60)], vec![front_tab(3, 120)]);
         let t_left = vec![front_tab(5, 130)];
-        let asks = idle_asks(&[(1, &here, &t_here), (2, &away, &t_fresh), (3, &away, &t_old), (4, &unfocused, &t_never), (5, &left, &t_left)]);
-        assert_eq!(asks.iter().map(|a| (a.0, a.1)).collect::<Vec<_>>(), vec![(3, 3), (5, 5)], "not the window in use, not a tab idle less than its limit, not a window that never suspends (limit 0); a terminal that lost focus counts however recently you typed there");
+        let asks = idle_asks(&[(1, &here, &t_here), (2, &away, &t_fresh), (3, &away, &t_old), (5, &left, &t_left)], 120);
+        assert_eq!(asks.iter().map(|a| (a.0, a.1)).collect::<Vec<_>>(), vec![(3, 3), (5, 5)], "not the window in use, not a tab idle less than the limit; a terminal that lost focus counts however recently you typed there");
+        assert!(idle_asks(&[(5, &left, &t_left)], 0).is_empty(), "limit 0: never");
         // A tab that is not in front goes past the limit, in any window; the tab in front of the window in use, after five times the limit.
         let bg = |id: u64, idle: u64| json!({"id": id, "pid": 1000 + id, "idle_s": idle, "safe": true, "safe_front": false});
-        let (in_use, long_gone) = (json!({"focus": true, "input_idle_s": 0, "idle_limit_s": 120}), json!({"focus": true, "input_idle_s": 600, "idle_limit_s": 120}));
+        let (in_use, long_gone) = (json!({"focus": true, "input_idle_s": 0}), json!({"focus": true, "input_idle_s": 600}));
         let (mixed, away_front) = (vec![bg(6, 119), bg(7, 120), front_tab(8, 5000)], vec![front_tab(9, 5000)]);
-        let asks = idle_asks(&[(1, &in_use, &mixed), (2, &long_gone, &away_front), (3, &unfocused, &[bg(10, 9000)])]);
-        assert_eq!(asks.iter().map(|a| (a.0, a.1)).collect::<Vec<_>>(), vec![(1, 7), (2, 9)], "a background tab past its limit; the front tab once you have not typed for five times the limit; never with limit 0");
+        let asks = idle_asks(&[(1, &in_use, &mixed), (2, &long_gone, &away_front)], 120);
+        assert_eq!(asks.iter().map(|a| (a.0, a.1)).collect::<Vec<_>>(), vec![(1, 7), (2, 9)], "a background tab past the limit; the front tab once you have not typed for five times the limit");
         let tabs = vec![front_tab(1, 0), json!({"id": 2, "pid": 1002, "idle_s": 0, "safe": true, "safe_front": false})];
         let eff = |front| effective_tabs(&tabs, front).iter().map(|t| t["safe"] == true).collect::<Vec<_>>();
         assert_eq!((eff(true), eff(false)), (vec![false, true], vec![true, true]), "the tab in front becomes stoppable only in a window you left");
@@ -1462,7 +1467,7 @@ mod tests {
         let (a, ra) = client(&p, std::process::id());
         let me = std::process::id();
         // This test process stands in for a tab's process: it holds megabytes.
-        a.tabs(vec![json!({"id": 1, "pid": me, "idle_s": 0})], vec![], 0);
+        a.tabs(vec![json!({"id": 1, "pid": me, "idle_s": 0})], vec![]);
         let held = |ra: &mpsc::Receiver<Msg>| loop {
             if let Msg::Peers(peers) = ra.recv_timeout(Duration::from_secs(10)).expect("peers with numbers")
                 && let Some(w) = peers.iter().find(|i| i.ui_mb > 0)
@@ -1474,28 +1479,29 @@ mod tests {
         let (ui, tab) = held(&ra);
         assert!(ui > 0 && tab > 0);
         // The window saying more about its tabs (without numbers) does not wipe what was measured.
-        a.tabs(vec![json!({"id": 1, "pid": me, "idle_s": 30})], vec![], 0);
+        a.tabs(vec![json!({"id": 1, "pid": me, "idle_s": 30})], vec![]);
         thread::sleep(Duration::from_millis(100));
         let (_, again) = held(&ra);
         assert!(again > 0);
     }
 
     #[test]
-    fn over_budget_with_nothing_safe_to_stop_the_windows_that_asked_for_the_budget_are_told() {
+    fn over_budget_with_nothing_safe_to_stop_the_windows_are_told() {
         let p = paths("notice");
-        let _ = serve_in_background(&p, fast());
+        let _ = serve_in_background(&p, Config { budget_mb: 500, ..fast() });
         wait_for("the socket", || p.sock().exists());
         let (a, ra) = client(&p, std::process::id());
         let (b, rb) = client(&p, std::process::id());
-        a.tabs(vec![tab(1, 900, 0, false)], vec![], 500);
-        b.tabs(vec![tab(2, 10, 0, false)], vec![], 0);
+        a.tabs(vec![tab(1, 900, 0, false)], vec![]);
+        b.tabs(vec![tab(2, 10, 0, false)], vec![]);
         loop {
             if let Msg::Notice(text) = ra.recv_timeout(Duration::from_secs(5)).expect("a notice") {
                 assert!(text.contains("910") && text.contains("500") && text.contains("no tab is safe"), "{text}");
                 break;
             }
         }
-        assert!(!std::iter::from_fn(|| rb.try_recv().ok()).any(|m| matches!(m, Msg::Notice(_))), "B asked for no budget");
+        let heard_by_b = std::iter::from_fn(|| rb.recv_timeout(Duration::from_secs(5)).ok()).any(|m| matches!(m, Msg::Notice(_)));
+        assert!(heard_by_b, "every window hears it");
     }
 
     #[test]
@@ -1503,7 +1509,7 @@ mod tests {
         let (tx, rx) = mpsc::channel();
         let c = Client::private(std::process::id(), tx, |m| m).expect("a private supervisor");
         assert!(c.is_private() && c.manages() && c.alive());
-        c.tabs(vec![json!({"id": 1, "pid": null, "idle_s": 0})], vec![], 0);
+        c.tabs(vec![json!({"id": 1, "pid": null, "idle_s": 0})], vec![]);
         loop {
             if let Msg::Peers(peers) = rx.recv_timeout(Duration::from_secs(10)).expect("the window is measured")
                 && peers.iter().any(|i| i.pid == std::process::id() && i.ui_mb > 0)
@@ -1517,14 +1523,14 @@ mod tests {
     #[test]
     fn a_window_you_left_is_asked_to_stop_its_front_tab_with_no_budget_and_the_one_you_use_is_not() {
         let p = paths("front");
-        let _ = serve_in_background(&p, fast());
+        let _ = serve_in_background(&p, Config { idle_s: 120, ..fast() });
         wait_for("the socket", || p.sock().exists());
         let (a, ra) = client(&p, std::process::id());
         let (b, rb) = client(&p, std::process::id());
-        a.window(None, 0, 120);
-        a.tabs(vec![front_tab(1, 600)], vec![], 0);
-        b.window(None, 300, 120);
-        b.tabs(vec![front_tab(2, 600)], vec![], 0);
+        a.window(None, 0);
+        a.tabs(vec![front_tab(1, 600)], vec![]);
+        b.window(None, 300);
+        b.tabs(vec![front_tab(2, 600)], vec![]);
         loop {
             if let Msg::Suspend { tab, front, .. } = rb.recv_timeout(Duration::from_secs(5)).expect("a request to B") {
                 assert_eq!((tab, front), (2, true));
@@ -1545,10 +1551,10 @@ mod tests {
         // supervisor was working on this very report.
         let (c, rc) = client(&p, std::process::id());
         let (d, rd) = client(&p, std::process::id());
-        c.window(Some(true), 300, 120); // 300 s of 600 (five times the limit)
-        c.tabs(vec![front_tab(7, 900)], vec![], 0);
-        d.window(Some(false), 0, 120);
-        d.tabs(vec![front_tab(8, 900)], vec![], 0);
+        c.window(Some(true), 300); // 300 s of 600 (five times the limit)
+        c.tabs(vec![front_tab(7, 900)], vec![]);
+        d.window(Some(false), 0);
+        d.tabs(vec![front_tab(8, 900)], vec![]);
         loop {
             if let Msg::Suspend { tab, .. } = rd.recv_timeout(Duration::from_secs(5)).expect("a request to D") {
                 assert_eq!(tab, 8);
@@ -1562,14 +1568,14 @@ mod tests {
     #[test]
     fn nothing_is_stopped_while_the_supervisor_is_paused() {
         let p = paths("front-paused");
-        let _ = serve_in_background(&p, Config { enforce: false, ..fast() });
+        let _ = serve_in_background(&p, Config { enforce: false, idle_s: 120, ..fast() });
         wait_for("the socket", || p.sock().exists());
         let (a, _ra) = client(&p, std::process::id());
         let (b, rb) = client(&p, std::process::id());
-        a.window(None, 0, 120);
-        a.tabs(vec![front_tab(1, 600)], vec![], 0);
-        b.window(None, 600, 120);
-        b.tabs(vec![front_tab(2, 600)], vec![], 0);
+        a.window(None, 0);
+        a.tabs(vec![front_tab(1, 600)], vec![]);
+        b.window(None, 600);
+        b.tabs(vec![front_tab(2, 600)], vec![]);
         thread::sleep(Duration::from_millis(900));
         assert!(!std::iter::from_fn(|| rb.try_recv().ok()).any(|m| matches!(m, Msg::Suspend { .. })), "a paused supervisor stops nothing");
     }

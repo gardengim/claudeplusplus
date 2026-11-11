@@ -37,7 +37,7 @@ pub const SETTINGS: [Setting; 3] = [
     Setting {
         key: "budget",
         label: "Memory budget",
-        help: "Applies the smallest budget any window set (/config): over it, the longest-idle tab's claude is stopped. Paused leaves every tab running.",
+        help: "Applies the memory budget (/config → Memory budget) to all windows together: over it, the longest-idle tab's claude is stopped. Paused stops the idle sweep too and leaves every tab running.",
         choices: &[("on", "enforced"), ("paused", "paused")],
     },
 ];
@@ -258,7 +258,6 @@ struct Win {
     /// Processes it asked the supervisor to watch; `None` when only the peers' list is known.
     owned: Option<u64>,
     mb: u64,
-    budget_mb: u64,
 }
 
 /// The windows, from the supervisor's own answer or else from the list every window gets of its peers.
@@ -271,7 +270,6 @@ fn wins(status: Option<&Value>, peers: &[Peer]) -> Vec<Win> {
                 tabs: w["tabs"].as_array().into_iter().flatten().map(|t| TabRow { cwd: t["cwd"].as_str().unwrap_or("").into(), busy: t["busy"].as_bool().unwrap_or(false), running: t["pid"].is_u64(), mb: t["mb"].as_u64().unwrap_or(0), idle_s: t["idle_s"].as_u64() }).collect(),
                 owned: w["owned"].as_u64(),
                 mb: w["mb"].as_u64().unwrap_or(0),
-                budget_mb: w["budget_mb"].as_u64().unwrap_or(0),
             })
             .collect();
     }
@@ -279,7 +277,7 @@ fn wins(status: Option<&Value>, peers: &[Peer]) -> Vec<Win> {
         .iter()
         .map(|p| {
             let tabs: Vec<TabRow> = p.tabs.iter().map(|t| TabRow { cwd: t.cwd.clone(), busy: t.busy, running: t.pid.is_some(), mb: t.mb, idle_s: None }).collect();
-            Win { pid: p.pid, mb: tabs.iter().map(|t| t.mb).sum(), tabs, owned: None, budget_mb: 0 }
+            Win { pid: p.pid, mb: tabs.iter().map(|t| t.mb).sum(), tabs, owned: None }
         })
         .collect()
 }
@@ -392,7 +390,6 @@ pub fn view(ui: &Ui, link: Link, pid: Option<u32>, peers: &[Peer], me: u32, exe_
             spans.push(Span::styled(format!("  {} MB", x.mb), theme::bold()));
             let mut facts = vec![plural(x.tabs.len() as u64, "tab")];
             facts.extend(x.owned.map(|o| format!("{o} watched")));
-            facts.push(if x.budget_mb > 0 { format!("budget {} MB", x.budget_mb) } else { "no budget".into() });
             spans.push(Span::styled(format!("   {}", facts.join(" · ")), theme::dim()));
             lines.push(Line::from(spans));
             let name_w = w.saturating_sub(34).clamp(12, 40);
