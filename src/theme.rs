@@ -4,7 +4,6 @@
 
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::Block;
 
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 
@@ -45,6 +44,11 @@ fn light() -> bool {
         2 => true,
         _ => LIGHT.load(Ordering::Relaxed),
     }
+}
+
+/// Text picked with the mouse: a quiet blue behind it, the text keeps its own colours.
+pub fn selection() -> Style {
+    Style::new().bg(if light() { Color::Indexed(153) } else { Color::Indexed(24) })
 }
 
 /// Text on a band. A band sets its own background, so it must set its text colour too: left to the
@@ -119,6 +123,30 @@ pub fn added_line() -> Style {
     })
 }
 
+/// The band behind a tool call that runs a command or touches a file (`$` Bash, `≡` Read/Glob/Grep, `±`/`+`
+/// Edit/Write), header to last output line: tinted by the kind's hue, so one call reads as one block and a
+/// run of calls separates. Other tools get none. Diff lines keep their own green and red on top of it.
+pub fn tool_band(name: &str) -> Option<Style> {
+    let kind = match name {
+        "Bash" => 0,
+        "Read" | "Glob" | "Grep" => 1,
+        "Edit" | "Write" | "NotebookEdit" => 2,
+        _ => return None,
+    };
+    let (dark, light_) = match kind {
+        0 => ((22, 32, 48), (228, 238, 252)),
+        1 => ((38, 26, 46), (244, 232, 250)),
+        _ => ((46, 34, 20), (252, 240, 224)),
+    };
+    let rgb = |(r, g, b)| Color::Rgb(r, g, b);
+    Some(on_band(match (light(), truecolor()) {
+        (false, true) => rgb(dark),
+        (true, true) => rgb(light_),
+        (false, false) => Color::Indexed(235),
+        (true, false) => Color::Indexed(255),
+    }))
+}
+
 pub fn removed_line() -> Style {
     on_band(match (light(), truecolor()) {
         (false, true) => Color::Rgb(72, 22, 28),
@@ -149,6 +177,11 @@ pub fn syn_comment() -> Style {
 /// The agent at work: the spinner above the input (Claude's own orange, as in Claude Code).
 pub fn working() -> Style {
     Style::new().fg(Color::Indexed(173))
+}
+
+/// The glint that sweeps the word beside the spinner: lighter than `working` on a dark background, darker on a light one.
+pub fn working_glint() -> Style {
+    Style::new().fg(Color::Indexed(if light() { 130 } else { 223 })).add_modifier(Modifier::BOLD)
 }
 
 /// The colours `/color` offers, as 256-colour indexes (every terminal has them).
@@ -278,6 +311,8 @@ pub fn mode(mode: &str) -> Style {
 pub const CURRENT: &str = "●";
 /// Marker in front of the row the cursor is on in choice lists.
 pub const CURSOR: &str = "❯";
+/// Where the cursor of a menu that does not have the keys rests.
+pub const CURSOR_AWAY: &str = "›";
 /// Checkbox states, the same in every list: shown, hidden, some of the children, shortened.
 pub const ON: &str = "☑";
 pub const OFF: &str = "☐";
@@ -294,7 +329,18 @@ pub const OPEN: &str = "▾";
 /// One choice in a row of choices: a dot marks the value in effect (in `hue`), the others recede, and the
 /// choice the cursor is on is reversed.
 pub fn chip(label: &str, current: bool, cursor: bool, hue: Style) -> Span<'static> {
-    let style = if cursor { selected() } else if current { hue } else { dim() };
+    chip_in(label, current, cursor, true, hue)
+}
+
+/// [`chip`] in a menu that may not have the keys: the choice under its cursor is only underlined then, and
+/// reversed once Tab has brought the menu into focus.
+pub fn chip_in(label: &str, current: bool, cursor: bool, focused: bool, hue: Style) -> Span<'static> {
+    let style = match (cursor, focused) {
+        (true, true) => selected(),
+        (true, false) => hue.add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
+        _ if current => hue,
+        _ => dim(),
+    };
     Span::styled(format!(" {}{label} ", if current { CURRENT } else { " " }), style)
 }
 
@@ -363,13 +409,6 @@ fn keys_for(text: &str, mac_keys: bool) -> String {
         }
     }
     out
-}
-
-/// A bordered box. `blocking` boxes are the agent asking you something (yellow); the rest are things you
-/// opened yourself (cyan). The colour tells you who is waiting on whom.
-pub fn frame(title: &str, blocking: bool) -> Block<'static> {
-    let hue = if blocking { attention() } else { accent() };
-    Block::bordered().title(Span::styled(format!(" {title} "), hue.add_modifier(Modifier::BOLD))).border_style(hue)
 }
 
 /// One line of key hints, always in this shape: `key action · key action`. Keys are bold, actions dim.
@@ -456,7 +495,7 @@ mod tests {
     #[test]
     fn every_glyph_is_one_column_wide() {
         use unicode_width::UnicodeWidthStr;
-        for g in [ON, OFF, PART, BRIEF, ALLOW, ASK, DENY, CLOSED, OPEN, CURRENT, CURSOR, "⌂", "▤", "◇", "◦", "◐", "◆", "⎋", "⏎", "␣", "⇥", "⌃", "⌥", "⇧", "⏵", "◷", "≡", "±", "⌕", "◎", "◈", "✦"] {
+        for g in [ON, OFF, PART, BRIEF, ALLOW, ASK, DENY, CLOSED, OPEN, CURRENT, CURSOR, "⌂", "▤", "◇", "◦", "◐", "◓", "◑", "◒", "◆", "⎋", "⏎", "␣", "⇥", "⌃", "⌥", "⇧", "⏵", "◷", "≡", "±", "⌕", "◎", "◈", "✦"] {
             assert_eq!(g.width(), 1, "{g} would shift columns");
         }
     }

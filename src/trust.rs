@@ -4,6 +4,7 @@
 //! asks in its place, once per folder: a folder Claude Code has recorded as trusted, or one that brings nothing
 //! that runs, starts at once; any other waits for `/trust`.
 
+use crate::sync::LockOk;
 use serde_json::Value;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -13,11 +14,11 @@ use std::sync::{LazyLock, Mutex};
 static ALLOWED: LazyLock<Mutex<HashSet<PathBuf>>> = LazyLock::new(Default::default);
 
 pub fn allow(cwd: &Path) {
-    ALLOWED.lock().unwrap_or_else(|e| e.into_inner()).insert(cwd.to_path_buf());
+    ALLOWED.lock_ok().insert(cwd.to_path_buf());
 }
 
 fn allowed(cwd: &Path) -> bool {
-    let a = ALLOWED.lock().unwrap_or_else(|e| e.into_inner());
+    let a = ALLOWED.lock_ok();
     cwd.ancestors().any(|d| a.contains(d))
 }
 

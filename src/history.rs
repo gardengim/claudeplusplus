@@ -2,9 +2,10 @@
 //! resumed tab can show earlier messages and `/resume` can list sessions. The format is internal
 //! to Claude Code, so parsing is lenient: anything not recognised is skipped.
 
+use crate::sync::LockOk;
 use serde_json::Value;
 use std::collections::{HashMap, VecDeque};
-use std::sync::Mutex;
+use std::sync::{Mutex, Once};
 use std::io::{BufRead, BufReader, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
@@ -12,6 +13,7 @@ use std::time::SystemTime;
 /// Only the tail of a long transcript is replayed, to keep memory flat.
 const MAX_LINES: usize = 400;
 
+#[derive(Clone)]
 pub struct Summary {
     pub id: String,
     /// `/rename` title, else Claude Code's generated one, else the first prompt.
@@ -100,32 +102,101 @@ pub fn recent_all(n: usize) -> Vec<Summary> {
 }
 
 fn recent_in(dirs: &[PathBuf], n: usize) -> Vec<Summary> {
-    let mut files: Vec<(PathBuf, SystemTime)> = dirs
+    let mut files: Vec<(PathBuf, SystemTime, u64)> = dirs
         .iter()
         .filter_map(|d| std::fs::read_dir(d).ok())
         .flatten()
         .flatten()
         .filter(|e| e.path().extension().is_some_and(|x| x == "jsonl"))
-        .filter_map(|e| Some((e.path(), e.metadata().ok()?.modified().ok()?)))
+        .filter_map(|e| {
+            let m = e.metadata().ok()?;
+            Some((e.path(), m.modified().ok()?, m.len()))
+        })
         .collect();
     files.sort_by_key(|f| std::cmp::Reverse(f.1));
     files.truncate(n);
-    files
-        .into_iter()
-        .map(|(p, modified)| {
-            let size = std::fs::metadata(&p).map_or(0, |m| m.len());
-            let (title, prompt, cwd) = cached_titles(&p, modified, size);
-            Summary { id: p.file_stem().unwrap_or_default().to_string_lossy().into_owned(), title, prompt, modified, size, cwd }
+    let out = files
+        .iter()
+        .map(|(p, modified, size)| {
+            let (title, prompt, cwd) = cached_titles(p, *modified, *size);
+            Summary { id: p.file_stem().unwrap_or_default().to_string_lossy().into_owned(), title, prompt, modified: *modified, size: *size, cwd }
         })
-        .collect()
+        .collect();
+    save_titles_file(&files.into_iter().map(|f| f.0).collect::<Vec<_>>());
+    out
 }
 
 type Titles = (String, String, String);
 type Cached = (SystemTime, u64, Titles);
 
+static CACHE: Mutex<Option<HashMap<PathBuf, Cached>>> = Mutex::new(None);
+static NEW_TITLES: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+fn titles_file() -> Option<PathBuf> {
+    if cfg!(test) {
+        return None; // tests never touch the real cache
+    }
+    crate::config::cache_dir().map(|d| d.join("titles.json"))
+}
+
+/// Titles survive between runs: a transcript is only read again when its size or mtime moved, so the first
+/// listing after a start is one small file instead of the head and tail of every transcript.
+fn load_titles_file() {
+    static ONCE: Once = Once::new();
+    ONCE.call_once(|| {
+        if let Some(file) = titles_file() {
+            read_titles(&file);
+        }
+    });
+}
+
+fn read_titles(file: &Path) {
+    {
+        let Some(v) = std::fs::read_to_string(file).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()) else { return };
+        let Some(map) = v["e"].as_object().filter(|_| v["v"] == 1) else { return };
+        let mut c = CACHE.lock_ok();
+        let c = c.get_or_insert_with(HashMap::new);
+        for (path, e) in map {
+            let (Some(s), Some(n), Some(size), Some(a), Some(b), Some(d)) = (e[0].as_u64(), e[1].as_u64(), e[2].as_u64(), e[3].as_str(), e[4].as_str(), e[5].as_str()) else { continue };
+            let at = SystemTime::UNIX_EPOCH + std::time::Duration::new(s, n as u32);
+            c.entry(PathBuf::from(path)).or_insert((at, size, (a.into(), b.into(), d.into())));
+        }
+    }
+}
+
+/// Write what the listing just showed, if any of it was new. Only the listed transcripts are kept, so the file
+/// stays as small as the list.
+fn save_titles_file(paths: &[PathBuf]) {
+    use std::sync::atomic::Ordering::Relaxed;
+    let Some(file) = titles_file() else { return };
+    if NEW_TITLES.swap(false, Relaxed) {
+        write_titles(&file, paths);
+    }
+}
+
+fn write_titles(file: &Path, paths: &[PathBuf]) {
+    let c = CACHE.lock_ok();
+    let Some(c) = c.as_ref() else { return };
+    let mut e = serde_json::Map::new();
+    for p in paths {
+        if let Some((at, size, (a, b, d))) = c.get(p) {
+            let since = at.duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default();
+            e.insert(p.to_string_lossy().into_owned(), serde_json::json!([since.as_secs(), since.subsec_nanos(), size, a, b, d]));
+        }
+    }
+    let text = serde_json::json!({"v": 1, "e": e}).to_string();
+    if let Some(dir) = file.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let tmp = file.with_extension("tmp");
+    if std::fs::write(&tmp, text).is_ok() {
+        let _ = std::fs::rename(&tmp, file);
+    }
+}
+
 /// Listing re-reads often (the side panel refreshes); a transcript is only re-read when it changed.
 fn cached_titles(path: &Path, modified: SystemTime, size: u64) -> Titles {
-    static CACHE: Mutex<Option<HashMap<PathBuf, Cached>>> = Mutex::new(None);
+    load_titles_file();
     if let Ok(c) = CACHE.lock()
         && let Some((m, sz, t)) = c.as_ref().and_then(|c| c.get(path))
         && *m == modified
@@ -134,6 +205,7 @@ fn cached_titles(path: &Path, modified: SystemTime, size: u64) -> Titles {
         return t.clone();
     }
     let t = titles(path);
+    NEW_TITLES.store(true, std::sync::atomic::Ordering::Relaxed);
     if let Ok(mut c) = CACHE.lock() {
         c.get_or_insert_with(HashMap::new).insert(path.to_path_buf(), (modified, size, t.clone()));
     }
@@ -158,6 +230,23 @@ fn titles(path: &Path) -> Titles {
 pub fn session_name(path: &Path) -> Option<String> {
     let n = names(path);
     [n.custom, n.ai].into_iter().find(|t| !t.trim().is_empty())
+}
+
+/// Everything a resumed tab shows from its transcript, read in one go (on a thread: the file can be huge).
+pub struct Loaded {
+    pub name: Option<String>,
+    pub color: Option<String>,
+    pub lines: Vec<Value>,
+    pub skipped: usize,
+    /// Reports of the agents whose receipt the transcript shows, by tool call id.
+    pub reports: HashMap<String, String>,
+}
+
+impl Loaded {
+    pub fn read(path: &Path) -> Loaded {
+        let (lines, skipped) = tail(path);
+        Loaded { name: session_name(path), color: session_color(path), lines, skipped, reports: agent_reports(path) }
+    }
 }
 
 /// The conversation's `/color`, if it has one (`default` counts as none).
@@ -441,6 +530,21 @@ pub fn ago(t: SystemTime) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn titles_written_to_disk_come_back_without_reading_the_transcript() {
+        let dir = std::env::temp_dir().join(format!("cpp-titles-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (transcript, file) = (dir.join("nope-gone.jsonl"), dir.join("titles.json")); // the transcript does not exist
+        let at = SystemTime::UNIX_EPOCH + std::time::Duration::new(1_700_000_000, 5);
+        CACHE.lock().unwrap().get_or_insert_with(HashMap::new).insert(transcript.clone(), (at, 42, ("a title".into(), "first prompt".into(), "/proj".into())));
+        write_titles(&file, std::slice::from_ref(&transcript));
+        CACHE.lock().unwrap().as_mut().unwrap().remove(&transcript);
+        read_titles(&file);
+        assert_eq!(cached_titles(&transcript, at, 42), ("a title".to_string(), "first prompt".to_string(), "/proj".to_string()), "same mtime and size: no read");
+        assert_eq!(cached_titles(&transcript, at, 43).0, "", "a changed size reads the file again (here: nothing there)");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
     use serde_json::json;
 
     #[test]

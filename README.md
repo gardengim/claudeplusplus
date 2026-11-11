@@ -87,8 +87,14 @@ Where it comes from, and what it costs:
 
 ```
 ┌──────── claude++ (one process, ~4 MB footprint) ──────────┐
-│ main.rs     event loop, keys, tabs, settings              │
+│ main.rs     App, config at startup, the event loop        │
+│ keys.rs     key routing (one front panel answers)         │
+│ input.rs    message box: editing, completion, vim, paste  │
+│ tabs.rs     tabs, sessions, the side list                 │
 │ commands.rs `/` commands and sending  panels.rs  panels   │
+│ cli.rs flags · tty.rs terminal · memory.rs link · sync.rs  │
+│ limits.rs   plan-window warning and the hold on sends     │
+│ supervisor.rs measuring, budget, idle · supui.rs panel    │
 │ pane_host.rs the embedded editor (pane.rs: pty + vt100)   │
 │ ui.rs       ratatui renderer (per-entry wrap cache)       │
 │ session.rs  protocol → transcript state machine (per tab) │
@@ -131,7 +137,7 @@ Release binary: ~2.3 MB.
 - ctrl+r searches the messages you sent (this folder's, shared with Claude Code), as in Claude Code; the session list is ←.
 - ctrl+b moves a running command to the background, as in Claude Code; `/tasks` lists background commands next to
   subagents, and `x` stops one. A tab with a command still running is never stopped by idle suspension or `--mem-budget`.
-- The model's thinking shows as one folded `✻ Thinking…` line; ctrl+o or a click reads it.
+- The model's thinking shows as one folded `✻ Thinking…` line; ctrl+o reads it.
 - Key hints are written the way your keyboard labels them, fixed when claude++ is built: `⌃t`, `⌥o`, `⇧⇥` on macOS
   (⌥ is Option, which terminals send as Alt), `Ctrl+T`, `Alt+O`, `Shift+Tab` on Linux.
 - Differences: ctrl+t opens a tab; Claude Code commands that open an interactive panel
@@ -141,14 +147,15 @@ Release binary: ~2.3 MB.
 
 - Streaming responses (token deltas) with a live activity line: requesting, thinking,
   calling a tool, elapsed time.
-- Tool calls rendered Claude-Code style: `● Bash(cmd)`, `⎿` result preview, ctrl+o to expand everything, and a click on a call (or alt+o for the latest) to fold just that one. A command run shows its first lines, or its last when it failed; unfolded it shows the whole command and what it is for.
+- Tool calls rendered Claude-Code style: `● Bash(cmd)`, `⎿` result preview, ctrl+o to expand everything, and alt+o to fold just the latest one. A command run shows its first lines, or its last when it failed; unfolded it shows the whole command and what it is for.
   `Edit` and `Write` show Claude Code's own hunks: "Added 2 lines, removed 1 line", numbered lines, context, and
   tinted bands for what changed (a pending edit shows a line diff of the call). `Read` shows only its size, as
   Claude Code does; an agent's report renders as markdown; answers to a question read `· question → answer`;
   `TodoWrite` is a checklist; other tools show their input as words, not JSON (MCP tools as `server · tool`).
 - **Looks like Claude Code where it helps**: your messages as `❯` on a band, a `✻ Thinking… (12s · ↓ 340 tokens ·
-  esc to interrupt)` line above the input while Claude works and `✻ Worked for 8s` after, syntax-coloured code
-  blocks, a Bash permission prompt that shows the command and its description, and long choices that wrap.
+  esc to interrupt)` line above the input while Claude works and `✻ Worked for 8s · done 14:30` after (the time it stopped), a
+  one-row `❯` hint at the top of the transcript naming the message being answered whenever that message has scrolled off screen,
+  syntax-coloured code blocks, a Bash permission prompt that shows the command and its description, and long choices that wrap.
   Colours work on a light or a dark terminal and follow it when it switches while claude++ runs; `/config` → Colors
   fixes them to dark or light instead.
 - **`/tasks`**: this tab's subagents as a list (state `◐ working` / `✓ done` / `✗ failed`, type, what each was asked, step count);
@@ -157,6 +164,15 @@ Release binary: ~2.3 MB.
   its report becomes that call's result, whether it ran in the foreground or in the background (headless Claude
   Code runs agents in the background: the turn ends, the agent keeps working, and its report starts a new turn).
   A finished agent folds its steps into a count under its report; ctrl+o lists them.
+- **Rate limits** (`/config` → the *Rate limits* tab). Claude Code reports your plan's 5-hour and 7-day windows; claude++ reads
+  them from every tab, since they belong to the account. *Warn at* (70–95%, default 90%) says so once, when a window first
+  reaches that: a note in the conversation, a message at the bottom and, with *Background tabs* set, a bell or desktop notice;
+  it warns again only after that window resets. *Hold messages at* (90–100%, off by default) keeps a message you send out of
+  Claude's hands while a window is that full: it waits in the queue (`alt+q`), due when the window resets, and messages that
+  were already waiting for a turn join it. Slash commands still go at once, and a turn already running is not touched.
+  *Send now* on a held message goes ahead anyway, and so does everything after it until that window resets. A window is
+  only known once Claude Code has reported it (the status line's *limits* segment shows when it has), so a fresh tab
+  holds nothing until its first turn. Saved as `limit_warn` and `limit_hold`.
 - **Compacting before the cache runs out** (`/config` → "Compact before the cache expires", off by default): a tab that is idle
   with a conversation of at least the chosen size (100k to 400k) and under 30 s of prompt cache left gets `/compact` sent, while
   the cache can still serve the read at a tenth of the price. Your next message then re-caches a summary (plus the ~33k
@@ -181,10 +197,9 @@ Release binary: ~2.3 MB.
   `sh`. The status line command stays on bash/zsh (those scripts are bash), and Claude's own Bash tool uses the shell Claude Code picks.
 - **Opening links and files** (`/open`): a panel lists the `http(s)` links and the existing file paths of this conversation, newest
   first (what Claude said, the files it read or changed, what you wrote; `file.rs:42` works). Enter opens one with the system's
-  opener (`open`, `xdg-open`), `e` edits a file in your editor, `/open 2` or `/open <link|path>` skips the panel. **Clicking** a link or path in
-  the conversation does the same, on release (a drag still selects text; a link broken across rows is put back together).
+  opener (`open`, `xdg-open`), `e` edits a file in your editor, `/open 2` or `/open <link|path>` skips the panel.
   Only `http(s)` links are opened. Files that run code when opened (apps, scripts, installers, `.py`, `.js`...) are shown in the
-  file manager instead of opened. Checked in a real terminal session: a mouse press and release on a link called `open` with that exact URL.
+  file manager instead of opened.
 - **Worktrees** (`/worktree`, `/wt`): a panel of the repository's git worktrees with the tabs working in each. Enter opens one in a tab (the
   tab already there, else a new one), `c` moves this tab into it (like `/cd`), `n` adds one (a sibling folder `<repo>-<name>` on branch
   `<name>`, made or reused; the new tab opens when git is done), `d` twice removes one. `/worktree add <name> [base]` and
@@ -196,6 +211,13 @@ Release binary: ~2.3 MB.
   to N times the usage; a note says so. Refused in the `lean` profile, which has no Agent tool. Checked against real Claude Code (haiku, 3
   files): one message with 3 parallel `Agent` calls, all `isolation: "worktree"`, 3 worktrees. Two honest limits: it is a prompt, so the model
   decides whether to follow it; and each agent's work stays on its own worktree branch until you merge it (`/worktree` lists them).
+- **Side questions** (`/btw <question>`): ask something about the conversation while Claude is still working, without interrupting it. Nothing
+  opens and no key is taken: the question appears in the transcript and the answer fills in below it (dim gutter, with its price), so you
+  keep typing, answering prompts or watching the turn. One `claude -p` call resumes a copy of the conversation (`--fork-session
+  --no-session-persistence`) with every tool off; the question and answer never reach Claude's history, context or transcript file. It
+  goes out at once even with the message queue on, and several can be in flight. It re-reads the conversation as input (with no tools it
+  may not hit the prompt cache; not measured), and it sees what Claude Code has already saved, so the step in progress may be missing.
+  Not run against the real API here (the sandbox blocks it): the tests use a stand-in `claude` that checks the arguments and the question.
 - **Terminals, for you and for Claude** (`/term [command]`): a real shell (or the command) on a pty inside claude++. It takes the whole
   screen and gets every key; ctrl+\ goes back to the conversation and the program keeps running. `/term` again lists them: Enter opens,
   `n` is a new shell, `x` twice closes one. With `/config` → *Agent terminal* on, Claude gets five tools hosted inside claude++ itself
@@ -256,10 +278,16 @@ Release binary: ~2.3 MB.
   Claude Code). Fast mode is changed live with `apply_flag_settings {fastMode}` and the backend's reported state
   decides what the note says (`Fast mode ON ↯` or the reason it refused); the status line shows `↯` while it is on.
   Verified against the real backend without sending any request; a real Opus fast request was not made (it bills
-  usage credits). ↑↓ model, ←→ effort, Enter applies live (`set_model` and `apply_flag_settings`, no restart),
+  usage credits). four menus, one with the keys (Tab moves it): models and versions as two lists side by side (↑↓), effort and fast mode as rows of choices (←→); Enter applies live (`set_model` and `apply_flag_settings`, no restart),
   and the choice is re-applied if the tab's backend is suspended and resumed. The list comes from `initialize`
   and is cached next to the command list; the status line shows `model effort`. `/model <name>` and `/effort <level>` set directly.
   A model switch warns that prompt caches are per model.
+- **How working looks** (`/config`: Spinner, Progress bars, Motion; or edit `config.json`, which takes any characters you type).
+  `"spinner"` is a sprite sheet: each character is one frame (`"⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"`), or space-separated words for multi-character frames
+  (`"[=  ] [== ] [===]"`); `"none"` hides it. `"progress"` is two characters, filled then empty (`"█░"`); `"none"` keeps the numbers only.
+  `"motion"` is `full` (spinner and a glint sweeping the verb), `calm` (default: spinner only) or `off` (nothing moves, and a busy tab
+  redraws once a second instead of ~8 times a second). A value that does not parse falls back to the default. Bars appear only where there is a real
+  fraction: usage, context, tasks done (in the spinner line) and agents done (`/tasks`).
 - **Which status line is claude++'s own choice** (`/statusline claude | builtin`, remembered in
   `~/.config/claude++/config.json`; `--statusline claude|builtin|"<command>"` overrides without saving). `builtin`
   (the default) is claude++'s own single line and never spawns anything. `claude` runs your Claude Code status
@@ -316,7 +344,7 @@ Release binary: ~2.3 MB.
   conversations from every folder plus Claude Code's background sessions from every directory, read from
   `~/.claude/jobs/*/state.json` (no process spawned). Each row has its state (`needs you` and `working` first),
   age and title (your `/rename`, else Claude Code's generated title, else the first prompt); a preview of the end of
-  the highlighted one with its summary or the question it is blocked on; and live filtering (all terms must match
+  the highlighted one with its summary or the question it is blocked on; and filtering (`/` starts it, in the side panel too; letters alone do nothing; esc leaves it; all terms must match
   title, summary, directory or id; `s:work`, `s:needs`, `s:done` filter by state). Enter reopens it in this tab if
   it is blank, else in a new tab, working in that session's own directory; a conversation already open just switches
   to its tab. A session still running in the background cannot be resumed headless (Claude Code refuses), so Enter
@@ -324,7 +352,7 @@ Release binary: ~2.3 MB.
   The list exists only while open: about 0.3 KB per row, 47 rows ≈ 14 KB, built in ~20 ms.
 - **Fork, take over, stop** (in the list): ctrl+f opens a copy of the highlighted session in its own tab
   (`--fork-session`; works for any session, including ones open elsewhere). ctrl+t on a running background
-  session stops it (`claude stop`) and opens it here; ctrl+x only stops it. Both need the same chord twice. Tool
+  session stops it (`claude stop`) and opens it here; ctrl+x only stops it. Both need the same chord twice. ctrl+x on an open tab that is working interrupts its turn at once (the side panel has it too). Tool
   approvals granted "for the session" do not carry over.
 - **Delete** (in the list): Delete (or ctrl+k) twice removes the highlighted conversation's transcript from disk, for
   good. Conversations open in a tab or running in the background are refused.
@@ -338,17 +366,23 @@ Release binary: ~2.3 MB.
   re-applied if the tab's process is restarted by idle suspension. Not yet: saving them into a profile.
 - **Side panel**: `/config` → Side panel → on (off by default; the full-screen list is always available and cannot be
   turned off). Then ← at the start of the input docks the list as a 30-column strip on the left (screens ≥ 100
-  wide), focused: ↑↓ move, Enter opens the highlighted conversation in a new tab (or this one if it is blank), → is "done browsing": it takes the highlighted conversation into the tab in front (replacing what that tab holds, or a new tab if it is mid-turn; switching if it is already open) and closes the side panel or leaves the full screen list, Esc hands the keyboard back (typing does too) and leaves it
-  docked, a second ← goes full screen, and → or Esc there step back to the dock. `/sessions` hides and shows it. It re-reads its sources every 5 s while visible
+  wide), focused: ↑↓ move, Enter opens the highlighted conversation in a new tab (or this one if it is blank), → is "done browsing": it takes the highlighted conversation into the tab in front (replacing what that tab holds, or a new tab if it is mid-turn; switching if it is already open) and closes the side panel or leaves the full screen list, Esc hides it (the panel is either focused or gone; typing letters does nothing while it has the keys, `/` filters, ctrl+c keeps its usual job and does not leave it),
+  a second ← goes full screen, and → or Esc there step back to the dock. `/sessions` hides and shows it. It re-reads its sources every 5 s while visible, on a thread (a list opens at once on what was read last, "loading…" the first time; titles are cached in `~/.cache/claude++/titles.json`, so only changed transcripts are read again; opening a conversation reads its transcript on a thread too, and sending waits until it is shown)
   and draws only the rows around the cursor.
-- **Scrolling**: mouse wheel (3 lines a tick), pgup/pgdn (a viewport minus two lines), shift+↑↓ (one line),
-  ctrl+home / ctrl+end (top / latest). While scrolled up the lines in view stay put as output arrives, and a
-  "↓ N lines below" tag shows how far back you are; sending a message returns to the latest. The wheel needs
-  mouse reporting (a left click picks a tab, or moves to a list row in any panel, the docked list included; clicking the highlighted row does what Enter does; prompts waiting on you ignore clicks), so selecting text takes Shift (Option in some terminals); `/config` → Mouse wheel → off gives
-  the mouse back to the terminal.
-- **Selecting text**: with the mouse on (the default), drag over the conversation to select; the selection is highlighted and ctrl+y copies it
-  (OSC 52, plus `pbcopy` on macOS). `/config` → Copy on select → on (off by default) copies it as soon as you let go. Any key, click or scroll drops
-  the selection. Wrapped lines copy as they are drawn.
+- **Scrolling**: the mouse wheel scrolls the conversation (3 lines a tick; it never walks your input history), and so do pgup/pgdn
+  (a viewport minus two lines), shift+↑↓ (one line), ctrl+home / ctrl+end (top / latest). While scrolled up the lines in view stay put as
+  output arrives, and a "↓ N lines below" tag shows how far back you are; sending a message returns to the latest.
+- **Selecting text**: claude++ takes the mouse, so it draws its own selection, live: the highlight follows the pointer as you drag, and
+  what is selected is on the clipboard while you drag (OSC 52, plus `pbcopy` on macOS; at most ten times a second), with "copied N
+  characters" shown when you let go. One mechanism for everything: the mouse and Shift are the same (claude++ asks the terminal to pass
+  shift+drag on, xterm's XTSHIFTESCAPE, which xterm and Ghostty honour; a terminal that keeps Shift for its own selection still does),
+  and the conversation, the message box and the panels all copy the same way. In the conversation the selection is held on the text,
+  so it stays on the same words while an answer streams in or you scroll, and a pointer held above or below it keeps scrolling. A
+  double click takes the word (paths and links count as words), a triple click the line; shift+click moves the end. Any key drops the
+  highlight. **In the message box** a click puts the cursor there (vim's normal mode keeps it on a character), a drag selects, and
+  shift+←/→/Home/End select from the keyboard (add ctrl or alt for words): typing or backspace replaces the selection. `/config` →
+  Mouse → off gives the mouse back to the terminal for good (then no wheel and no clicks). `/copy` copies the last answer,
+  `/copy code` its last code block.
 - **Custom profiles**: a JSON file per profile in `~/.config/claude++/profiles/<name>.json`, used like the built-in
   ones (`--profile name`, `/new name`, `/profile name`, or `"profile": "name"` in `config.json`; `/profile` lists them):
 
@@ -432,7 +466,7 @@ Release binary: ~2.3 MB.
   your user-level `~/.claude/CLAUDE.md` (not the project's).
 - **Find** (`/find text`): jump to the newest entry containing the text (case-insensitive); `/find` again steps to
   older matches, `/find +` to newer, wrapping.
-- **Queue** (`/queue`, alt+q, or click the strip; `/config` → While Claude works: queue / send, to get the old send-at-once behaviour back): a message sent while Claude works waits instead of cutting in; a
+- **Queue** (`/queue`, alt+q; `/config` → While Claude works: queue / send, to get the old send-at-once behaviour back): a message sent while Claude works waits instead of cutting in; a
   strip above the box lists the first few and each goes out when the turn ends. In the panel: ↑/↓ move, alt+↑/↓ (or
   J/K) reorder, `t` to the top, enter = send now (stops the running turn, then this goes first), `s` = steer (send
   without stopping; Claude takes it in at its next step), `e` edit (back into the box), `d` delete, `C` clear,
@@ -477,7 +511,7 @@ Release binary: ~2.3 MB.
   per tab. Closing a tab that is mid-turn asks for a second press.
 - **Per-project profile**: `<project>/.claude++/config.json` with `{"profile": "lean"}` (any built-in or custom
   profile) sets the profile for tabs started there and for sessions opened from that project; `--profile` wins.
-- **Small things that add up**: each tab keeps its own half-typed message when you switch away; `/copy` (or ctrl+y)
+- **Small things that add up**: each tab keeps its own half-typed message when you switch away; `/copy`
   copies the last answer and `/copy code` its last code block (OSC 52, plus `pbcopy` on macOS); alt+←/→ (or alt+b/f)
   move by word, alt+backspace and ctrl+w delete a word, alt+d deletes the next word, ctrl+u / ctrl+k cut to the start / end of the line (at its edge, the line break); ↑/↓ move between the rows of a longer message and only then walk history (the half-typed message comes back when you step past the newest); ctrl+z undoes and ctrl+shift+z (alt+z where the terminal cannot tell shift) redoes; a
   background tab that finishes a turn or asks for an answer rings the terminal bell or sends a desktop
@@ -665,8 +699,100 @@ sessions in different folders then share the whole system prompt in the prompt c
 3.2k to 1.8k tokens (−45%; cost of a trivial haiku turn $0.0007 → $0.0004, `python3 bench/levers.py xcache`),
 and a repository whose git status changed no longer invalidates it. `"stable_prompt": "off"` in `config.json` turns it off.
 
+**A long conversation does not make the backend big, and `/compact` does not shrink it** (`python3 bench/levers.py growth 16`, Claude Code
+2.1.321, haiku, `lean` backend, $0.26): over 16 turns the context grew from 8.8k to 37.8k tokens and the footprint from 139 to 147 MB (about
+0.3 MB per 1k tokens); `/compact` cut the context to 12.3k tokens and the footprint stayed at 148–150 MB. So the ~140 MB a backend holds
+is almost all baseline, and stopping the process (idle suspension, the budget) is the only thing that gives it back. Not measured: whether
+the 0.3 MB per 1k tokens stays linear at several hundred thousand tokens.
+
 The Claude daemon and `bg-spare` workers seen in `ps` come from interactive `claude` (`←`, `/bg`, `claude agents`), not
 from `claude -p`; a headless run does not start or need them (checked by diffing `ps` around one run).
+
+## Seeing and managing processes: `/procs` and the supervisor
+
+`/procs` (or `claude++ procs` from a shell) lists every Claude-related process on the machine, grouped by who owns it, with
+the memory each holds (macOS `footprint`; RSS elsewhere, which overstates). It is read-only. **Only what claude++ itself started is ever
+controlled; everything else is shown and left alone**: interactive `claude` windows, Claude Code's own daemon and its
+pre-warmed `bg-spare` workers, and MCP servers started by Claude or by another app. Groups: ours, the supervisor, another claude++,
+`claude` (not ours), daemon, daemon spare workers, background session hosts, MCP servers (not ours). One run on a machine with
+three `claude` sessions (two interactive, one background), Claude Code's daemon and one claude++ showed 44 processes holding 2.6 GB, of which the daemon's three idle
+spare workers held 0.68 GB: that is Claude Code's, so it is listed and not touched (`CLAUDE_CODE_DISABLE_AGENT_VIEW=1` in the
+shell that starts `claude` is Claude Code's own switch for its daemon; not tested here).
+
+Once a day at most, claude++ also says so in the first tab when Claude Code's idle spare workers hold more than 200 MB, so the cost of
+interactive `claude` windows is visible without opening `/procs`.
+
+**The supervisor** (`claude++ supervisor`) is one small process per user that every claude++ connects to. claude++ starts it when none
+is running, and it ends 20 s after the last claude++ has left and any clean-up below is done. **It owns every decision about memory and
+idleness, and does the measuring**; a window only says what its tabs are and obeys the request to stop one (it can refuse a tab you
+just switched to or that started working). It has these jobs:
+
+- *Status:* each claude++ tells it what its tabs are doing, and it tells every instance about the others (`/procs` shows the other
+  windows' tab counts, busy tabs and memory).
+- *A ledger of what claude++ started:* each instance reports the pids of its `claude` backends. If an instance disappears without a
+  goodbye (killed, crashed), its backends that are still running are stopped, 10 s later with SIGTERM and after 3 s more with SIGKILL.
+  Guards: the instance itself must be gone for good (same pid *and* start time no longer running, so a window that only lost its
+  connection keeps its processes), and each pid must still have the start time it was reported with (a reused pid is left alone).
+  A clean quit says goodbye first, and then nothing is touched.
+- *Measuring.* It runs `footprint` (or `ps`) for all windows at once, every 6 s while any window set a budget and every 18 s otherwise:
+  each tab's `claude` process with its children, and each window itself. The numbers come back to every window with the peers message,
+  and are what the `mem` segment of the status line, `/procs` and the hints show. A window runs no `ps` or `footprint` of its own.
+- *One memory budget for all windows.* `--mem-budget` (or `/config`) covers all windows together: when they hold more than the **smallest** budget any window asked for, the supervisor asks the window that owns
+  the longest-idle tab that is safe to stop (same rules as before: never the tab in front, a busy one, one with a prompt or background
+  work) to stop its `claude`; it resumes on the next message, which re-caches the conversation. One tab per check (every 6 s), so the
+  next memory sample shows the effect before another goes. A window that set no budget counts towards the total and is never asked
+  to stop anything. The owning window has the last word and refuses a tab you have just switched to or that started working. When the total is over
+  the budget and no tab is safe to stop, the supervisor tells the windows that asked for the budget (at most once a minute).
+- *Idle tabs, and the window you are in versus the ones you left.* A tab that is not in front is asked to stop once it has been idle for
+  its window's `--idle-suspend`. The tab in front of the window you are working in is asked to stop after five times as long with no
+  input. The tab in front of a window you left is treated like a background tab. Each window tells the supervisor
+  whether its terminal has focus (terminals that report it), how long since its last key, and its `--idle-suspend`. The supervisor
+  decides which window is in front: the one whose terminal has focus, else the one with the most recent input (and any other within a
+  minute of it). Every other window's front tab is then as stoppable as a background tab: it is asked to stop once idle for that window's
+  `--idle-suspend`, **with or without a memory budget**, and the budget picks from those tabs too. The owning window refuses when its
+  terminal has focus or you typed in the last 30 s. A window that reports nothing (an older build) counts as in front. Measured with `bench/multi.py`
+  (`sep-active`: three separate windows, typing only in the third, haiku): 453 MB with all three running, **167 MB** after two minutes,
+  against 447 → 434 MB with the supervisor off; the two stopped windows answered their next message 1.6–2 s later than the one in use.
+  A window you left is stopped 60–90 s after you start working elsewhere at the earliest (the 60 s margin plus the 30 s reporting step),
+  and not before its tab has been idle for `--idle-suspend`. The idle sweep is part of the supervisor's budget switch: when you pause the budget (the "paused" switch in the supervisor panel), nothing is stopped.
+  `CLAUDEPP_SUP_DIR` points a claude++ at a different supervisor directory (benches and tests); that directory is created with mode 0700.
+  A supervisor left running from an older build (a rebuild or an upgrade) is replaced by the first window of the new build that finds it serving nobody else; one with other windows attached is left alone, and the panel keeps saying "stale" until they close.
+- *Shared MCP servers across windows.* With *Share MCP servers* on (`/config`), the stdio servers of every tab are run once instead of
+  once per tab. Without the supervisor that is one process per window; with it, one process for **all** windows (same command,
+  arguments, environment and folder). A window hands each JSON-RPC message to the supervisor and gets the answer back; request ids are
+  kept apart per window. The process stops when the last window that used it is gone. If the supervisor goes away, a message in flight
+  gets a JSON-RPC error and the next ones are answered by a process of the window's own, as before. Off by default, like the setting.
+- *Nothing else.* No process claude++ did not start is ever signalled.
+
+**Without the shared supervisor.** A window that cannot use it (`CLAUDEPP_SUPERVISOR=off`, stopped with `/supervisor`, or one that would
+not start) runs the same supervisor code inside itself, over a socket pair, for itself only. Budget, idle-suspend and measuring work the
+same, with this window's tabs only, and its tabs share MCP servers among themselves when that setting is on. There is no second
+implementation of any of it in the window. A window on its own supervisor looks for the shared one again every 10 s (unless `off`) and
+switches to it when it is there.
+
+**Managing it: `/supervisor`**, a dashboard. From the top: its state (running, pid, uptime, protocol; a warning when it was started from an
+older claude++ binary), the figures at a glance (windows, tabs and how many are working or hold a claude process, shared MCP servers;
+since it started: tabs the budget stopped, processes cleaned up after crashed windows, MCP messages relayed, windows served),
+**memory** as a gauge against the smallest budget any window asked for plus a sparkline of the last two minutes, every **window** with
+its share of memory and each of its tabs (working, idle for how long, or no process), the **shared MCP servers** it runs (pid, memory,
+windows using it, times started), and its **activity** (the log, with times). It refreshes every second. The same screen is the
+control panel: ↑↓ moves over the MCP servers, the settings and the buttons, ←→ changes a setting or picks a button, Enter runs.
+*Settings*, each saved in `config.json` and applied to the running one at once: how long it **stays after the last window** (20 s, 5 min,
+1 hour, always), whether it **cleans up after a crashed window** (on by default), and whether the **memory budget** is enforced or
+paused. *Buttons*: **Restart** (windows reconnect within seconds and a new one starts from the current binary: what to do after
+updating claude++), **Stop** (and keep it stopped until you Start it; shared MCP servers then run in each window), **Start**; Enter on a
+shared MCP server restarts that process (the next message from any window starts it again). A supervisor from before this panel cannot
+be inspected, so the dashboard shows only what the windows already know of each other, and Restart and Stop signal it, only after its
+command line says it is a `claude++ supervisor`. It never acts on anything claude++ did not start.
+
+The socket is `/tmp/claudepp-<uid>/sup.sock` (directory 0700, socket 0600, the directory's owner is checked); the log next to it is
+`supervisor.log`. Messages are one JSON object per line (`hello`, `tabs`, `mcp`, `bye`, `status`, `set`, `mcp_restart`, `shutdown`; `welcome`, `peers`, `suspend`, `mcp_reply`, `status`, `refuse`), versioned. Stopped on purpose = a `stopped` file next to the socket.
+Not done: backends are still started and held by each claude++ itself (a supervisor crash does not kill them, and the windows fall
+back to their own budget check); the budget does not yet weigh a tab's cost to resume against its memory.
+Measured with the real binary (`start → two instances → one dies without a goodbye`): the dead instance's backend was stopped 10.3 s
+later, the instance that said goodbye was left alone, and the supervisor exited 20 s after that clean-up had finished. For the budget,
+two simulated windows (A: budget 200 MB, tabs of 80 and 70 MB; B: no budget, 120 MB) were 270 MB over: 6.3 s in, A was asked to stop
+its longest-idle tab, and B was never asked.
 
 ## Many agents, one process
 
@@ -762,6 +888,8 @@ Run `cargo build --release` first. All use the real `claude` or none at all; non
   permission queue, questions, interrupt, subagent nesting), wrapping / CJK width / cursor
   math, diff rendering, base64, and backend process lifecycle against a fake `claude` script
   (round trip, stderr capture, clean exit, kill on hang). `.github/workflows/ci.yml` runs `cargo test` and `clippy -D warnings` on macOS and Linux (not yet run: no remote).
+- The supervisor tests (`supervisor::tests`) use Unix sockets and real child processes, so they fail inside a sandbox that forbids
+  creating sockets (Operation not permitted); run them outside it.
 - End-to-end runs were driven through a pty plus a terminal emulator against the real backend:
   permission → file written, multi-turn recall, tabs, interrupt, AskUserQuestion, image
   attachment, idle suspend → resume with context, and quit with no orphans.

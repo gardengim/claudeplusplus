@@ -13,6 +13,7 @@
 //! A tab owns its terminals, so they survive a restart of the `claude` process behind it (`/cd`, `/profile`) and go with
 //! the tab. Nothing is running, and the tools are not even offered to the model, until `/config` → "Agent terminal" is on.
 
+use crate::sync::LockOk;
 use crate::pane::{Replies, draw_screen, encode, nz, open_pty, winsize};
 use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -66,7 +67,7 @@ pub struct Term {
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
-    m.lock().unwrap_or_else(|e| e.into_inner())
+    m.lock_ok()
 }
 
 impl Term {
@@ -524,6 +525,7 @@ mod tests {
         assert!(out.contains("hello-42") && !out.contains("timed out"), "{out}");
         // Ctrl-C ends a running command and the shell takes the next line.
         call(&t, "term_send", json!({"name": "t1", "text": "sleep 30\n"})).unwrap();
+        thread::sleep(Duration::from_millis(300)); // the shell must have started it, or the Ctrl-C meets the shell instead
         call(&t, "term_send", json!({"name": "t1", "keys": ["Ctrl-C"]})).unwrap();
         let out = call(&t, "term_send", json!({"name": "t1", "text": "echo back-$((1+1))", "keys": ["Enter"], "until": "back-2"})).unwrap();
         assert!(out.contains("back-2"), "{out}");

@@ -263,10 +263,6 @@ fn grid(cs: &[Cat], max: u64, sel: &str, rows: usize, cols: usize) -> Vec<Line<'
 
 // ---- the detail for one category ----
 
-fn clip(s: &str, w: usize) -> String {
-    if s.chars().count() <= w { s.to_string() } else { s.chars().take(w.saturating_sub(1)).collect::<String>() + "…" }
-}
-
 fn source_name(s: &str) -> &str {
     match s {
         "userSettings" => "yours",
@@ -279,7 +275,7 @@ fn source_name(s: &str) -> &str {
 /// What a row stands for and what makes up its tokens; `w` is the width to fit.
 fn detail(c: &Ctx, cat: &Cat, w: usize) -> Vec<Line<'static>> {
     let (d, w) = (&c.detail, w.max(24));
-    let row = |label: String, t: u64| Line::from(vec![Span::raw(format!("{:<n$}", clip(&label, w - 8), n = w - 7)), Span::styled(format!("{:>6}", tokens(t)), theme::bold())]);
+    let row = |label: String, t: u64| Line::from(vec![Span::raw(format!("{:<n$}", crate::ui::truncate(&label, w - 8), n = w - 7)), Span::styled(format!("{:>6}", tokens(t)), theme::bold())]);
     let sub = |s: &str| Line::styled(s.to_string(), theme::dim());
     let note = |s: &str| wrap(s, w).into_iter().map(|l| Line::styled(l, theme::dim())).collect::<Vec<_>>();
     let mut out = vec![Line::from(vec![Span::styled("■ ", cat.style()), Span::styled(cat.name.clone(), theme::bold()), Span::styled(format!("  {}", tokens(cat.tokens)), theme::dim())])];
@@ -393,7 +389,7 @@ impl Ui {
     /// `n`: how many rows there are.
     pub fn key(&mut self, k: KeyEvent, n: usize) -> Out {
         match k.code {
-            KeyCode::Esc | KeyCode::Char('q') => Out::Close,
+            KeyCode::Esc => Out::Close,
             KeyCode::Char('c') if k.modifiers.contains(KeyModifiers::CONTROL) => Out::Close,
             KeyCode::Up | KeyCode::Down if n > 0 => {
                 self.sel = cycle(self.sel.min(n - 1), n, k.code == KeyCode::Up);
@@ -484,22 +480,22 @@ pub fn view(ui: &Ui, u: &Usage, width: usize) -> View {
         .enumerate()
         .map(|(i, k)| {
             let at = i == sel;
-            let name = |extra: &str| Span::styled(format!("{:<name_w$}", clip(&format!("{}{extra}", k.name), name_w)), if at { theme::bold() } else { Style::new() });
+            let name = |extra: &str| Span::styled(format!("{:<name_w$}", crate::ui::truncate(&format!("{}{extra}", k.name), name_w)), if at { theme::bold() } else { Style::new() });
             let spans = match k.kind {
                 Kind::Used => {
                     let share = k.tokens as f64 / used_sum.max(1) as f64;
-                    let full = ((share * 10.0).round() as usize).min(10);
+                    let (full, rest) = crate::motion::look().bar(share, 10);
                     vec![
                         Span::styled("■ ", k.style()),
                         name(""),
                         Span::styled(format!("{:>7} ", tokens(k.tokens)), theme::bold()),
-                        Span::styled("█".repeat(full), k.style()),
-                        Span::styled("░".repeat(10 - full), theme::dim()),
+                        Span::styled(full, k.style()),
+                        Span::styled(rest, theme::dim()),
                         Span::styled(if share < 0.005 { " <1%".to_string() } else { format!(" {:>3.0}%", share * 100.0) }, theme::dim()),
                     ]
                 }
-                Kind::Deferred => vec![Span::styled("□ ", theme::dim()), Span::styled(format!("{:<name_w$}", clip(&format!("{} · on demand", k.name), name_w)), theme::dim()), Span::styled(format!("{:>7}", tokens(k.tokens)), theme::dim())],
-                Kind::Buffer => vec![Span::styled("▒ ", theme::dim()), Span::styled(format!("{:<name_w$}", clip(&format!("{} · reserved", k.name), name_w)), theme::dim()), Span::styled(format!("{:>7}", tokens(k.tokens)), theme::dim())],
+                Kind::Deferred => vec![Span::styled("□ ", theme::dim()), Span::styled(format!("{:<name_w$}", crate::ui::truncate(&format!("{} · on demand", k.name), name_w)), theme::dim()), Span::styled(format!("{:>7}", tokens(k.tokens)), theme::dim())],
+                Kind::Buffer => vec![Span::styled("▒ ", theme::dim()), Span::styled(format!("{:<name_w$}", crate::ui::truncate(&format!("{} · reserved", k.name), name_w)), theme::dim()), Span::styled(format!("{:>7}", tokens(k.tokens)), theme::dim())],
                 Kind::Free => vec![Span::styled("· ", theme::dim()), name(""), Span::styled(format!("{:>7} ", tokens(k.tokens)), theme::bold()), Span::styled(format!("{:.0}% of the window", percent(k.tokens, c.max)), theme::dim())],
             };
             row_with(at, false, spans)

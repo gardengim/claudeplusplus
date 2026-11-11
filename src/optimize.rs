@@ -386,6 +386,8 @@ pub struct Ui {
     pub review_note: Option<(String, bool)>,
     /// The MCP servers you defined for this folder.
     pub mcp: Vec<String>,
+    /// Two menus, one with the keys: the level (a row of choices, left and right) or the items (a list, up and down).
+    pub on_level: bool,
 }
 
 pub type Pending = Arc<Mutex<Option<Result<(Vec<Verdict>, f64), String>>>>;
@@ -399,7 +401,7 @@ impl Ui {
             *out.lock().unwrap() = Some(ev);
         });
         let files = instructions::Ui::new(cwd, Rules::new()).files;
-        Ui { level, sel: 0, items: vec![], loading: true, ev: None, scan, skills: None, files, start_tokens: 0, review: None, cands: vec![], verdicts: None, review_note: None, mcp: crate::mcp::defs(cwd).into_keys().collect() }
+        Ui { level, sel: 0, items: vec![], loading: true, ev: None, scan, skills: None, files, start_tokens: 0, review: None, cands: vec![], verdicts: None, review_note: None, mcp: crate::mcp::defs(cwd).into_keys().collect(), on_level: false }
     }
 
     /// Take the scan result and the skill listing when both are in; true when the proposal was just built.
@@ -635,7 +637,7 @@ pub fn view(ui: &Ui, width: usize) -> View {
     let head = vec![Line::from(
         Level::ALL
             .iter()
-            .flat_map(|l| [theme::chip(l.name(), *l == ui.level, *l == ui.level, theme::bold()), Span::raw(" ")])
+            .flat_map(|l| [theme::chip_in(l.name(), *l == ui.level, *l == ui.level, ui.on_level, theme::bold()), Span::raw(" ")])
             .collect::<Vec<_>>(),
     )];
     if ui.loading {
@@ -657,7 +659,8 @@ pub fn view(ui: &Ui, width: usize) -> View {
         let label: String = it.label.chars().take(width.saturating_sub(24)).collect();
         let pad = width.saturating_sub(12).saturating_sub(label.chars().count()).saturating_sub(size.chars().count()).max(1);
         let style = if n == sel { theme::bold() } else if it.on { ratatui::style::Style::new() } else { theme::dim() };
-        body.push(row_with(n == sel, false, vec![Span::styled(if it.on { "☑ " } else { "☐ " }, if it.on { theme::ok() } else { theme::dim() }), Span::styled(label, style), Span::raw(" ".repeat(pad)), Span::styled(size, theme::dim())]));
+        let cells = vec![Span::styled(if it.on { "☑ " } else { "☐ " }, if it.on { theme::ok() } else { theme::dim() }), Span::styled(label, style), Span::raw(" ".repeat(pad)), Span::styled(size, theme::dim())];
+        body.push(if ui.on_level { crate::panel::row_in(n == sel, false, cells) } else { row_with(n == sel, false, cells) });
     }
     let ev = ui.ev.clone().unwrap_or_default();
     let mut tail = vec![Line::raw("")];
@@ -681,7 +684,7 @@ pub fn view(ui: &Ui, width: usize) -> View {
     if let Some((n, style)) = review {
         tail.extend(wrap(&n, width.saturating_sub(4).max(20)).into_iter().map(|l| Line::styled(l, style)));
     }
-    View::new("Optimize", body, focus, theme::hints(&[("↑↓", "move"), ("space", "tick"), ("←→", "level"), ("c", "ask Claude"), ("enter", "apply"), ("esc", "cancel")])).with_head(head).with_tail(tail).rows(0, 14)
+    View::new("Optimize", body, focus, theme::hints(&[("↑↓←→", "move"), ("tab", "next menu"), ("space", "tick"), ("c", "ask Claude"), ("enter", "apply"), ("esc", "cancel")])).with_head(head).with_tail(tail).rows(0, 14)
 }
 
 #[cfg(test)]

@@ -16,6 +16,7 @@
 //! logging) are dropped, and a request the server makes of its client (sampling, roots, elicitation) is refused.
 //! Servers that depend on those, or keep state per conversation, should not be shared.
 
+use crate::sync::LockOk;
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
@@ -36,8 +37,23 @@ pub struct Def {
 }
 
 impl Def {
-    fn key(&self) -> String {
+    pub(crate) fn key(&self) -> String {
         json!([self.command, self.args, self.env, self.cwd]).to_string()
+    }
+
+    /// For the supervisor, which runs the process when claude++ windows share it across windows.
+    pub fn to_json(&self) -> Value {
+        json!({"command": self.command, "args": self.args, "env": self.env, "cwd": self.cwd})
+    }
+
+    pub fn from_json(v: &Value) -> Option<Def> {
+        let strs = |a: &Value| a.as_array().map(|a| a.iter().filter_map(|s| s.as_str().map(String::from)).collect::<Vec<_>>());
+        Some(Def {
+            command: v["command"].as_str()?.into(),
+            args: strs(&v["args"])?,
+            env: v["env"].as_array()?.iter().filter_map(|p| Some((p[0].as_str()?.into(), p[1].as_str()?.into()))).collect(),
+            cwd: v["cwd"].as_str()?.into(),
+        })
     }
 }
 
@@ -90,7 +106,7 @@ static REGISTRY: LazyLock<Mutex<HashMap<String, Weak<Server>>>> = LazyLock::new(
 
 /// The shared server for `def`: the running one, or a new one. The process stops when the last `Arc` is dropped.
 pub fn acquire(def: &Def) -> Result<Arc<Server>, String> {
-    let mut reg = REGISTRY.lock().unwrap_or_else(|e| e.into_inner());
+    let mut reg = REGISTRY.lock_ok();
     reg.retain(|_, w| w.strong_count() > 0);
     let key = def.key();
     if let Some(s) = reg.get(&key).and_then(Weak::upgrade) && s.usable() {
@@ -108,19 +124,64 @@ pub fn acquire(def: &Def) -> Result<Arc<Server>, String> {
     Ok(s)
 }
 
+/// Sends one message of a shared server to the supervisor, which runs the process for every window. `Err` gives the
+/// reply back: the supervisor is not there (any more), so the caller runs the server itself.
+pub type HubFn = dyn Fn(&Def, u64, Value, Reply) -> Result<(), Reply> + Send + Sync;
+
+static HUB: Mutex<Option<Arc<HubFn>>> = Mutex::new(None);
+
+/// While set, servers acquired with [`acquire_shared`] run in the supervisor and are shared across windows.
+pub fn set_hub(h: Option<Arc<HubFn>>) {
+    *HUB.lock_ok() = h;
+}
+
+/// One tab's share of a server: it goes through the supervisor while there is one, and through a process of our
+/// own otherwise (started the first time it is needed, or at once when there is no supervisor to ask).
+pub struct Handle {
+    def: Def,
+    local: std::sync::OnceLock<Result<Arc<Server>, String>>,
+}
+
+/// A handle for `def`. Without a supervisor the process starts now, so it comes up while claude does.
+pub fn acquire_shared(def: &Def) -> Handle {
+    let h = Handle { def: def.clone(), local: Default::default() };
+    if HUB.lock_ok().is_none() {
+        let _ = h.local.set(acquire(def));
+    }
+    h
+}
+
+impl Handle {
+    /// One message from a tab; `reply` gets the JSON-RPC answer.
+    pub fn route(&self, client: u64, msg: Value, reply: Reply) {
+        let hub = HUB.lock_ok().clone();
+        let reply = match hub {
+            Some(hub) => match hub(&self.def, client, msg.clone(), reply) {
+                Ok(()) => return,
+                Err(reply) => reply,
+            },
+            None => reply,
+        };
+        match self.local.get_or_init(|| acquire(&self.def)) {
+            Ok(s) => s.route(client, msg, reply),
+            Err(e) => reply(error(msg.get("id").unwrap_or(&Value::Null), e)),
+        }
+    }
+}
+
 /// How many shared server processes are running now.
 pub fn live() -> usize {
-    let reg = REGISTRY.lock().unwrap_or_else(|e| e.into_inner());
+    let reg = REGISTRY.lock_ok();
     reg.values().filter_map(Weak::upgrade).filter(|s| s.lock().tx.is_some()).count()
 }
 
-fn error(id: &Value, message: &str) -> Value {
+pub(crate) fn error(id: &Value, message: &str) -> Value {
     json!({"jsonrpc": "2.0", "id": id, "error": {"code": -32000, "message": message}})
 }
 
 impl Server {
     fn lock(&self) -> MutexGuard<'_, Inner> {
-        self.inner.lock().unwrap_or_else(|e| e.into_inner())
+        self.inner.lock_ok()
     }
 
     fn usable(&self) -> bool {
@@ -313,6 +374,59 @@ impl Server {
     }
 }
 
+/// One shared server, as `/supervisor` lists it.
+pub struct Running {
+    pub key: String,
+    pub command: String,
+    pub cwd: String,
+    pub pid: Option<u32>,
+    /// Windows (connections) holding it.
+    pub windows: usize,
+    pub starts: u32,
+}
+
+/// The servers running now, in a stable order.
+pub fn running() -> Vec<Running> {
+    let mut out: Vec<Running> = REGISTRY
+        .lock_ok()
+        .iter()
+        .filter_map(|(key, w)| w.upgrade().map(|s| (key.clone(), s)))
+        .map(|(key, s)| {
+            let i = s.lock();
+            // One count is the one just taken from the registry.
+            Running { key, command: s.def.command.clone(), cwd: s.def.cwd.clone(), pid: i.child.as_ref().map(|c| c.id()), windows: Arc::strong_count(&s) - 1, starts: i.starts }
+        })
+        .collect();
+    out.sort_by(|a, b| (&a.command, &a.cwd).cmp(&(&b.command, &b.cwd)));
+    out
+}
+
+impl Server {
+    /// Stop the process; the next message of any window starts it again (and the give-up count starts over).
+    fn restart(&self) {
+        let mut i = self.lock();
+        i.tx = None;
+        i.starts = 0;
+        let child = i.child.take();
+        drop(i);
+        if let Some(c) = child {
+            crate::backend::reap(c, true);
+        }
+    }
+}
+
+/// Restart the server with this key. False when it is not running any more.
+pub fn restart(key: &str) -> bool {
+    let server = REGISTRY.lock_ok().get(key).and_then(Weak::upgrade);
+    server.inspect(|s| s.restart()).is_some()
+}
+
+/// Stop every server: the supervisor is leaving, and its servers must not outlive it.
+pub fn stop_all() {
+    let all: Vec<Arc<Server>> = REGISTRY.lock_ok().values().filter_map(Weak::upgrade).collect();
+    all.iter().for_each(|s| s.restart());
+}
+
 impl Drop for Server {
     /// The last tab using it is gone: close its input so it can finish, and stop it if it lingers.
     fn drop(&mut self) {
@@ -329,6 +443,9 @@ pub(crate) mod tests {
     use super::*;
     use std::sync::mpsc::channel;
     use std::time::Duration;
+
+    /// The hub is process-wide: a test that sets it, or that must not see one, holds this.
+    pub(crate) static HUB_TEST: Mutex<()> = Mutex::new(());
 
     /// A server in sh: it logs each start to `log`, answers `initialize`, `tools/list` and `tools/call` (with its
     /// pid) and exits on `tools/call` for `die`. Ids are read out of the line.
@@ -461,5 +578,37 @@ done"#,
         crate::backend::wait_for_exits();
         assert_ne!(unsafe { libc::kill(pid, 0) }, 0, "gone with the last holder");
         let _ = std::fs::remove_dir_all(log.parent().unwrap());
+    }
+    fn ask_handle(h: &Handle, client: u64, msg: Value) -> Value {
+        let (tx, rx) = channel();
+        h.route(client, msg, Box::new(move |v| tx.send(v).unwrap()));
+        rx.recv_timeout(Duration::from_secs(5)).expect("a reply")
+    }
+
+    #[test]
+    fn a_def_survives_the_trip_to_the_supervisor() {
+        let (def, _) = server("json");
+        assert_eq!(Def::from_json(&def.to_json()), Some(def));
+        assert_eq!(Def::from_json(&json!({"command": "x"})), None);
+    }
+
+    #[test]
+    fn a_handle_goes_through_the_hub_when_it_takes_the_message_and_runs_the_server_itself_when_it_does_not() {
+        let _own = HUB_TEST.lock_ok();
+        let (def, log) = server("hub");
+        set_hub(Some(Arc::new(|_, _, msg, reply| {
+            reply(json!({"jsonrpc": "2.0", "id": msg["id"], "result": {"via": "hub"}}));
+            Ok(())
+        })));
+        let h = acquire_shared(&def);
+        assert_eq!(ask_handle(&h, 1, init(1))["result"]["via"], "hub");
+        assert!(!log.exists(), "nothing was started here");
+        set_hub(Some(Arc::new(|_, _, _, reply| Err(reply))));
+        assert_eq!(ask_handle(&h, 1, init(2))["id"], 2, "the hub declined: answered by our own process");
+        assert!(log.exists());
+        set_hub(None);
+        let h2 = acquire_shared(&def);
+        assert_eq!(ask_handle(&h2, 2, init(3))["id"], 3);
+        assert_eq!(std::fs::read_to_string(&log).unwrap().matches("start").count(), 1, "both handles share one process");
     }
 }

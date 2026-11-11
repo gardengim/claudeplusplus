@@ -77,7 +77,7 @@ impl Backend {
         wrap: impl Fn(u32, Msg) -> E + Send + 'static,
     ) -> io::Result<Self> {
         // Started first so they come up while claude does. One that cannot start still answers, with that error.
-        let shares: HashMap<String, Result<Arc<crate::share::Server>, String>> = launch.shared.iter().map(|(n, d)| (n.clone(), crate::share::acquire(d))).collect();
+        let shares: HashMap<String, crate::share::Handle> = launch.shared.iter().map(|(n, d)| (n.clone(), crate::share::acquire_shared(d))).collect();
         let terms = launch.terms.clone();
         let mut cmd = Command::new(&launch.bin);
         cmd.args([
@@ -263,7 +263,7 @@ pub fn reap(mut child: Child, group: bool) {
 static NEXT_CLIENT: AtomicU64 = AtomicU64::new(1);
 
 /// Claude asked for an MCP server we host: pass the message to the shared process and send its answer back.
-fn answer_mcp(v: &Value, client: u64, shares: &HashMap<String, Result<Arc<crate::share::Server>, String>>, terms: &Option<Arc<crate::term::Terms>>, pipe: &Arc<Pipe>) {
+fn answer_mcp(v: &Value, client: u64, shares: &HashMap<String, crate::share::Handle>, terms: &Option<Arc<crate::term::Terms>>, pipe: &Arc<Pipe>) {
     let (rid, req) = (v["request_id"].clone(), &v["request"]);
     let msg = req["message"].clone();
     let pipe = pipe.clone();
@@ -278,8 +278,7 @@ fn answer_mcp(v: &Value, client: u64, shares: &HashMap<String, Result<Arc<crate:
         return t.handle(&msg, reply);
     }
     match req["server_name"].as_str().and_then(|n| shares.get(n)) {
-        Some(Ok(server)) => server.route(client, msg.clone(), reply),
-        Some(Err(e)) => reply(fail(e)),
+        Some(server) => server.route(client, msg.clone(), reply),
         None => reply(fail("no such server")),
     }
 }
@@ -403,6 +402,7 @@ done"#,
 
     #[test]
     fn two_backends_get_the_same_hosted_mcp_server_and_still_see_end_of_input() {
+        let _no_hub = crate::share::tests::HUB_TEST.lock().unwrap_or_else(|e| e.into_inner());
         let (def, log) = crate::share::tests::server("backend");
         let out = log.with_file_name("claude-out");
         // The fake claude names the server in `initialize`, then asks it two things over the pipe, like the real one.

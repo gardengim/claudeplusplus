@@ -11,7 +11,7 @@ use ratatui::text::{Line, Span};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 /// Hour, minute and second of the local day at `t`.
-fn local_hms(t: SystemTime) -> (u64, u64, u64) {
+pub fn local_hms(t: SystemTime) -> (u64, u64, u64) {
     let secs = t.duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs()) as libc::time_t;
     // SAFETY: localtime_r only writes the tm it is given.
     let tm = unsafe {
@@ -102,7 +102,7 @@ impl Ui {
         self.cursor = self.cursor.min(n.saturating_sub(1));
         let at = self.cursor;
         match k.code {
-            KeyCode::Esc | KeyCode::Char('q') => return Act::Close,
+            KeyCode::Esc => return Act::Close,
             KeyCode::Char('c') if ctrl => return Act::Close,
             _ if n == 0 => {}
             // Moving a message: it keeps the cursor.
@@ -119,8 +119,8 @@ impl Ui {
                 q[..=at].rotate_right(1);
                 self.cursor = 0;
             }
-            KeyCode::Up | KeyCode::Char('k') => self.cursor = cycle(at, n, true),
-            KeyCode::Down | KeyCode::Char('j') => self.cursor = cycle(at, n, false),
+            KeyCode::Up => self.cursor = cycle(at, n, true),
+            KeyCode::Down => self.cursor = cycle(at, n, false),
             KeyCode::Enter => return Act::Send(at),
             KeyCode::Char('s') => return Act::Steer(at),
             KeyCode::Char('e') => return Act::Edit(at),

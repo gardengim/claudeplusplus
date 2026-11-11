@@ -11,6 +11,7 @@ use crate::session::Choice;
 use crate::theme;
 use crate::ui::{truncate, wrap};
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use unicode_width::UnicodeWidthStr;
 use serde_json::Value;
@@ -65,6 +66,9 @@ pub struct Ui {
     /// Permission prompt: highlighted row.
     pub perm: usize,
     tab: usize,
+    /// Several questions are two menus, one with the keys: the strip of questions (left and right) or the
+    /// options of this one (up and down). Tab moves between them.
+    on_strip: bool,
     cursor: Vec<usize>,
     checked: Vec<Vec<bool>>,
     other: Vec<String>,
@@ -149,13 +153,16 @@ impl Ui {
             return Outcome::Stay;
         }
         let rows = no + 1; // the options and "Other"
+        if let Some(to) = crate::panel::menu_after(&k, self.on_strip as usize, 2) {
+            self.on_strip = to == 1;
+        }
         match k.code {
             KeyCode::Esc => return Outcome::Decline,
-            KeyCode::Up | KeyCode::Down => self.cursor[i] = crate::panel::cycle(self.cursor[i], rows, k.code == KeyCode::Up),
-            KeyCode::Home => self.cursor[i] = 0,
-            KeyCode::End => self.cursor[i] = no,
-            KeyCode::Left | KeyCode::BackTab if n > 1 => self.tab = self.tab.saturating_sub(1),
-            KeyCode::Right | KeyCode::Tab if n > 1 => self.tab = (self.tab + 1).min(n),
+            KeyCode::Up | KeyCode::Down if !self.on_strip => self.cursor[i] = crate::panel::cycle(self.cursor[i], rows, k.code == KeyCode::Up),
+            KeyCode::Home if !self.on_strip => self.cursor[i] = 0,
+            KeyCode::End if !self.on_strip => self.cursor[i] = no,
+            KeyCode::Left if n > 1 && self.on_strip => self.tab = self.tab.saturating_sub(1),
+            KeyCode::Right if n > 1 && self.on_strip => self.tab = (self.tab + 1).min(n),
             KeyCode::Char(' ') if multi => self.toggle(i, no),
             KeyCode::Char(c @ '1'..='9') if !ctrl => {
                 let idx = c as usize - '1' as usize;
@@ -210,7 +217,7 @@ impl Ui {
         let n = qs.len();
         match k.code {
             KeyCode::Esc => return Outcome::Decline,
-            KeyCode::Left | KeyCode::BackTab => self.tab = n - 1,
+            KeyCode::Left => self.tab = n - 1,
             KeyCode::Char(c @ '1'..='9') if (c as usize - '1' as usize) < n => self.tab = c as usize - '1' as usize,
             KeyCode::Enter => match self.done.iter().position(Option::is_none) {
                 Some(first) => {
@@ -253,6 +260,7 @@ impl Ui {
         }
         // next unanswered question after this one, else the review tab
         self.tab = (1..n).map(|d| (i + d) % n).find(|j| self.done[*j].is_none()).unwrap_or(n);
+        self.on_strip = false;
         Outcome::Stay
     }
 
@@ -283,7 +291,7 @@ impl Ui {
                 body.push(Line::styled(self.note.clone(), theme::attention()));
             }
             let all = self.done.iter().all(Option::is_some);
-            let footer = if all { theme::hints(&[("enter", "submit"), ("←", "back"), ("1-9", "edit one"), ("esc", "decline")]) } else { theme::hints(&[("enter", "go to the missing one"), ("←", "back"), ("esc", "decline")]) };
+            let footer = if all { theme::hints(&[("enter", "submit"), ("←→", "question"), ("1-9", "edit one"), ("esc", "decline")]) } else { theme::hints(&[("enter", "go to the missing one"), ("←→", "question"), ("esc", "decline")]) };
             return finish(View::new("Review", body, 0, footer), width);
         }
         let i = self.tab.min(n.saturating_sub(1));
@@ -303,7 +311,7 @@ impl Ui {
             let boxed = if multi { if self.checked.get(i).and_then(|c| c.get(j)) == Some(&true) { "☑ " } else { "☐ " } } else { "" };
             let num = if j < 9 { format!("{}. ", j + 1) } else { "   ".to_string() };
             let text = truncate(&format!("{boxed}{num}{}", label(o)), width.saturating_sub(2));
-            body.push(row(on, vec![Span::raw(text)]));
+            body.push(crate::panel::row_in(on, !self.on_strip, vec![Span::raw(text)]));
             for d in wrap(o["description"].as_str().unwrap_or_default(), width.saturating_sub(indent)).into_iter().filter(|d| !d.is_empty()) {
                 body.push(Line::styled(format!("{}{d}", " ".repeat(indent)), theme::dim()));
             }
@@ -339,15 +347,15 @@ impl Ui {
             keys.extend([("type", "your answer"), ("enter", "confirm"), ("esc", "stop typing")]);
         } else {
             keys.push(("↑↓", "move"));
+            if n > 1 {
+                keys.push(("tab", "next menu"));
+            }
             if multi {
                 keys.extend([("space", "toggle"), ("enter", "confirm")]);
             } else {
                 keys.push(("enter", "choose"));
             }
             keys.push(("1-9", if multi { "toggle" } else { "pick" }));
-            if n > 1 {
-                keys.push(("←→", "question"));
-            }
             keys.push(("esc", "decline"));
         }
         let title = if n > 1 { format!("Question {}/{n}", i + 1) } else { format!("Question · {}", header(q, i)) };
@@ -355,16 +363,16 @@ impl Ui {
     }
 
     fn tab_line(&self, qs: &[Value]) -> Line<'static> {
-        let mut spans: Vec<Span<'static>> = Vec::new();
-        for (i, q) in qs.iter().enumerate() {
-            let done = self.done.get(i).is_some_and(Option::is_some);
-            let label = format!(" {} {} ", if done { "✓" } else { "○" }, truncate(&header(q, i), 18));
-            spans.push(Span::styled(label, if i == self.tab { theme::selected() } else if done { theme::ok() } else { theme::dim() }));
-            spans.push(Span::raw(" "));
-        }
-        let review = self.tab == qs.len();
-        spans.push(Span::styled(" Submit ", if review { theme::selected() } else { theme::dim() }));
-        Line::from(spans)
+        let mut tabs: Vec<(String, Style)> = qs
+            .iter()
+            .enumerate()
+            .map(|(i, q)| {
+                let done = self.done.get(i).is_some_and(Option::is_some);
+                (format!("{} {}", if done { "✓" } else { "○" }, truncate(&header(q, i), 18)), if done { theme::ok() } else { theme::dim() })
+            })
+            .collect();
+        tabs.push(("Submit".into(), theme::dim()));
+        crate::panel::tab_strip_focus(tabs, self.tab.min(qs.len()), self.on_strip || self.review_tab(qs) == Some(self.tab))
     }
 
     // ---------- permissions ----------
@@ -652,6 +660,9 @@ mod tests {
         let qs = two();
         let mut ui = Ui::for_questions(&qs);
         press(&mut ui, &qs, KeyCode::Right);
+        assert_eq!(ui.tab, 0, "the options have the keys: left and right do nothing");
+        press(&mut ui, &qs, KeyCode::Tab); // the strip of questions has them now
+        press(&mut ui, &qs, KeyCode::Right);
         press(&mut ui, &qs, KeyCode::Right);
         assert_eq!(ui.tab, 2);
         assert!(matches!(press(&mut ui, &qs, KeyCode::Enter), Outcome::Stay));
@@ -685,7 +696,7 @@ mod tests {
         press(&mut ui, &qs, KeyCode::Char('1'));
         assert!(text(&ui.question_view(&qs, 60)).iter().any(|l| l.contains("☑ 1. Lint")));
         let footer: String = ui.question_view(&qs, 60).footer.spans.iter().map(|s| s.content.as_ref()).collect();
-        assert!(footer.contains("␣ toggle") && footer.contains("←→ question") && footer.contains("⎋ decline"), "{footer}");
+        assert!(footer.contains("␣ toggle") && footer.contains("⇥ next menu") && footer.contains("⎋ decline"), "{footer}");
         // typing shows the text with the cursor, and the hints change
         typed(&mut ui, &qs, "hey");
         let v = ui.question_view(&qs, 60);

@@ -7,7 +7,7 @@ use crate::panel::{self, View, cycle};
 use crate::session::{BACKGROUND, Entry, Item, Shell};
 use crate::theme;
 use crate::ui::{tool_icon, tool_summary};
-use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::crossterm::event::{KeyCode, KeyEvent};
 use ratatui::text::{Line, Span};
 use serde_json::Value;
 use std::cell::Cell;
@@ -90,8 +90,8 @@ pub struct Ui {
 impl Ui {
     /// `false` once the panel should close. `n` is how many agents there are.
     pub fn key(&mut self, k: KeyEvent, n: usize) -> bool {
-        let ctrl_c = k.code == KeyCode::Char('c') && k.modifiers.contains(KeyModifiers::CONTROL);
-        let back = matches!(k.code, KeyCode::Esc | KeyCode::Char('q'));
+        let ctrl_c = crate::panel::is_ctrl_c(&k);
+        let back = k.code == KeyCode::Esc;
         if ctrl_c || (back && !self.open) {
             return false;
         }
@@ -109,9 +109,9 @@ impl Ui {
         }
         self.cursor = self.cursor.min(n - 1);
         match k.code {
-            KeyCode::Up | KeyCode::Char('k') => self.cursor = cycle(self.cursor, n, true),
-            KeyCode::Down | KeyCode::Char('j') => self.cursor = cycle(self.cursor, n, false),
-            KeyCode::Enter | KeyCode::Right => (self.open, self.scroll) = (true, 0),
+            KeyCode::Up => self.cursor = cycle(self.cursor, n, true),
+            KeyCode::Down => self.cursor = cycle(self.cursor, n, false),
+            KeyCode::Enter => (self.open, self.scroll) = (true, 0),
             KeyCode::Char('x') => self.stop = Some(self.cursor),
             _ => {}
         }
@@ -120,12 +120,12 @@ impl Ui {
     fn key_in_detail(&mut self, k: KeyEvent) {
         let last = self.rows.get().saturating_sub(1);
         self.scroll = match k.code {
-            KeyCode::Esc | KeyCode::Char('q') | KeyCode::Left => {
+            KeyCode::Esc => {
                 self.open = false;
                 return;
             }
-            KeyCode::Up | KeyCode::Char('k') => self.scroll.saturating_sub(1),
-            KeyCode::Down | KeyCode::Char('j') => (self.scroll + 1).min(last),
+            KeyCode::Up => self.scroll.saturating_sub(1),
+            KeyCode::Down => (self.scroll + 1).min(last),
             KeyCode::PageUp => self.scroll.saturating_sub(10),
             KeyCode::PageDown => (self.scroll + 10).min(last),
             KeyCode::Home => 0,
@@ -181,7 +181,9 @@ fn list_view(lanes: &[Lane], cursor: usize) -> View {
         keys.push(("x", "stop"));
     }
     keys.push(("esc", "close"));
-    View::new(title, body, cursor, theme::hints(&keys))
+    let done = lanes.iter().filter(|l| !l.state.live()).count();
+    let head = if lanes.len() > 1 { vec![Line::styled(format!("  {} done", crate::motion::count_bar(done, lanes.len(), 10)), theme::dim())] } else { vec![] };
+    View::new(title, body, cursor, theme::hints(&keys)).with_head(head)
 }
 
 fn detail_view(ui: &Ui, l: &Lane, width: usize) -> View {
@@ -201,6 +203,7 @@ fn detail_view(ui: &Ui, l: &Lane, width: usize) -> View {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ratatui::crossterm::event::KeyModifiers;
     use serde_json::json;
 
     fn tool(id: &str, name: &str, input: Value, result: Option<(&str, bool)>, nested: bool) -> Item {

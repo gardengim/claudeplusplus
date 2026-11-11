@@ -7,6 +7,9 @@ impl App {
         if self.sessions[self.active].rewinding {
             return self.flash("restoring files; send once they are back");
         }
+        if self.sessions[self.active].loading {
+            return self.flash("still reading the conversation; send in a moment");
+        }
         self.reset_undo = true;
         if self.vim.on {
             self.vim.mode = vim::Mode::Insert; // sent: type the next one
@@ -172,6 +175,7 @@ impl App {
             "/optimize" => self.optimize_cmd(&arg),
             "/permissions" => self.perms = Some(permissions::Ui::new(self.cwd(), &self.sessions[self.active])),
             "/instructions" => self.instr = Some(instructions::Ui::new(self.cwd(), instructions::rules_path().map(|f| instructions::load_rules(&f)).unwrap_or_default())),
+            "/btw" => self.btw_cmd(&arg),
             "/usage" | "/cost" | "/status" => self.open_usage(),
             "/context" => {
                 self.ctx_ui = Some(Default::default());
@@ -184,6 +188,8 @@ impl App {
             }
             "/export" => self.export(&arg),
             "/tasks" => self.lanes = Some(Default::default()),
+            "/procs" => self.open_procs(),
+            "/supervisor" => self.open_supervisor(),
             "/queue" => self.queue_ui = Some(Default::default()),
             "/schedule" => {
                 // `10m do this` schedules at once; `2h` waits for the message to be typed; anything else asks for the time.
@@ -277,6 +283,11 @@ impl App {
                 }
                 let (launch, tx) = (self.launch_for(self.active), self.tx.clone());
                 let mentioned = self.mentioned_images(&text);
+                if !text.starts_with('/')
+                    && let Some(w) = self.limit_block()
+                {
+                    return self.hold_for_limit(text, w);
+                }
                 // Claude is working (or messages already wait): this one waits its turn, managed with alt+q.
                 if !text.starts_with('/') && ((self.queue_on && self.s().busy) || self.s().queue.iter().any(|q| q.due.is_none())) {
                     self.queue_message(text, None);
@@ -434,4 +445,346 @@ impl App {
         self.s().note(msg);
         Ok(swarm::prompt(n, &goal))
     }
+}
+
+impl App {
+    /// Tell the user something happened in a tab they are not looking at: a bell, or a desktop notification
+    /// (OSC 9: iTerm2, Ghostty, WezTerm...), as configured.
+    pub(crate) fn notify(&mut self, what: &str) {
+        let seq = match self.notify.as_str() {
+            "bell" => "\x07".to_string(),
+            "desktop" => format!("\x1b]9;claude++: {}\x07", what.replace(['\x07', '\x1b'], "")),
+            _ => return,
+        };
+        #[cfg(test)]
+        self.sent_notices.push(seq.clone());
+        if self.tty {
+            let _ = write!(io::stdout(), "{seq}");
+            let _ = io::stdout().flush();
+        }
+    }
+
+    /// `/copy`: the last answer, or with `code` the last fenced code block in it.
+    /// `/export [file]`: the conversation as plain text, your messages marked `>` and tool calls `●`.
+    pub(crate) fn export(&mut self, arg: &str) {
+        let mut out = String::new();
+        for i in &self.sessions[self.active].items {
+            let block = match &i.entry {
+                Entry::User(_) | Entry::Rich(_) => i.entry.text().lines().map(|l| format!("> {l}")).collect::<Vec<_>>().join("\n"),
+                Entry::Assistant { text, .. } => text.trim_end().to_string(),
+                Entry::Tool { name, input, result, nested, .. } if !nested && name != "Thinking" => {
+                    let res = result.as_ref().map_or(String::new(), |r| {
+                        let mut t: String = r.0.trim_end().chars().take(2000).collect();
+                        if t.len() < r.0.trim_end().len() {
+                            t.push_str("\n…");
+                        }
+                        t.lines().map(|l| format!("\n  ⎿ {l}")).collect()
+                    });
+                    let mut input = input.clone();
+                    if let Some(o) = input.as_object_mut() {
+                        o.retain(|k, _| !k.starts_with('_')); // our own bookkeeping (patches, agent steps)
+                    }
+                    format!("● {name}({input}){res}")
+                }
+                _ => continue,
+            };
+            out.push_str(&block);
+            out.push_str("\n\n");
+        }
+        if out.is_empty() {
+            return self.flash("nothing to export yet");
+        }
+        let name = if arg.is_empty() {
+            let stamp = std::process::Command::new("date").arg("+%Y-%m-%d-%H%M%S").output().map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string()).unwrap_or_default();
+            format!("conversation-{stamp}.txt")
+        } else {
+            arg.to_string()
+        };
+        let path = std::path::Path::new(self.cwd()).join(name);
+        let file = std::fs::OpenOptions::new().write(true).create_new(true).open(&path);
+        match file.and_then(|mut f| f.write_all(out.as_bytes())) {
+            Ok(()) => self.flash(format!("exported to {}", path.display())),
+            Err(e) => self.flash(format!("export failed: {e}")),
+        }
+    }
+
+    pub(crate) fn copy_last(&mut self, what: &str) {
+        let last = self.sessions[self.active].items.iter().rev().find_map(|i| match &i.entry {
+            Entry::Assistant { text, .. } if !text.trim().is_empty() => Some(text.clone()),
+            _ => None,
+        });
+        let Some(text) = last else { return self.flash("nothing to copy yet") };
+        let (text, label) = match what {
+            "" => (text, "answer"),
+            "code" => match last_code_block(&text) {
+                Some(code) => (code, "code block"),
+                None => return self.flash("the last answer has no code block"),
+            },
+            _ => return self.flash("usage: /copy [code]"),
+        };
+        let n = text.chars().count();
+        self.copy_text(&text);
+        self.flash(format!("copied the last {label} ({n} chars)"));
+    }
+
+    /// Clipboard via the OSC 52 escape (works over ssh in terminals that allow it) and, where it exists,
+    /// `pbcopy`.
+    pub(crate) fn copy_text(&mut self, text: &str) {
+        #[cfg(test)]
+        self.sent_notices.push(format!("copy:{text}"));
+        if self.tty {
+            let _ = write!(io::stdout(), "\x1b]52;c;{}\x07", image::base64(text.as_bytes()));
+            let _ = io::stdout().flush();
+        }
+        if cfg!(target_os = "macos") && self.tty
+            && let Ok(mut c) = std::process::Command::new("pbcopy").stdin(std::process::Stdio::piped()).spawn()
+        {
+            if let Some(mut i) = c.stdin.take() {
+                let _ = i.write_all(text.as_bytes());
+            }
+            thread::spawn(move || drop(c.wait()));
+        }
+    }
+
+    /// Put a message in this tab's queue, with the pictures it mentions.
+    pub(crate) fn queue_message(&mut self, text: String, due: Option<SystemTime>) {
+        let used = image::tokens_in(&text);
+        let (keep, gone): (Vec<_>, Vec<_>) = std::mem::take(&mut self.s().attachments).into_iter().partition(|a| used.contains(&a.n));
+        gone.iter().for_each(|a| a.preview.iter().for_each(|p| image::delete(p.id)));
+        let keep = keep
+            .into_iter()
+            .map(|mut a| {
+                a.preview.take().iter().for_each(|p| image::delete(p.id)); // the box no longer shows it
+                a
+            })
+            .collect();
+        self.undo.clear();
+        self.redo.clear();
+        let s = self.s();
+        if due.is_none() {
+            s.queue_hold = false; // sending something new means carrying on
+        }
+        s.queue.push(session::Queued { text, atts: keep, due });
+        let n = s.queue.len();
+        self.flash(match due {
+            Some(d) => format!("scheduled for {} · alt+q to manage", queue::clock(d)),
+            None => format!("queued ({n}) · alt+q to manage"),
+        });
+    }
+
+    /// A tab whose prompt cache is about to expire and whose conversation is big gets `/compact` now, while
+    /// the cache still serves the read: the next message then re-caches a summary, not the whole conversation.
+    pub(crate) fn precompact(&mut self) {
+        if self.precompact_k == 0 {
+            return;
+        }
+        let (min, ttl, typing) = (self.precompact_k * 1000, self.cache_ttl, !self.input.is_empty());
+        for i in 0..self.sessions.len() {
+            let s = &mut self.sessions[i];
+            if !s.should_precompact(ttl, min) || (i == self.active && typing) {
+                continue;
+            }
+            s.precompacted = true;
+            let left = s.cache_left(ttl).map_or(0, |l| l.as_secs());
+            s.note(format!("{}k tokens and the prompt cache expires in {left}s: compacting now, while it is still warm, so your next message re-caches a summary instead", s.ctx_tokens / 1000));
+            self.send_queued(i, session::Queued { text: "/compact".into(), atts: vec![], due: None });
+        }
+    }
+
+    /// Send the next waiting message of every tab that is free to take one.
+    pub(crate) fn drain_queues(&mut self) {
+        let held = self.limit_block();
+        for i in 0..self.sessions.len() {
+            let s = &mut self.sessions[i];
+            if let Some(w) = held {
+                // Messages that were waiting for the turn now wait for the window instead.
+                s.queue.iter_mut().filter(|q| q.due.is_none()).for_each(|q| q.due = Some(w.resets_at()));
+            }
+            if s.busy || s.queue_hold || s.rewinding || !s.pending.is_empty() {
+                continue;
+            }
+            // The first message that is not waiting for a time of its own.
+            let now = SystemTime::now();
+            let Some(at) = s.queue.iter().position(|q| q.due.is_none_or(|d| d <= now)) else { continue };
+            let q = s.queue.remove(at);
+            self.send_queued(i, q);
+        }
+    }
+
+    pub(crate) fn send_queued(&mut self, i: usize, q: session::Queued) {
+        let (launch, tx) = (self.launch_for(i), self.tx.clone());
+        let mentioned = self.mentioned_images(&q.text);
+        let mine = std::mem::replace(&mut self.sessions[i].attachments, q.atts);
+        self.sessions[i].submit(q.text, &mentioned, &launch, &tx);
+        self.sessions[i].attachments = mine;
+    }
+
+    pub(crate) fn queue_key(&mut self, k: KeyEvent) {
+        use queue::Act;
+        let Some(mut ui) = self.queue_ui.take() else { return };
+        let i = self.active;
+        let act = ui.key(k, &mut self.sessions[i].queue);
+        let keep = match act {
+            Act::Close => false,
+            Act::None => true,
+            Act::Send(n) => {
+                // It goes first; if Claude is mid-turn that turn is stopped, and the message follows its end.
+                let s = &mut self.sessions[i];
+                let mut q = s.queue.remove(n);
+                q.due = None;
+                s.queue.insert(0, q);
+                self.release_limit();
+                let s = &mut self.sessions[i];
+                s.interrupt();
+                s.queue_hold = false;
+                self.drain_queues();
+                true
+            }
+            Act::Steer(n) => {
+                let mut q = self.sessions[i].queue.remove(n);
+                q.due = None;
+                self.release_limit();
+                self.send_queued(i, q);
+                true
+            }
+            Act::Edit(_) if !self.input.is_empty() => {
+                self.flash("send or clear the message box first: editing a queued message needs it");
+                true
+            }
+            Act::Edit(n) => {
+                let q = self.sessions[i].queue.remove(n);
+                self.set_input(q.text);
+                self.sessions[i].attachments.extend(q.atts);
+                false
+            }
+            Act::Remove(n) => {
+                self.sessions[i].queue.remove(n);
+                true
+            }
+            Act::Clear => {
+                self.sessions[i].queue.clear();
+                true
+            }
+            Act::Schedule(n) => {
+                let mut s = schedule::Ui::new("");
+                (s.target, s.from_queue) = (Some(n), true);
+                self.sched_ui = Some(s);
+                false
+            }
+            Act::Pause => {
+                let s = &mut self.sessions[i];
+                s.queue_hold = !s.queue_hold;
+                self.drain_queues();
+                true
+            }
+        };
+        if keep {
+            self.queue_ui = Some(ui);
+        }
+    }
+
+    pub(crate) fn schedule_key(&mut self, k: KeyEvent) {
+        use schedule::Act;
+        let Some(mut ui) = self.sched_ui.take() else { return };
+        let i = self.active;
+        let unset = ui.target.and_then(|n| self.sessions[i].queue.get(n)).is_some_and(|q| q.due.is_some());
+        let done = match ui.key(k, SystemTime::now(), unset) {
+            Act::None => false,
+            Act::Close => true,
+            Act::Bad => {
+                self.flash("not a time: try 45m, 2h30m or 17:30");
+                false
+            }
+            Act::Pick(due) => {
+                if let Some(n) = ui.target {
+                    self.sessions[i].queue.get_mut(n).iter_mut().for_each(|q| q.due = due);
+                    self.flash(due.map_or("no longer scheduled: it goes when the turn ends".into(), |d| format!("scheduled for {}", queue::clock(d))));
+                } else if let (Some(msg), Some(due)) = (ui.msg.take(), due) {
+                    self.queue_message(msg, Some(due));
+                } else {
+                    self.sched_at = due;
+                    self.flash("now type the message: enter schedules it, esc cancels");
+                }
+                true
+            }
+        };
+        if !done {
+            self.sched_ui = Some(ui);
+        } else if ui.from_queue {
+            self.queue_ui = Some(Default::default());
+        }
+    }
+}
+
+/// The body of the last ``` fenced block in `text`.
+pub(crate) fn last_code_block(text: &str) -> Option<String> {
+    let mut blocks = vec![];
+    let mut cur: Option<Vec<&str>> = None;
+    for line in text.lines() {
+        if line.trim_start().starts_with("```") {
+            match cur.take() {
+                Some(b) => blocks.push(b.join("\n")),
+                None => cur = Some(vec![]),
+            }
+        } else if let Some(b) = cur.as_mut() {
+            b.push(line);
+        }
+    }
+    blocks.pop()
+}
+
+/// Commands claude++ handles itself: (name, argument hint, description).
+pub(crate) const LOCAL_COMMANDS: [(&str, &str, &str); 42] = [
+    ("new", "[profile]", "open a new tab"),
+    ("profile", "[name] [--hard]", "show or change this tab's profile"),
+    ("close", "", "close this tab"),
+    ("clear", "", "start a fresh conversation in this tab"),
+    ("resume", "[id]", "browse and reopen earlier sessions"),
+    ("sessions", "", "list sessions: this directory's and background ones (also ←)"),
+    ("model", "[name]", "pick a model and effort, or switch directly"),
+    ("effort", "[level]", "pick or set the thinking effort"),
+    ("color", "[name]", "pick this conversation's colour: the tab, frames and highlights wear it"),
+    ("mode", "[mode]", "set the permission mode (no argument: this tab's mode and rules)"),
+    ("memory", "[user]", "edit this project's CLAUDE.md (or your own ~/.claude/CLAUDE.md) in $EDITOR"),
+    ("export", "[file]", "save this conversation as text (default: a dated file here)"),
+    ("img", "<path>", "attach an image to the next message"),
+    ("find", "<text>", "jump to the newest match in the conversation; again for older"),
+    ("queue", "", "messages waiting for Claude: reorder, send now, edit, delete (alt+q)"),
+    ("schedule", "<when> <message>", "send a message later: 10m, 2h30m or a time like 14:30"),
+    ("search", "[text]", "search this conversation or the messages you sent (ctrl+f)"),
+    ("vim", "", "turn vim keys in the message box on or off"),
+    ("editor", "", "turn the message box into your $EDITOR on or off (quit the editor to send)"),
+    ("copy", "[code]", "copy the last answer, or its last code block, to the clipboard"),
+    ("config", "", "claude++'s settings"),
+    ("trust", "", "start claude in this folder although Claude Code has not trusted it (this run only)"),
+    ("setting", "", "same as /config"),
+    ("session", "", "this tab's permission mode and tool rules"),
+    ("usage", "", "where this tab's context goes, and your plan limits"),
+    ("context", "", "the context window drawn: what fills it, category by category"),
+    ("tasks", "", "this tab's subagents: state, steps and report"),
+    ("supervisor", "", "see what the claude++ supervisor is doing, change its settings, restart or stop it"),
+    ("procs", "", "Claude processes on this machine: who owns each, what it holds (read-only)"),
+    ("optimize", "[light|balanced|aggressive|off|now]", "trim this project's start-up context from evidence (reversible)"),
+    ("permissions", "", "saved allow/ask/deny rules from your settings files: add and delete"),
+    ("instructions", "", "tick CLAUDE.md files and sections in or out of new sessions"),
+    ("term", "[command]", "a terminal in claude++ (a shell, or the command); Claude can drive terminals too: /config → Agent terminal"),
+    ("btw", "<question>", "ask a side question about this conversation; it is not added to it"),
+    ("swarm", "[2-8] <goal>", "have Claude split a goal into parallel subagents, each in its own worktree"),
+    ("worktree", "[add <name> | rm <name>]", "list, add and remove git worktrees, each can have its own tab (also /wt)"),
+    ("open", "[n|link|path]", "open a link or file from this conversation"),
+    ("cd", "[path|-]", "work in another folder from the next message on (this conversation goes with you)"),
+    ("version", "[x.y.z|default]", "list the installed Claude Code versions, or pin the one claude++ runs"),
+    ("statusline", "[claude|builtin|items]", "choose which status line to show, or which parts of claude++'s own"),
+    ("help", "", "keys and commands"),
+    ("quit", "", "leave claude++"),
+];
+
+/// One row of the `/command` and `@file` popup.
+#[derive(Clone)]
+pub struct Completion {
+    /// `/` for commands, `@` for files.
+    pub prefix: char,
+    pub name: String,
+    pub hint: String,
+    pub desc: String,
 }

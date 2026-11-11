@@ -60,13 +60,7 @@ pub fn parse_token(tok: &str, cwd: &Path) -> Option<Found> {
     if path.is_empty() || !(path.contains('/') || ext) {
         return None;
     }
-    let full = if let Some(rest) = path.strip_prefix("~/") {
-        std::env::home_dir()?.join(rest)
-    } else if path.starts_with('/') {
-        PathBuf::from(path)
-    } else {
-        cwd.join(path)
-    };
+    let full = crate::config::under_home(path).unwrap_or_else(|| cwd.join(path)); // an absolute path replaces cwd in join
     full.exists().then_some(Found { target: Target::Path(full), line })
 }
 
@@ -105,57 +99,6 @@ pub fn collect(items: &[Item], cwd: &Path) -> Vec<Found> {
         }
     }
     out
-}
-
-/// The word at cell (`x`, `y`) of the drawn rows (a wide glyph's second cell is ""), when it is a link or path. A link that wraps
-/// is put back together from the rows around it.
-pub fn at(rows: &[Vec<String>], x: usize, y: usize, cwd: &Path) -> Option<Found> {
-    let chars_of = |r: &Vec<String>| -> (Vec<char>, Vec<usize>) {
-        let (mut cs, mut at) = (vec![], vec![]);
-        for (cell, s) in r.iter().enumerate() {
-            for c in s.chars() {
-                cs.push(c);
-                at.push(cell);
-            }
-        }
-        (cs, at)
-    };
-    let (row, cell_of) = chars_of(rows.get(y)?);
-    let i = cell_of.iter().position(|&c| c >= x)?;
-    if is_delim(*row.get(i)?) {
-        return None;
-    }
-    let (mut a, mut b) = (i, i);
-    while a > 0 && !is_delim(row[a - 1]) {
-        a -= 1;
-    }
-    while b + 1 < row.len() && !is_delim(row[b + 1]) {
-        b += 1;
-    }
-    let mut tok: String = row[a..=b].iter().collect();
-    // A long link is broken at the edge: take the run that continues it on the rows below, or above.
-    let mut down = b + 1 == row.len();
-    for r in rows.iter().skip(y + 1).take(3) {
-        if !down {
-            break;
-        }
-        let (r, _) = chars_of(r);
-        let start = r.iter().take_while(|c| c.is_whitespace()).count();
-        let run: String = r[start..].iter().take_while(|c| !is_delim(**c)).collect();
-        down = !run.is_empty() && start + run.chars().count() == r.len();
-        tok.push_str(&run);
-    }
-    let mut up = a == 0;
-    for r in rows[..y].iter().rev().take(3) {
-        if !up {
-            break;
-        }
-        let (r, _) = chars_of(r);
-        let run: Vec<char> = r.iter().rev().take_while(|c| !is_delim(**c)).copied().collect();
-        up = !run.is_empty() && run.len() == r.len();
-        tok.insert_str(0, &run.into_iter().rev().collect::<String>());
-    }
-    parse_token(&tok, cwd).or_else(|| parse_token(&row[a..=b].iter().collect::<String>(), cwd))
 }
 
 /// Kinds of file that do something when opened rather than show something.
@@ -250,22 +193,6 @@ mod tests {
         assert_eq!((out[1].target.clone(), out[1].line), (Target::Path(d.join("src/main.rs")), Some(42)));
         assert_eq!(out[2].target, Target::Path(d.join("README.md")));
         assert!(parse_token("http://", &d).is_none() && parse_token("src", &d).is_none(), "a bare word is not a path");
-    }
-
-    #[test]
-    fn a_click_finds_the_word_under_it_and_rejoins_a_wrapped_link() {
-        let d = tmp("at");
-        let rows = |lines: &[&str]| -> Vec<Vec<String>> { lines.iter().map(|l| l.chars().map(String::from).collect()).collect() };
-        let r = rows(&["see src/main.rs now", "go to https://example.com/very/lo", "ng/path/here and more   "]);
-        assert_eq!(at(&r, 6, 0, &d).map(|f| f.target), Some(Target::Path(d.join("src/main.rs"))));
-        assert!(at(&r, 1, 0, &d).is_none(), "the word 'see' is nothing");
-        assert!(at(&r, 3, 0, &d).is_none(), "nor is the space");
-        let want = Some(Target::Url("https://example.com/very/long/path/here".into()));
-        assert_eq!(at(&r, 12, 1, &d).map(|f| f.target), want, "clicked on the first part");
-        assert_eq!(at(&r, 2, 2, &d).map(|f| f.target), want, "clicked on the continuation");
-        // a wide glyph's second cell is empty and does not shift the columns
-        let w = vec![vec!["日".to_string(), String::new(), " ".into(), "R".into(), "E".into(), "A".into(), "D".into(), "M".into(), "E".into(), ".".into(), "m".into(), "d".into()]];
-        assert_eq!(at(&w, 8, 0, &d).map(|f| f.target), Some(Target::Path(d.join("README.md"))));
     }
 
     #[test]

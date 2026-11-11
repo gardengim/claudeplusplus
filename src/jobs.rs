@@ -40,7 +40,7 @@ impl State {
     pub fn glyph(self) -> &'static str {
         match self {
             State::Blocked => "◆",
-            State::Working => "◐",
+            State::Working => crate::motion::working_glyph(),
             State::Failed => "✗",
             State::Done => "✓",
             State::Stopped => "·",
@@ -52,6 +52,7 @@ impl State {
     }
 }
 
+#[derive(Clone)]
 pub struct Job {
     /// Short supervisor id, the argument of `claude attach|stop`.
     pub short: String,

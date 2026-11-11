@@ -7,7 +7,7 @@
 //! Running sessions pick the change up by themselves (Claude Code watches its settings files).
 //! Deny beats ask beats allow, whichever file a rule is in.
 
-use crate::panel::{View, row_with};
+use crate::panel::{View, row_in, row_with, step_tab, tab_strip_focus};
 use crate::session::Session;
 use crate::theme;
 use crate::ui::wrap;
@@ -171,11 +171,13 @@ pub struct Ui {
     pub cwd: String,
     /// The last write failed, or says what happened.
     pub note: Option<String>,
+    /// Two menus, one with the keys: the allow/ask/deny strip (left and right) or the rules (up and down).
+    pub on_strip: bool,
 }
 
 impl Ui {
     pub fn new(cwd: &str, s: &Session) -> Ui {
-        Ui { tab: Behavior::Allow, sel: 0, stage: Stage::List, rules: load(cwd, &s.rules), cwd: cwd.into(), note: None }
+        Ui { tab: Behavior::Allow, sel: 0, stage: Stage::List, rules: load(cwd, &s.rules), cwd: cwd.into(), note: None, on_strip: false }
     }
 
     pub fn reload(&mut self, s: &Session) {
@@ -195,7 +197,7 @@ impl Ui {
 
     pub fn switch(&mut self, delta: isize) {
         let i = Behavior::ALL.iter().position(|b| *b == self.tab).unwrap_or(0) as isize;
-        self.tab = Behavior::ALL[(i + delta).rem_euclid(3) as usize];
+        self.tab = Behavior::ALL[step_tab(i as usize, 3, delta)];
         self.sel = 0;
         self.stage = Stage::List;
     }
@@ -208,21 +210,14 @@ impl Ui {
 }
 
 pub fn view(ui: &Ui, width: usize) -> View {
-    let head = vec![Line::from(
-        Behavior::ALL
-            .iter()
-            .flat_map(|b| {
-                let n = ui.rules.iter().filter(|r| r.behavior == *b).count();
-                [Span::styled(format!(" {} {} {n} ", b.glyph(), b.label()), if *b == ui.tab { theme::selected() } else { theme::dim() }), Span::raw(" ")]
-            })
-            .collect::<Vec<_>>(),
-    )];
+    let tabs = Behavior::ALL.iter().map(|b| (format!("{} {} {}", b.glyph(), b.label(), ui.rules.iter().filter(|r| r.behavior == *b).count()), theme::dim())).collect();
+    let head = vec![tab_strip_focus(tabs, Behavior::ALL.iter().position(|b| *b == ui.tab).unwrap_or(0), ui.on_strip)];
     let shown = ui.shown();
     let sel = ui.sel.min(shown.len());
     let mut body: Vec<Line> = vec![];
     body.push(match &ui.stage {
         Stage::Typing(text) => row_with(true, false, vec![Span::styled("rule ", theme::dim()), Span::raw(text.clone()), Span::styled(" ", theme::selected())]),
-        _ => row_with(sel == 0, false, vec![Span::styled("+ add a new rule…", if sel == 0 { theme::bold() } else { theme::dim() })]),
+        _ => row_in(sel == 0, !ui.on_strip, vec![Span::styled("+ add a new rule…", if sel == 0 { theme::bold() } else { theme::dim() })]),
     });
     for (i, r) in shown.iter().enumerate() {
         let on = sel == i + 1;
@@ -236,7 +231,7 @@ pub fn view(ui: &Ui, width: usize) -> View {
         if confirm {
             v.push(Span::styled("  d again to delete", theme::danger()));
         }
-        body.push(row_with(on, false, v));
+        body.push(row_in(on, !ui.on_strip, v));
     }
     let mut tail = vec![Line::raw("")];
     let help = match &ui.stage {
@@ -259,8 +254,8 @@ pub fn view(ui: &Ui, width: usize) -> View {
     }
     let footer = match ui.stage {
         Stage::Typing(_) => theme::hints(&[("enter", "next"), ("esc", "cancel")]),
-        Stage::Where(..) => theme::hints(&[("↑↓", "file"), ("enter", "save"), ("esc", "back")]),
-        _ => theme::hints(&[("↑↓", "move"), ("←→", "allow/ask/deny"), ("d", "delete"), ("esc", "close")]),
+        Stage::Where(..) => theme::hints(&[("↑↓", "move"), ("enter", "save"), ("esc", "back")]),
+        _ => theme::hints(&[("↑↓←→", "move"), ("tab", "next menu"), ("d", "delete"), ("esc", "close")]),
     };
     View::new("Permissions", body, sel, footer).with_head(head).with_tail(tail).rows(0, 12)
 }
@@ -324,7 +319,7 @@ mod tests {
         add(&Scope::Project.file(cwd).unwrap(), Behavior::Deny, "Bash(git push:*)").unwrap();
         let rules = load(cwd, &[("Read".into(), true)]);
         assert!(rules.iter().any(|r| r.source == Source::Tab && r.text == "Read"));
-        let ui = Ui { tab: Behavior::Allow, sel: 0, stage: Stage::List, rules, cwd: cwd.into(), note: None };
+        let ui = Ui { tab: Behavior::Allow, sel: 0, stage: Stage::List, rules, cwd: cwd.into(), note: None, on_strip: false };
         let allow = ui.rules.iter().find(|r| r.behavior == Behavior::Allow && r.source == Source::File(Scope::Local)).unwrap();
         assert_eq!(ui.overridden_by(allow), Some(Behavior::Deny));
         let v = view(&ui, 100);

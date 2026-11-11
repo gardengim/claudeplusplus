@@ -12,6 +12,49 @@ use std::collections::VecDeque;
 use std::sync::mpsc::Sender;
 use std::time::{Duration, Instant};
 
+/// A place in the transcript: (entry, row inside it, screen column). Held this way the selection stays on the same
+/// words while output arrives or the view scrolls.
+pub type Spot = (usize, usize, u16);
+
+/// A selection in the transcript. The draw fills `area`/`rows` (what the last frame showed) and turns `a`..`b` into
+/// `text`; the mouse code only moves the ends.
+#[derive(Default)]
+pub struct Sel {
+    pub area: ratatui::layout::Rect,
+    /// Per screen row of `area`, the entry and the row inside it.
+    pub rows: Vec<(usize, usize)>,
+    pub a: Option<Spot>,
+    pub b: Option<Spot>,
+    /// The button is down.
+    pub live: bool,
+    /// The pointer is above (-1) or below (1) the transcript: the view scrolls and the end follows.
+    pub edge: i8,
+    pub edge_at: Option<Instant>,
+    /// A double (2) or triple (3) click waiting for the draw to widen it to the word or line.
+    pub expand: u8,
+    /// The ends moved: the draw reads the text again.
+    pub dirty: bool,
+    /// Text read and not yet copied (`App::flush_selection` takes it).
+    pub text: Option<String>,
+}
+
+impl Sel {
+    /// The spot under a screen cell, clamped into what the last frame showed.
+    pub fn at(&self, p: (u16, u16)) -> Option<Spot> {
+        let k = (p.1.saturating_sub(self.area.y) as usize).min(self.rows.len().checked_sub(1)?);
+        let (i, r) = self.rows[k];
+        Some((i, r, p.0.clamp(self.area.x, self.area.right().saturating_sub(1))))
+    }
+    /// The two ends in reading order, if they differ.
+    pub fn span(&self) -> Option<(Spot, Spot)> {
+        let (a, b) = (self.a?, self.b?);
+        (a != b).then(|| if a <= b { (a, b) } else { (b, a) })
+    }
+    pub fn clear(&mut self) {
+        (self.a, self.b, self.live, self.edge, self.expand, self.text) = (None, None, false, 0, 0, None);
+    }
+}
+
 /// One piece of a user message that contains pasted images.
 pub enum Part {
     Text(String),
@@ -58,6 +101,9 @@ pub enum Entry {
     Tool { id: String, name: String, input: Value, result: Option<(String, bool)>, nested: bool },
     Note(String),
     Error(String),
+    /// A `/btw` side question, shown in the transcript and filled in when its answer arrives. Display only:
+    /// never sent to Claude, so it is not part of the conversation. `id` pairs it with its answer.
+    Side { id: u64, question: String, answer: Option<Result<(String, f64), String>> },
     /// A picture already sent to the terminal; drawn as placeholder cells.
     Image(Shown),
 }
@@ -74,6 +120,35 @@ pub struct ModelInfo {
     pub efforts: Vec<String>,
     /// Supports fast mode (Opus only).
     pub fast: bool,
+}
+
+/// "Sonnet 5.5" → ("Sonnet", Some("5.5")). A name that does not end in a version ("Default (recommended)") stays whole.
+pub fn split_name(name: &str) -> (&str, Option<&str>) {
+    match name.rsplit_once(' ') {
+        Some((family, v)) if !family.is_empty() && v.starts_with(|c: char| c.is_ascii_digit()) && v.chars().all(|c| c.is_ascii_digit() || c == '.') => (family, Some(v)),
+        _ => (name, None),
+    }
+}
+
+impl ModelInfo {
+    /// The family and the version of its name.
+    pub fn parts(&self) -> (&str, Option<&str>) {
+        split_name(&self.name)
+    }
+}
+
+/// The model picker's first menu: each family once, in the order the list first names it, with the list
+/// positions of its versions (the second menu), newest first as the list has them.
+pub fn families(models: &[ModelInfo]) -> Vec<(String, Vec<usize>)> {
+    let mut out: Vec<(String, Vec<usize>)> = Vec::new();
+    for (i, m) in models.iter().enumerate() {
+        let f = m.parts().0;
+        match out.iter_mut().find(|o| o.0 == f) {
+            Some(o) => o.1.push(i),
+            None => out.push((f.to_string(), vec![i])),
+        }
+    }
+    out
 }
 
 /// A slash command Claude Code offers (from the `initialize` reply), for completion.
@@ -170,8 +245,13 @@ pub struct Session {
     /// Transcript rows in the last frame and its height, so paging and anchoring know the viewport.
     pub view_h: usize,
     pub last_total: usize,
+    pub sel: Sel,
     pub session_id: Option<String>,
     start: Start,
+    /// The transcript is still being read on a thread: nothing can be sent yet. `history_gen` tells reads apart.
+    pub loading: bool,
+    history_gen: u64,
+    loading_note: Option<usize>,
     pub items: Vec<Item>,
     pub pending: VecDeque<Pending>,
     pub busy: bool,
@@ -309,6 +389,10 @@ impl Entry {
             Entry::Rich(parts) => parts.iter().filter_map(|p| if let Part::Text(t) = p { Some(t.as_str()) } else { None }).collect::<Vec<_>>().join(" "),
             Entry::Assistant { text, .. } => text.clone(),
             Entry::Tool { name, input, result, .. } => format!("{name} {input} {}", result.as_ref().map_or("", |r| r.0.as_str())),
+            Entry::Side { question, answer, .. } => match answer {
+                Some(Ok((a, _))) => format!("{question} {a}"),
+                _ => question.clone(),
+            },
             Entry::Image(_) => String::new(),
         }
     }
@@ -344,7 +428,11 @@ impl Session {
             tools: vec![],
             view_h: 20,
             last_total: 0,
+            sel: Sel::default(),
             session_id: None,
+            loading: false,
+            history_gen: 0,
+            loading_note: None,
             start: Start::New,
             items: Vec::new(),
             pending: VecDeque::new(),
@@ -435,19 +523,29 @@ impl Session {
         }
     }
 
-    pub fn resume(&mut self, id: String) {
+    pub fn resume(&mut self, id: String, tx: &Sender<AppEvent>) {
         match history::find(&id) {
-            Some(path) => self.show_history(&path),
+            Some(path) => self.load_history(path, tx),
             None => self.note(format!("resuming session {id} (transcript not found, so earlier messages are not shown)")),
         }
         self.start = Start::Resume(id);
     }
 
-    pub fn continue_last(&mut self, cwd: &str) {
+    /// The stored conversation this tab shows: its id once the backend reported one, else the one it was told to
+    /// resume (the id only arrives with the first turn, so a just-opened conversation would have none).
+    pub fn conversation(&self) -> Option<String> {
+        match (&self.session_id, &self.start) {
+            (Some(id), _) => Some(id.clone()),
+            (None, Start::Resume(id)) if !self.fork => Some(id.clone()),
+            _ => None,
+        }
+    }
+
+    pub fn continue_last(&mut self, cwd: &str, tx: &Sender<AppEvent>) {
         // Pin the id now: `claude --continue` picks at backend launch, by which time another session in
         // this folder may be newer than the one shown.
         match history::recent(cwd, 1).into_iter().next() {
-            Some(s) => self.resume(s.id),
+            Some(s) => self.resume(s.id, tx),
             None => {
                 self.note("continuing the most recent conversation in this directory".into());
                 self.start = Start::Continue;
@@ -471,10 +569,43 @@ impl Session {
         }
     }
 
-    fn show_history(&mut self, path: &std::path::Path) {
-        self.follow_name(path);
-        self.color = history::session_color(path);
-        let (lines, skipped) = history::tail(path);
+    /// Read the transcript on a thread (they reach hundreds of MB) and show it when it arrives; until then the
+    /// tab says so and takes no message. Under test the read is inline.
+    fn load_history(&mut self, path: std::path::PathBuf, tx: &Sender<AppEvent>) {
+        self.history_gen += 1;
+        if cfg!(test) {
+            return self.show_history(history::Loaded::read(&path), &path);
+        }
+        self.loading = true;
+        self.loading_note = Some(self.items.len());
+        self.note("loading the conversation…".into());
+        let (sid, read_no, tx) = (self.id, self.history_gen, tx.clone());
+        std::thread::spawn(move || {
+            let loaded = history::Loaded::read(&path);
+            let _ = tx.send(AppEvent::Resumed(sid, read_no, path, Box::new(loaded)));
+        });
+    }
+
+    /// The read started by `load_history` finished. A tab that was cleared or pointed elsewhere since ignores it.
+    pub fn finish_history(&mut self, read_no: u64, path: &std::path::Path, loaded: history::Loaded) {
+        if read_no != self.history_gen {
+            return;
+        }
+        self.loading = false;
+        if let Some(at) = self.loading_note.take()
+            && matches!(self.items.get(at).map(|i| &i.entry), Some(Entry::Note(_)))
+        {
+            self.items.remove(at);
+        }
+        self.show_history(loaded, path);
+    }
+
+    fn show_history(&mut self, loaded: history::Loaded, path: &std::path::Path) {
+        if let Some(n) = loaded.name {
+            self.title = n.chars().take(18).collect::<String>().trim().to_string();
+        }
+        self.color = loaded.color;
+        let (lines, skipped) = (loaded.lines, loaded.skipped);
         if skipped > 0 {
             self.note(format!("… {skipped} earlier messages not shown"));
         }
@@ -492,7 +623,7 @@ impl Session {
             })
             .collect();
         if !waiting.is_empty() {
-            let reports = history::agent_reports(path);
+            let reports = loaded.reports;
             for id in waiting {
                 let report = reports.get(&id).cloned().unwrap_or_else(|| "finished (its report was not saved)".into());
                 self.set_result(&id, report, false);
@@ -763,6 +894,21 @@ impl Session {
 
     pub fn note(&mut self, s: String) {
         self.push(Entry::Note(crate::theme::keys(&s)));
+    }
+
+    /// Show a `/btw` question, waiting for its answer.
+    pub fn start_side(&mut self, id: u64, question: &str) {
+        self.push(Entry::Side { id, question: question.into(), answer: None });
+    }
+
+    /// The answer to a `/btw`; dropped when the conversation it belonged to was cleared.
+    pub fn side_done(&mut self, id: u64, res: Result<(String, f64), String>) {
+        if let Some(item) = self.items.iter_mut().rev().find(|i| matches!(&i.entry, Entry::Side { id: n, .. } if *n == id))
+            && let Entry::Side { answer, .. } = &mut item.entry
+        {
+            *answer = Some(res);
+            item.cache = None;
+        }
     }
 
     fn error(&mut self, s: String) {
@@ -1175,6 +1321,7 @@ impl Session {
 
     /// Start a fresh conversation in this tab.
     pub fn clear(&mut self) {
+        (self.history_gen, self.loading, self.loading_note) = (self.history_gen + 1, false, None);
         self.backend = None;
         self.session_id = None;
         self.start = Start::New;
@@ -1579,7 +1726,7 @@ impl Session {
                     self.note(text.into());
                 } else if self.turn_chars > 0 {
                     // How long the model worked, as Claude Code says after each turn.
-                    self.note(format!("✻ Worked for {}", duration(self.busy_since.elapsed())));
+                    self.note(format!("✻ Worked for {} · done {}", duration(self.busy_since.elapsed()), crate::queue::clock(std::time::SystemTime::now())));
                 }
             }
             "control_request" => {
@@ -1888,7 +2035,7 @@ fn outlives_a_turn(entry: &Entry) -> bool {
 }
 
 /// The words of a message you sent (pictures as their tokens), or None for any other entry.
-fn user_said(e: &Entry) -> Option<String> {
+pub(crate) fn user_said(e: &Entry) -> Option<String> {
     match e {
         Entry::User(t) => Some(t.clone()),
         Entry::Rich(parts) => Some(

@@ -3,8 +3,8 @@
 //! the conversation grows.
 
 use crate::panel::{self, View};
-use crate::{App, instructions, optimize, permissions, settings, tabcfg, theme, usage};
-use crate::session::{Entry, Item, Part, Pending, Session};
+use crate::{App, instructions, optimize, permissions, settings, supervisor, tabcfg, theme, usage};
+use crate::session::{Entry, Item, Part, Pending, Session, Spot};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Position, Rect};
 use ratatui::style::{Modifier, Style};
@@ -13,30 +13,11 @@ use ratatui::widgets::{Block, Borders, Paragraph};
 use serde_json::Value;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
-const SPINNER: [&str; 10] = ["·", "✢", "✳", "✶", "✻", "✽", "✻", "✶", "✳", "✢"];
 const COLLAPSED_LINES: usize = 4;
 
 /// The docked list needs a screen at least this wide, and takes this many columns.
 const DOCK_MIN_SCREEN: u16 = 100;
-const DOCK_W: u16 = 30;
-
-/// Where the last frame drew things a click can hit.
-#[derive(Clone, Default)]
-pub struct Hits {
-    /// The tab strip's row, and each tab's column range.
-    pub tab_y: u16,
-    pub tabs: Vec<(u16, u16)>,
-    /// The open panel's (or the full-screen list's) rows.
-    pub list: Option<panel::ListHit>,
-    /// The docked session column: its area and the rows in it.
-    pub dock: Option<(Rect, panel::ListHit)>,
-    /// Tool calls in the transcript: first row, last row (exclusive) and the item, for a click to fold.
-    pub calls: Vec<(u16, u16, usize)>,
-    /// The strip of queued messages above the input.
-    pub queue: Option<Rect>,
-    /// The conversation's area, where a drag selects text.
-    pub body: Rect,
-}
+const DOCK_W: u16 = 34;
 
 /// Rows the editor gets in the message box's place: a third of the screen, 5 to 14.
 pub fn pane_rows(screen_h: u16) -> u16 {
@@ -79,7 +60,14 @@ fn draw_term_full(f: &mut Frame, app: &mut App) {
 }
 
 pub fn draw(f: &mut Frame, app: &mut App) {
-    app.hits = Hits::default();
+    app.sync_selection(); // every list rests on the same conversation
+    app.panes = vec![f.area()];
+    app.input_rect = Rect::default(); // set again where the message box is drawn
+    draw_ui(f, app);
+    select(f, app); // after everything is drawn, so the highlight and the copy cover panels too
+}
+
+fn draw_ui(f: &mut Frame, app: &mut App) {
     if app.term_view.is_some() {
         return draw_term_full(f, app);
     }
@@ -95,7 +83,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         ex.set_open(open);
         let area = f.area();
         let v = ex.view(area.width as usize);
-        app.hits.list = Some(panel::render_full(f, area, v));
+        panel::render_full(f, area, v);
         return;
     }
     let mut area = f.area();
@@ -108,11 +96,8 @@ pub fn draw(f: &mut Frame, app: &mut App) {
             d.set_open(open);
             let lines = d.dock_lines(DOCK_W as usize - 1, dock.height as usize, focused);
             f.render_widget(Paragraph::new(lines).block(Block::new().borders(Borders::RIGHT).border_style(if focused { theme::accent() } else { theme::dim() })), dock);
-            let (first, len, cursor) = d.dock_hit;
-            // Row 0 of the column is its heading, so entries start one row down.
-            let body = Rect::new(dock.x, dock.y + 1, dock.width.saturating_sub(1), dock.height.saturating_sub(1));
-            app.hits.dock = Some((dock, panel::ListHit { body, first, len, cursor, input_focus: false }));
         }
+        app.panes = vec![dock, rest]; // a drag selects within the pane it started in
         area = rest;
     }
     let input_w = area.width.saturating_sub(2).max(1) as usize;
@@ -122,14 +107,17 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     // drawn by the one shared panel renderer, at the bottom of the screen above the input.
     let view = surface(app, area.width as usize);
     let panel_h = view.as_ref().map_or(0, |v| panel::height(v, area.height));
-    let input_keeps_focus = view.as_ref().is_none_or(|v| v.input_focus);
+    // A panel stands in for the message box (the suggestions are the exception: they are about it).
+    let hide_input = panel_h > 0 && view.as_ref().is_some_and(|v| !v.input_focus);
+    // The terminal cursor belongs to whatever has the keyboard: not the input box while a panel or the side list does.
+    let input_keeps_focus = view.as_ref().is_none_or(|v| v.input_focus) && !app.dock_focus;
     let s = &app.sessions[app.active];
     let chars: Vec<char> = app.input.chars().collect();
-    let sel = app.vim.on.then(|| app.vim.highlight(&chars, app.cursor)).flatten();
+    let sel = app.vim.on.then(|| app.vim.highlight(&chars, app.cursor)).flatten().or(app.box_selection());
     let (input_rows, cursor_row) = input_rows(&input_lines, cursor.1, &s.attachments, &chars, sel);
     // The user's own status line (if configured and it has produced output) sits under the input.
     // Like Claude Code, it steps aside while a permission prompt or question is up, and on tiny terminals.
-    let ext_h = if app.statusline_on && s.pending.is_empty() && area.height >= 14 {
+    let ext_h = if app.statusline_on && s.pending.is_empty() && !hide_input && area.height >= 14 {
         s.status_lines.len().min(crate::statusline::MAX_LINES) as u16
     } else {
         0
@@ -147,7 +135,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         Constraint::Length(task_lines.len() as u16),
         Constraint::Length(queue_lines.len() as u16),
         Constraint::Length(panel_h),
-        Constraint::Length(if app.pane.is_some() { pane_rows(area.height) } else { input_rows.len().min((area.height / 2).max(8) as usize) as u16 } + 2),
+        Constraint::Length(if hide_input { 0 } else { (if app.pane.is_some() { pane_rows(area.height) } else { input_rows.len().min((area.height / 2).max(8) as usize) as u16 }) + 2 }),
         Constraint::Length(ext_h),
         Constraint::Length(1),
     ])
@@ -160,36 +148,36 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     }
     if !queue_lines.is_empty() {
         f.render_widget(Paragraph::new(queue_lines), queue_area);
-        app.hits.queue = Some(queue_area);
     }
     if spin_h > 0 {
         f.render_widget(Paragraph::new(spinner_line(s, spin_area.width as usize)), spin_area);
     }
 
     f.render_widget(Paragraph::new(tab_line(app)), tabs);
-    let mut x = tabs.x;
-    app.hits.tab_y = tabs.y;
-    for g in tab_groups(app) {
-        let w: usize = g.iter().map(|s| s.content.width()).sum();
-        app.hits.tabs.push((x, (x + w as u16).min(tabs.right())));
-        x += w as u16;
-    }
     let expanded = app.expanded;
     let cwd = app.cwd.clone();
-    let peek = if app.dock_peek && app.dock_focus { app.dock.as_mut().map(|d| d.peek_lines(body.width as usize)) } else { None };
+    // Room at the sides, so text does not run into the panel's edge or the screen's. Bands (your message,
+    // diff lines) ignore it and run to the edge.
+    let side = if body.width >= 70 { 2 } else { 0 };
+    let peek = if app.dock_peek && app.dock_focus { app.dock.as_mut().map(|d| d.peek_lines(body.width.saturating_sub(2 * side) as usize)) } else { None };
     match peek {
         Some(lines) => {
             let skip = lines.len().saturating_sub(body.height as usize);
-            f.render_widget(Paragraph::new(lines).scroll((skip as u16, 0)), body);
+            f.render_widget(Paragraph::new(lines).scroll((skip as u16, 0)), body.inner(ratatui::layout::Margin::new(side, 0)));
         }
-        None => app.hits.calls = transcript(f, &mut app.sessions[app.active], body, expanded, &cwd),
+        None => {
+            transcript(f, &mut app.sessions[app.active], body, side, expanded, &cwd);
+        }
     }
-    app.hits.body = body;
-    select(f, app, body);
+    app.flush_selection(); // the selection was read while the conversation was laid out; its "copied" flash is drawn below
     if let Some(view) = view.filter(|_| panel_h > 0) {
-        app.hits.list = panel::render(f, panel_area, view);
+        panel::render(f, panel_area, view);
     }
 
+    if hide_input {
+        f.render_widget(Paragraph::new(status_line(app, area.height)), status);
+        return;
+    }
     // Input mode editor, editing: the box is the editor.
     if app.pane.is_some() {
         let title = app.pane.as_ref().map_or(String::new(), |p| format!(" {} · quit it to send · ctrl+\\ cancels ", p.editor));
@@ -228,6 +216,8 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         rule = rule.title(Line::from(Span::styled(format!(" {}{pending} ", app.vim.label()), theme::accent().add_modifier(Modifier::BOLD))).right_aligned());
     }
     f.render_widget(Paragraph::new(text).block(rule), input_area);
+    app.input_rect = Rect::new(input_area.x + 2, input_area.y + 1, input_area.width.saturating_sub(2), visible as u16);
+    app.input_skip = skip;
     // A panel that owns the keyboard also owns the cursor: leave it hidden.
     if input_keeps_focus {
         f.set_cursor_position(Position::new(input_area.x + 2 + cursor.0 as u16, input_area.y + 1 + cursor_row.saturating_sub(skip) as u16));
@@ -235,26 +225,51 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     f.render_widget(Paragraph::new(status_line(app, area.height)), status);
 }
 
-/// The rows of `body` between two screen cells (x, y), as (y, first x, last x): the span of a drag.
-fn sel_rows(body: Rect, a: (u16, u16), b: (u16, u16)) -> Vec<(u16, u16, u16)> {
-    if body.is_empty() {
-        return vec![];
+/// The character index under (row, column) of the message box's wrapped text, as `input_layout` lays it out: a column
+/// past the end of a row is that row's end.
+pub(crate) fn input_index(text: &str, width: usize, row: usize, col: usize) -> usize {
+    let (mut r, mut w) = (0, 0);
+    for (i, ch) in text.chars().enumerate() {
+        let cw = ch.width().unwrap_or(0);
+        if ch != '\n' && w + cw > width {
+            (r, w) = (r + 1, 0);
+        }
+        if r > row || (r == row && (ch == '\n' || col < w + cw)) {
+            return i;
+        }
+        if ch == '\n' {
+            (r, w) = (r + 1, 0);
+        } else {
+            w += cw;
+        }
     }
-    let clamp = |p: (u16, u16)| (p.0.clamp(body.x, body.right() - 1), p.1.clamp(body.y, body.bottom() - 1));
-    let (a, b) = (clamp(a), clamp(b));
-    let (s, e) = if (a.1, a.0) <= (b.1, b.0) { (a, b) } else { (b, a) };
-    (s.1..=e.1).map(|y| (y, if y == s.1 { s.0 } else { body.x }, if y == e.1 { e.0 } else { body.right() - 1 })).collect()
+    text.chars().count()
 }
 
-/// While a drag is on: remember what the conversation shows (a wide glyph's second cell is "") and draw the
-/// dragged part reversed.
-fn select(f: &mut Frame, app: &mut App, body: Rect) {
-    let Some((a, b)) = app.drag else { return };
+/// The cells of `region` between two screen cells (x, y), as (y, first x, last x), in reading order.
+fn sel_rows(region: Rect, a: (u16, u16), b: (u16, u16)) -> Vec<(u16, u16, u16)> {
+    if region.is_empty() {
+        return vec![];
+    }
+    let clamp = |p: (u16, u16)| (p.0.clamp(region.x, region.right() - 1), p.1.clamp(region.y, region.bottom() - 1));
+    let (a, b) = (clamp(a), clamp(b));
+    let (s, e) = if (a.1, a.0) <= (b.1, b.0) { (a, b) } else { (b, a) };
+    (s.1..=e.1).map(|y| (y, if y == s.1 { s.0 } else { region.x }, if y == e.1 { e.0 } else { region.right() - 1 })).collect()
+}
+
+/// While the mouse is down or a selection stands: remember what the screen shows (a wide glyph's second cell is
+/// "") for the words and the copy, and paint the selected cells.
+fn select(f: &mut Frame, app: &mut App) {
+    let Some((a, b)) = app.drag else {
+        app.sel_dirty = false;
+        return;
+    };
+    let area = f.area();
     let buf = f.buffer_mut();
-    app.snap = (body.y..body.bottom())
+    app.snap = (area.y..area.bottom())
         .map(|y| {
             let mut skip = 0;
-            (body.x..body.right())
+            (area.x..area.right())
                 .map(|x| {
                     let sym = buf.cell((x, y)).map_or(String::new(), |c| c.symbol().to_string());
                     if skip > 0 {
@@ -267,27 +282,46 @@ fn select(f: &mut Frame, app: &mut App, body: Rect) {
                 .collect()
         })
         .collect();
+    if a != b && std::mem::take(&mut app.sel_dirty) {
+        app.pending_copy = Some(selection_text(&app.snap, app.region, a, b)).filter(|t| !t.is_empty());
+    }
     if a != b {
-        for (y, x0, x1) in sel_rows(body, a, b) {
+        for (y, x0, x1) in sel_rows(app.region, a, b) {
             for x in x0..=x1 {
                 if let Some(c) = buf.cell_mut((x, y)) {
-                    c.modifier.insert(Modifier::REVERSED);
+                    c.set_style(theme::selection());
                 }
             }
         }
     }
 }
 
-/// The text between two screen cells of the conversation, from the cells drawn last (`snap`).
-pub fn selection_text(snap: &[Vec<String>], body: Rect, a: (u16, u16), b: (u16, u16)) -> String {
-    let lines: Vec<String> = sel_rows(body, a, b)
+/// The text between two screen cells, from the cells drawn last, one line per row with trailing blanks cut.
+pub fn selection_text(snap: &[Vec<String>], region: Rect, a: (u16, u16), b: (u16, u16)) -> String {
+    let lines: Vec<String> = sel_rows(region, a, b)
         .into_iter()
         .map(|(y, x0, x1)| {
-            let row = snap.get((y - body.y) as usize).map_or(&[][..], |r| &r[..]);
-            row.get((x0 - body.x) as usize..=(x1 - body.x) as usize).unwrap_or_default().concat().trim_end().to_string()
+            let row = snap.get(y as usize).map_or(&[][..], |r| &r[..]);
+            row.get(x0 as usize..=x1 as usize).unwrap_or_default().concat().trim_end().to_string()
         })
         .collect();
     lines.join("\n").trim_end().to_string()
+}
+
+/// The run of word characters around column `x` of a drawn row (paths and links count as words), if `x` is on one.
+pub fn word_at(row: &[String], x: u16, region: Rect) -> Option<(u16, u16)> {
+    let is_word = |i: u16| row.get(i as usize).is_some_and(|s| s.is_empty() || s.chars().next().is_some_and(|c| c.is_alphanumeric() || "_-./:~@#%+=?&".contains(c)));
+    if !is_word(x) {
+        return None;
+    }
+    let (mut a, mut b) = (x, x);
+    while a > region.x && is_word(a - 1) {
+        a -= 1;
+    }
+    while b + 1 < region.right() && is_word(b + 1) {
+        b += 1;
+    }
+    Some((a, b))
 }
 
 /// The panel to show, if any. One at a time; the first that applies wins.
@@ -295,71 +329,54 @@ fn surface(app: &mut App, width: usize) -> Option<View> {
     if let Some(p) = app.sessions[app.active].pending.front() {
         return Some(prompt_view(p, width.saturating_sub(4), &app.cwd));
     }
-    if let Some(sel) = app.color_picker {
-        return Some(color_view(sel));
-    }
-    if app.model_picker.is_some() {
-        return Some(model_view(app));
-    }
-    if let Some(p) = app.rewind {
-        return Some(rewind_view(&app.sessions[app.active], p, width));
-    }
-    if let Some(ui) = &app.sched_ui {
-        let s = &app.sessions[app.active];
-        let q = ui.target.and_then(|n| s.queue.get(n));
-        let gist = q.map(|q| crate::queue::gist(q, width.saturating_sub(16)));
-        return Some(crate::schedule::view(ui, gist.as_deref(), q.is_some_and(|q| q.due.is_some()), std::time::SystemTime::now()));
-    }
-    if let Some(ui) = &app.queue_ui {
-        let s = &app.sessions[app.active];
-        return Some(crate::queue::view(ui, &s.queue, s.queue_hold, s.busy, width));
-    }
-    if let Some(ui) = &app.search {
-        return Some(crate::search::view(ui));
-    }
-    if let Some(ui) = &app.lanes {
-        let s = &app.sessions[app.active];
-        return Some(crate::lanes::view(ui, &crate::lanes::collect(&s.items, &s.shells, s.cwd.as_deref().unwrap_or(&app.cwd)), width));
-    }
-    if let Some(ui) = &app.ctx_ui {
-        return Some(crate::context::view(ui, &app.sessions[app.active].usage, width));
-    }
-    if app.usage_open {
-        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0.0, |d| d.as_secs_f64());
-        return Some(usage::view(&app.sessions[app.active].usage, width, now));
-    }
-    if let Some(ui) = &app.opt {
-        return Some(optimize::view(ui, width));
-    }
-    if let Some(ui) = &app.perms {
-        return Some(permissions::view(ui, width));
-    }
-    if let Some(ui) = &app.instr {
-        return Some(instructions::view(ui, width));
-    }
-    if let Some(ui) = &app.tabcfg {
-        return Some(tabcfg::view(ui, &app.sessions[app.active], width));
-    }
-    if let Some(ui) = &app.settings {
-        return Some(settings::view(ui, width, |k| app.setting_value(k)));
-    }
-    if let Some(ui) = &app.wt_ui {
-        let canon = |p: &str| std::fs::canonicalize(p).map_or(p.to_string(), |c| c.to_string_lossy().into_owned());
-        let tabs: Vec<String> = app.sessions.iter().map(|s| canon(s.cwd.as_deref().unwrap_or(&app.cwd))).collect();
-        let here = canon(app.cwd());
-        return Some(crate::worktree::view(ui, &tabs, &here));
-    }
-    if let Some(ui) = &app.open_ui {
-        return Some(crate::open::view(ui));
-    }
-    if let Some(ui) = &app.term_ui {
-        return Some(crate::termui::view(ui, &app.sessions[app.active].terms.all(), app.agent_term));
-    }
-    if let Some(ui) = &app.items_ui {
-        return Some(crate::segments::view(ui, &app.line_items));
+    if let Some(panel) = app.front_panel() {
+        return panel_view(app, panel, width);
     }
     let rows = app.completions();
     (!rows.is_empty()).then(|| suggest_view(&rows, app.sel, width))
+}
+
+/// What a front panel draws; the explorer is drawn apart, as the whole screen.
+fn panel_view(app: &App, panel: crate::Panel, width: usize) -> Option<View> {
+    use crate::Panel as P;
+    let s = &app.sessions[app.active];
+    match panel {
+        P::Explorer => None,
+        P::Color => app.color_picker.map(color_view),
+        P::Model => Some(model_view(app)),
+        P::Rewind => app.rewind.map(|p| rewind_view(s, p, width)),
+        P::Sched => app.sched_ui.as_ref().map(|ui| {
+            let q = ui.target.and_then(|n| s.queue.get(n));
+            let gist = q.map(|q| crate::queue::gist(q, width.saturating_sub(16)));
+            crate::schedule::view(ui, gist.as_deref(), q.is_some_and(|q| q.due.is_some()), std::time::SystemTime::now())
+        }),
+        P::Queue => app.queue_ui.as_ref().map(|ui| crate::queue::view(ui, &s.queue, s.queue_hold, s.busy, width)),
+        P::Search => app.search.as_ref().map(crate::search::view),
+        P::Procs => app.procs_ui.as_ref().map(|ui| crate::procs::view(ui, &app.peers, std::process::id())),
+        P::Lanes => app.lanes.as_ref().map(|ui| crate::lanes::view(ui, &crate::lanes::collect(&s.items, &s.shells, s.cwd.as_deref().unwrap_or(&app.cwd)), width)),
+        P::Ctx => app.ctx_ui.as_ref().map(|ui| crate::context::view(ui, &s.usage, width)),
+        P::Usage => {
+            let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0.0, |d| d.as_secs_f64());
+            Some(usage::view(&s.usage, width, now))
+        }
+        P::Opt => app.opt.as_ref().map(|ui| optimize::view(ui, width)),
+        P::Perms => app.perms.as_ref().map(|ui| permissions::view(ui, width)),
+        P::Instr => app.instr.as_ref().map(|ui| instructions::view(ui, width)),
+        P::TabCfg => app.tabcfg.as_ref().map(|ui| tabcfg::view(ui, s, app.cwd(), width)),
+        P::Settings => app.settings.as_ref().map(|ui| settings::view(ui, width, |k| app.setting_value(k))),
+        P::Worktree => app.wt_ui.as_ref().map(|ui| {
+            let canon = |p: &str| std::fs::canonicalize(p).map_or(p.to_string(), |c| c.to_string_lossy().into_owned());
+            let tabs: Vec<String> = app.sessions.iter().map(|s| canon(s.cwd.as_deref().unwrap_or(&app.cwd))).collect();
+            crate::worktree::view(ui, &tabs, &canon(app.cwd()))
+        }),
+        P::Open => app.open_ui.as_ref().map(crate::open::view),
+        P::Term => app.term_ui.as_ref().map(|ui| crate::termui::view(ui, &s.terms.all(), app.agent_term)),
+        P::Supervisor => app.sup_ui.as_ref().map(|ui| {
+            let (link, pid) = app.sup_link();
+            crate::supui::view(ui, link, pid, &app.peers, std::process::id(), supervisor::exe_mtime(), |i| app.sup_setting(i), width)
+        }),
+        P::Items => app.items_ui.as_ref().map(|ui| crate::segments::view(ui, &app.line_items)),
+    }
 }
 
 /// The `/color` choices, each name in its own colour; the UI behind already wears the highlighted one.
@@ -370,41 +387,73 @@ fn color_view(sel: usize) -> View {
 }
 
 /// The model list with the effort levels and fast mode of the highlighted model pinned beneath it.
-fn model_view(app: &App) -> View {
+pub(crate) fn model_view(app: &App) -> View {
     let Some(p) = app.model_picker else { return View::new("", vec![], 0, Line::raw("")) };
     let models = app.model_list();
     let s = &app.sessions[app.active];
     let cur = app.current_model();
-    let mut body: Vec<Line> = models
-        .iter()
-        .enumerate()
-        .map(|(i, m)| panel::row(i == p.sel, vec![Span::raw(format!("{} {:<24} {}", if cur == Some(i) { theme::CURRENT } else { " " }, m.name, m.desc))]))
+    // Four menus, one with the keys at a time: the models and their versions side by side (both vertical),
+    // then the effort and fast mode (both horizontal).
+    let focus = p.focused(crate::ModelPicker::usable(models, p.sel));
+    let fams = crate::session::families(models);
+    let at = fams.iter().position(|f| f.1.contains(&p.sel)).unwrap_or(0);
+    let versions: Vec<(usize, &str)> = fams.get(at).map_or(vec![], |f| f.1.iter().filter_map(|&i| models[i].parts().1.map(|v| (i, v))).collect());
+    let vat = versions.iter().position(|v| v.0 == p.sel).unwrap_or(0);
+    let name_w = fams.iter().map(|f| f.0.width()).max().unwrap_or(0).max(5);
+    let ver_w = versions.iter().map(|v| v.1.width()).max().unwrap_or(0);
+    let cell = |text: String, selected: bool, focused: bool| match (selected, focused) {
+        (true, true) => Span::styled(text, theme::selected()),
+        (true, false) => Span::styled(text, theme::bold()),
+        _ => Span::raw(text),
+    };
+    let body_len = fams.len().max(versions.len());
+    let mut body: Vec<Line> = (0..body_len)
+        .map(|r| {
+            let mut spans = Vec::new();
+            match fams.get(r) {
+                Some((family, entries)) => {
+                    let (on, mark) = (r == at, if cur.is_some_and(|c| entries.contains(&c)) { theme::CURRENT } else { " " });
+                    let cursor = if !on { "  ".to_string() } else if focus == 0 { format!("{} ", theme::CURSOR) } else { format!("{} ", theme::CURSOR_AWAY) };
+                    spans.push(Span::styled(cursor, if on && focus == 0 { theme::accent() } else { theme::dim() }));
+                    spans.push(cell(format!(" {mark} {family:<name_w$} "), on, focus == 0));
+                }
+                None => spans.push(Span::raw(" ".repeat(name_w + 6))),
+            }
+            spans.push(Span::raw("   "));
+            if let Some(&(i, v)) = versions.get(r) {
+                let mark = if cur == Some(i) { theme::CURRENT } else { " " };
+                spans.push(cell(format!(" {mark} {v:<ver_w$} "), r == vat, focus == 1));
+            }
+            Line::from(spans)
+        })
         .collect();
     if body.is_empty() {
         body.push(Line::styled("loading models…", theme::dim()));
     }
-    let mut tail = Vec::new();
+    let head = Line::from(vec![Span::raw("  "), panel::menu_label(&format!(" {:<w$}", "model", w = name_w + 4), focus == 0), Span::raw("   "), panel::menu_label(" version", focus == 1)]);
+    let mut tail = vec![Line::styled(format!("  {}", models.get(p.sel).map_or("", |m| m.desc.as_str())), theme::dim())];
     if let Some(m) = models.get(p.sel).filter(|m| !m.efforts.is_empty()) {
-        let mut spans = vec![Span::raw("effort  ")];
+        let mut spans = vec![Span::raw("  "), panel::menu_label("effort ", focus == 2)];
         for (i, e) in m.efforts.iter().enumerate() {
-            spans.push(theme::chip(e, *e == s.effort, i == p.effort, theme::bold()));
+            spans.push(theme::chip_in(e, *e == s.effort, i == p.effort, focus == 2, theme::bold()));
         }
         tail.push(Line::from(spans));
     }
     // Fast mode: Opus only, so the row says so instead of vanishing and shifting the layout.
     let cur_fast = s.fast_mode || s.fast_pref == Some(true);
     if models.get(p.sel).is_some_and(|m| m.fast) {
-        let mut spans = vec![Span::raw("fast ↯  ")];
+        let mut spans = vec![Span::raw("  "), panel::menu_label("fast ↯ ", focus == 3)];
         for (on, label) in [(false, "off"), (true, "on")] {
-            spans.push(theme::chip(label, cur_fast == on, p.fast == on, theme::bold()));
+            spans.push(theme::chip_in(label, cur_fast == on, p.fast == on, focus == 3, theme::bold()));
         }
         spans.push(Span::styled("  faster output, higher price per token", theme::dim()));
         tail.push(Line::from(spans));
     } else {
-        tail.push(Line::styled("fast ↯  not available on this model (Opus only)", theme::dim()));
+        tail.push(Line::styled("  fast ↯  not available on this model (Opus only)", theme::dim()));
     }
-    let footer = theme::hints(&[("↑↓", "model"), ("←→", "effort"), ("space", "fast"), ("enter", "apply"), ("esc", "cancel")]);
-    View::new("Model, effort & fast mode", body, p.sel, footer).with_tail(tail)
+    let footer = theme::hints(&[("↑↓←→", "move"), ("tab", "next menu"), ("enter", "apply"), ("esc", "cancel")]);
+    let row = if focus == 1 { vat } else { at };
+    View::new("Model, effort & fast mode", body, row, footer).with_head(vec![head]).with_tail(tail)
 }
 
 /// Earlier messages to go back to, with what to restore pinned beneath.
@@ -414,18 +463,18 @@ fn rewind_view(s: &crate::session::Session, p: crate::RewindPicker, width: usize
     let body: Vec<Line> = points
         .iter()
         .enumerate()
-        .map(|(i, (_, t))| panel::row(i == sel, vec![Span::raw(truncate(&t.split_whitespace().collect::<Vec<_>>().join(" "), width.saturating_sub(8)))]))
+        .map(|(i, (_, t))| panel::row_in(i == sel, !p.on_restore, vec![Span::raw(truncate(&t.split_whitespace().collect::<Vec<_>>().join(" "), width.saturating_sub(8)))]))
         .collect();
     let edited = points.get(sel).is_some_and(|(at, _)| s.edits_since(*at));
     let choices = crate::RewindPicker::choices(edited);
-    let mut spans = vec![Span::raw("restore  ")];
+    let mut spans = vec![panel::menu_label("restore  ", p.on_restore)];
     for (i, (label, ..)) in choices.iter().enumerate() {
-        spans.push(theme::chip(label, false, i == p.restore.min(choices.len() - 1), theme::bold()));
+        spans.push(theme::chip_in(label, false, i == p.restore.min(choices.len() - 1), p.on_restore, theme::bold()));
     }
     if !edited {
         spans.push(Span::styled("  no files edited since", theme::dim()));
     }
-    let keys: &[(&str, &str)] = if edited { &[("↑↓", "message"), ("←→", "restore"), ("enter", "rewind"), ("esc", "cancel")] } else { &[("↑↓", "message"), ("enter", "rewind"), ("esc", "cancel")] };
+    let keys: &[(&str, &str)] = if edited { &[("↑↓←→", "move"), ("tab", "next menu"), ("enter", "rewind"), ("esc", "cancel")] } else { &[("↑↓", "move"), ("enter", "rewind"), ("esc", "cancel")] };
     View::new("Rewind to before…", body, sel, theme::hints(keys)).with_tail(vec![Line::from(spans)])
 }
 
@@ -445,9 +494,8 @@ fn suggest_view(rows: &[crate::Completion], sel: usize, width: usize) -> View {
             panel::row(i == sel, vec![Span::raw(format!("{left}{}", " ".repeat(pad))), Span::styled(truncate(&r.desc, room), theme::dim())])
         })
         .collect();
-    let title = if rows[0].prefix == '@' { "Files" } else { "Commands" };
     let footer = theme::hints(&[("tab", "complete"), ("↑↓", "move"), ("esc", "hide")]);
-    View::new(title, body, sel, footer).input_focus().rows(0, 8)
+    View::new("", body, sel, footer).input_focus().rows(0, 8)
 }
 
 pub(crate) fn tab_line(app: &App) -> Line<'static> {
@@ -475,7 +523,7 @@ fn tab_groups(app: &App) -> Vec<Vec<Span<'static>>> {
         let mark_style = match (i == app.active, mark) {
             (true, _) => style,
             (_, "◆") => theme::attention(),
-            (_, "◐") => tint,
+            _ if s.busy => tint,
             _ => style,
         };
         let number = if i == app.active || color.is_none() { style } else { tint };
@@ -491,9 +539,70 @@ fn tab_groups(app: &App) -> Vec<Vec<Span<'static>>> {
     groups
 }
 
-fn transcript(f: &mut Frame, s: &mut Session, area: Rect, expanded: bool, cwd: &str) -> Vec<(u16, u16, usize)> {
+/// Put `side` columns of room on both ends of a line; a band (a background at that end) carries its colour into it.
+fn side_room(l: &mut Line<'static>, side: usize) {
+    let room = |sp: Option<&Span>| Span::styled(" ".repeat(side), sp.and_then(|s| s.style.bg).map_or(Style::new(), |c| Style::new().bg(c)));
+    let (left, right) = (room(l.spans.first()), room(l.spans.last()));
+    l.spans.insert(0, left);
+    l.spans.push(right);
+}
+
+fn item_lines(item: &Item, width: u16, side: u16, expanded: bool, cwd: &str) -> Vec<Line<'static>> {
+    // Your messages are a band from edge to edge, with `❯` at the very start: no room at the sides.
+    let side = if matches!(item.entry, Entry::User(_) | Entry::Rich(_)) { 0 } else { side };
+    let mut l = entry_lines(&item.entry, width.saturating_sub(2 * side) as usize, expanded != item.flipped, cwd);
+    l.iter_mut().for_each(|l| side_room(l, side as usize));
+    l
+}
+
+/// A line as one string per screen column (a wide glyph's second column is "", a zero-width mark joins the one before).
+fn cells(l: &Line) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for c in l.spans.iter().flat_map(|s| s.content.chars()) {
+        match c.width().unwrap_or(0) {
+            0 => out.last_mut().map_or((), |p| p.push(c)),
+            w => {
+                out.push(c.to_string());
+                out.extend((1..w).map(|_| String::new()));
+            }
+        }
+    }
+    out
+}
+
+/// What the transcript selection covers, one line per row with trailing blanks cut.
+fn sel_text(s: &Session, lo: Spot, hi: Spot, width: u16, side: u16, expanded: bool, cwd: &str) -> String {
+    let (x_min, x_max) = (s.sel.area.x, s.sel.area.right().saturating_sub(1));
+    let mut out = Vec::new();
+    for i in lo.0..=hi.0.min(s.items.len().saturating_sub(1)) {
+        let item = &s.items[i];
+        let kept = item.cache.as_ref().filter(|c| c.0 == width && c.2.len() == c.1 && c.1 > 0);
+        let fresh;
+        let lines: &[Line] = match kept {
+            Some(c) => &c.2,
+            None => {
+                fresh = item_lines(item, width, side, expanded, cwd);
+                &fresh
+            }
+        };
+        let (r0, r1) = (if i == lo.0 { lo.1 } else { 0 }, if i == hi.0 { hi.1 } else { usize::MAX });
+        for (r, l) in lines.iter().enumerate().filter(|(r, _)| (r0..=r1).contains(r)) {
+            let x0 = if (i, r) == (lo.0, lo.1) { lo.2 } else { x_min };
+            let x1 = if (i, r) == (hi.0, hi.1) { hi.2 } else { x_max };
+            let row = cells(l);
+            let (x0, x1) = ((x0 - x_min) as usize, (x1 - x_min) as usize);
+            out.push(row.get(x0..=x1.min(row.len().saturating_sub(1))).unwrap_or_default().concat().trim_end().to_string());
+        }
+    }
+    out.join("\n").trim_matches('\n').trim_end().to_string()
+}
+
+fn transcript(f: &mut Frame, s: &mut Session, area: Rect, side: u16, expanded: bool, cwd: &str) -> Vec<(u16, u16, usize)> {
+    s.sel.rows.clear();
+    s.sel.area = area;
     if s.items.is_empty() {
-        f.render_widget(Paragraph::new(welcome(s, cwd, area.width as usize)), area);
+        s.sel.clear();
+        f.render_widget(Paragraph::new(welcome(s, cwd, area.width.saturating_sub(2 * side) as usize)), area.inner(ratatui::layout::Margin::new(side, 0)));
         return Vec::new();
     }
     let width = area.width;
@@ -503,7 +612,7 @@ fn transcript(f: &mut Frame, s: &mut Session, area: Rect, expanded: bool, cwd: &
         match &item.cache {
             Some((w, n, _)) if *w == width => *n,
             _ => {
-                let mut l = entry_lines(&item.entry, width as usize, expanded != item.flipped, cwd);
+                let mut l = item_lines(item, width, side, expanded, cwd);
                 let n = l.len();
                 if !keep {
                     l = Vec::new();
@@ -548,6 +657,8 @@ fn transcript(f: &mut Frame, s: &mut Session, area: Rect, expanded: bool, cwd: &
     let mut pos = 0;
     let mut calls = Vec::new();
     let mut shown = (first, first);
+    let mut top_cut = 0;
+    let mut rowmap: Vec<(usize, usize)> = Vec::with_capacity(h);
     for i in first..s.items.len() {
         let n = rows(&mut s.items[i], true);
         if pos + n > start {
@@ -560,12 +671,14 @@ fn transcript(f: &mut Frame, s: &mut Session, area: Rect, expanded: bool, cwd: &
             let from = start.saturating_sub(pos);
             let at = lines.len();
             lines.extend(l[from..].iter().take(h - lines.len()).cloned());
+            rowmap.extend((from..).take(lines.len() - at).map(|r| (i, r)));
             if matches!(item.entry, Entry::Tool { nested: false, .. }) {
                 calls.push((area.y + at as u16, area.y + lines.len() as u16, i));
             }
             shown.1 = i;
             if at == 0 {
                 shown.0 = i;
+                top_cut = from;
             }
             if lines.len() >= h {
                 break;
@@ -584,12 +697,88 @@ fn transcript(f: &mut Frame, s: &mut Session, area: Rect, expanded: bool, cwd: &
         }
     }
     f.render_widget(Paragraph::new(lines), area);
+    // The message being answered has scrolled off the top: say which it is. The nearest one at or above the view.
+    if h > 2
+        && let Some(j) = s.items[..=shown.0].iter().rposition(|it| crate::session::user_said(&it.entry).is_some())
+        && (j < shown.0 || top_cut > 1) // row 0 of a message is its blank spacer
+    {
+        let text = crate::session::user_said(&s.items[j].entry).unwrap_or_default();
+        // The band runs edge to edge, as your message does.
+        let hint = prompt_hint(&text, area.width as usize);
+        f.render_widget(Paragraph::new(hint), Rect::new(area.x, area.y, area.width, 1));
+    }
     if s.scroll > 0 && h > 1 {
         let note = theme::keys(&format!(" ↓ {} lines below · ctrl+end ", s.scroll));
         let w = (note.chars().count() as u16).min(area.width);
         f.render_widget(Paragraph::new(Span::styled(note, theme::selected())), Rect::new(area.right() - w, area.bottom() - 1, w, 1));
     }
+    s.sel.rows = rowmap;
+    selection(f, s, width, side, expanded, cwd);
     calls
+}
+
+/// One row naming the message the transcript below answers: `❯ ` and the start of it, on the message band.
+fn prompt_hint(text: &str, width: usize) -> Line<'static> {
+    let band = theme::user_band();
+    let first = text.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("");
+    let room = width.saturating_sub(2);
+    let (mut out, mut used) = (String::new(), 0);
+    for c in first.chars() {
+        let w = c.width().unwrap_or(0);
+        if used + w > room.saturating_sub(1) && first.width() > room {
+            out.push('…');
+            used += 1;
+            break;
+        }
+        out.push(c);
+        used += w;
+    }
+    out.push_str(&" ".repeat(room.saturating_sub(used)));
+    Line::from(vec![Span::styled("❯ ", band.patch(theme::accent()).add_modifier(Modifier::BOLD)), Span::styled(out, band)])
+}
+
+/// The transcript selection: follow a pointer held past an edge, widen a double or triple click, read the text when the
+/// ends moved, and paint it. Runs after the rows are laid out, so it always agrees with what is on screen.
+fn selection(f: &mut Frame, s: &mut Session, width: u16, side: u16, expanded: bool, cwd: &str) {
+    let area = s.sel.area;
+    if s.sel.a.or(s.sel.b).is_some_and(|p| p.0 >= s.items.len()) {
+        return s.sel.clear(); // the entries it was on are gone (/clear, rewind)
+    }
+    let (first, last) = (s.sel.rows.first().copied(), s.sel.rows.last().copied());
+    if s.sel.live && s.sel.edge != 0 && let (Some(top), Some(bottom)) = (first, last) {
+        let (i, r) = if s.sel.edge < 0 { top } else { bottom };
+        s.sel.b = Some((i, r, if s.sel.edge < 0 { area.x } else { area.right().saturating_sub(1) }));
+        s.sel.dirty = true;
+    }
+    if s.sel.expand != 0 && let Some((i, r, x)) = s.sel.a.filter(|p| p.0 < s.items.len()) {
+        let (lo, hi) = if s.sel.expand == 3 {
+            (area.x, area.right().saturating_sub(1))
+        } else {
+            let row: Vec<String> = item_lines(&s.items[i], width, side, expanded, cwd).get(r).map(cells).unwrap_or_default();
+            ui_word(&row, x - area.x, area.width).map_or((x, x), |(a, b)| (a + area.x, b + area.x))
+        };
+        (s.sel.a, s.sel.b, s.sel.expand, s.sel.dirty) = (Some((i, r, lo)), Some((i, r, hi)), 0, true);
+    }
+    if s.sel.dirty {
+        s.sel.dirty = false;
+        s.sel.text = s.sel.span().map(|(lo, hi)| sel_text(s, lo, hi, width, side, expanded, cwd)).filter(|t| !t.is_empty());
+    }
+    let Some((lo, hi)) = s.sel.span() else { return };
+    let buf = f.buffer_mut();
+    for (k, &(i, r)) in s.sel.rows.iter().enumerate().filter(|(_, p)| (lo.0, lo.1) <= **p && **p <= (hi.0, hi.1)) {
+        let x0 = if (i, r) == (lo.0, lo.1) { lo.2 } else { area.x };
+        let x1 = if (i, r) == (hi.0, hi.1) { hi.2 } else { area.right().saturating_sub(1) };
+        for x in x0..=x1 {
+            if let Some(c) = buf.cell_mut((x, area.y + k as u16)) {
+                c.set_style(theme::selection());
+            }
+        }
+    }
+}
+
+/// The word around column `x` of a row of cells, if it is on one: `word_at` for a row that starts at column 0.
+fn ui_word(row: &[String], x: u16, width: u16) -> Option<(u16, u16)> {
+    word_at(row, x, Rect::new(0, 0, width, 1))
 }
 
 /// An empty tab: where you are, with what, and the keys that matter first. A blank screen says neither.
@@ -628,7 +817,7 @@ fn welcome(s: &Session, cwd: &str, width: usize) -> Vec<Line<'static>> {
     out
 }
 
-fn entry_lines(e: &Entry, width: usize, expanded: bool, cwd: &str) -> Vec<Line<'static>> {
+pub(crate) fn entry_lines(e: &Entry, width: usize, expanded: bool, cwd: &str) -> Vec<Line<'static>> {
     let mut out = vec![Line::raw("")];
     match e {
         Entry::User(t) => user_lines(&mut out, t, width, true),
@@ -639,8 +828,13 @@ fn entry_lines(e: &Entry, width: usize, expanded: bool, cwd: &str) -> Vec<Line<'
                     Part::Text(t) => user_lines(&mut out, t, width, first),
                     Part::Image(n, shown) => {
                         user_lines(&mut out, &crate::image::token(*n), width, first);
+                        // The picture sits on the message's band, so the band does not break around it.
+                        let bg = theme::user_band().bg.map_or(Style::new(), |c| Style::new().bg(c));
                         for mut l in shown.iter().flat_map(crate::image::placeholder_lines) {
                             l.spans.insert(0, Span::raw("  "));
+                            let w: usize = l.spans.iter().map(|s| s.content.width()).sum();
+                            l.spans.push(Span::raw(" ".repeat(width.saturating_sub(w))));
+                            l.spans.iter_mut().for_each(|sp| sp.style = sp.style.patch(bg));
                             out.push(l);
                         }
                     }
@@ -659,15 +853,50 @@ fn entry_lines(e: &Entry, width: usize, expanded: bool, cwd: &str) -> Vec<Line<'
             if expanded && !*nested {
                 tool_lines(&mut folded, name, input, result, false, width, false, cwd);
                 if folded.len() < out.len() {
-                    out.push(Line::styled(theme::keys("     ▴ fold (click or alt+o)"), theme::dim()));
+                    out.push(Line::styled(theme::keys("     ▴ fold (alt+o)"), theme::dim()));
                 }
+            }
+            if let Some(band) = theme::tool_band(name).filter(|_| !*nested) {
+                on_band(&mut out[1..], band, width);
             }
         }
         Entry::Note(t) => block(&mut out, t, width, Span::raw("  "), theme::dim()),
         Entry::Error(t) => block(&mut out, t, width, Span::styled("✗ ", theme::danger()), theme::danger()),
+        Entry::Side { question, answer, .. } => side_lines(&mut out, question, answer, width),
         Entry::Image(s) => out.extend(crate::image::placeholder_lines(s)),
     }
     out
+}
+
+/// Lay `band` behind `lines`, the full width: only where a span has no background (a diff line keeps its own)
+/// and no colour (the band's text colour, so nothing turns invisible on it).
+fn on_band(lines: &mut [Line<'static>], band: Style, width: usize) {
+    for l in lines {
+        let w: usize = l.spans.iter().map(|s| s.content.width()).sum();
+        l.spans.push(Span::raw(" ".repeat(width.saturating_sub(w))));
+        for sp in &mut l.spans {
+            sp.style.bg = sp.style.bg.or(band.bg);
+            sp.style.fg = sp.style.fg.or(band.fg);
+        }
+    }
+}
+
+/// A `/btw`: the question under a `btw` label, then the answer in a quiet gutter so it cannot be taken for
+/// part of the conversation, and what it cost.
+fn side_lines(out: &mut Vec<Line<'static>>, question: &str, answer: &Option<Result<(String, f64), String>>, width: usize) {
+    block(out, question, width, Span::styled("  btw ", theme::accent().add_modifier(Modifier::BOLD)), Style::new());
+    let gutter = || Span::styled("  │ ", theme::dim());
+    match answer {
+        None => out.push(Line::from(vec![gutter(), Span::styled("asking… (not added to the conversation)", theme::dim())])),
+        Some(Err(e)) => block(out, e, width, Span::styled("  ✗ ", theme::danger()), theme::danger()),
+        Some(Ok((text, cost))) => {
+            for mut l in crate::markdown::render(text, width.saturating_sub(4)) {
+                l.spans.insert(0, gutter());
+                out.push(l);
+            }
+            out.push(Line::from(vec![gutter(), Span::styled(format!("${cost:.4} · not in the conversation"), theme::dim())]));
+        }
+    }
 }
 
 /// Your message, as Claude Code shows it: `❯` and the words on a band across the width.
@@ -1103,7 +1332,7 @@ fn prompt_view(p: &Pending, width: usize, cwd: &str) -> View {
 /// `✻ Thinking… (12s · ↓ 340 tokens · esc to interrupt)`, as Claude Code shows a turn in progress.
 fn spinner_line(s: &Session, width: usize) -> Line<'static> {
     let el = s.busy_since.elapsed();
-    let frame = SPINNER[(el.as_millis() / 120) as usize % SPINNER.len()];
+    let look = crate::motion::look();
     let what = if s.activity.is_empty() { "working" } else { &s.activity };
     let mut what: Vec<char> = what.chars().collect();
     what[0] = what[0].to_ascii_uppercase();
@@ -1111,12 +1340,15 @@ fn spinner_line(s: &Session, width: usize) -> Line<'static> {
     if s.turn_chars >= 4 {
         detail += &format!(" · ↓ {} tokens", crate::usage::tokens((s.turn_chars / 4) as u64));
     }
-    let line = Line::from(vec![
-        Span::styled(format!("{frame} "), theme::working()),
-        Span::styled(format!("{}…", what.into_iter().collect::<String>()), theme::working().add_modifier(Modifier::BOLD)),
-        Span::styled(theme::keys(&format!(" ({detail} · esc to interrupt{})", if s.shells.iter().any(|x| x.status.is_none() && !x.background) { " · ctrl+b to background" } else { "" })), theme::dim()),
-    ]);
-    if line.width() > width { Line::from(line.spans[..2].to_vec()) } else { line }
+    let done = s.tasks.iter().filter(|t| t.2 == "completed").count();
+    if done < s.tasks.len() {
+        detail += &format!(" · {}", crate::motion::count_bar(done, s.tasks.len(), 5));
+    }
+    let mut head: Vec<Span<'static>> = look.frame(el).map(|f| Span::styled(format!("{f} "), theme::working())).into_iter().collect();
+    head.extend(look.shimmer(&format!("{}…", what.into_iter().collect::<String>()), theme::working().add_modifier(Modifier::BOLD), theme::working_glint(), el));
+    let tail = Span::styled(theme::keys(&format!(" ({detail} · esc to interrupt{})", if s.shells.iter().any(|x| x.status.is_none() && !x.background) { " · ctrl+b to background" } else { "" })), theme::dim());
+    let line = Line::from(head.iter().cloned().chain([tail]).collect::<Vec<_>>());
+    if line.width() > width { Line::from(head) } else { line }
 }
 
 /// One part of claude++'s own status line (`segments::ALL`), or nothing when it has nothing to say yet.
@@ -1348,6 +1580,38 @@ mod tests {
     }
 
     #[test]
+    fn a_model_name_splits_into_family_and_version() {
+        assert_eq!(crate::session::split_name("Sonnet 5.5"), ("Sonnet", Some("5.5")));
+        assert_eq!(crate::session::split_name("Opus 4"), ("Opus", Some("4")));
+        assert_eq!(crate::session::split_name("Default (recommended)"), ("Default (recommended)", None));
+        assert_eq!(crate::session::split_name("Haiku"), ("Haiku", None));
+        assert_eq!(crate::session::split_name("Mix 5.5b"), ("Mix 5.5b", None));
+    }
+
+    #[test]
+    fn commands_and_file_calls_sit_on_one_full_width_band_and_other_tools_do_not() {
+        let entry = |name: &str, input: Value, result: &str| Entry::Tool { id: "t".into(), name: name.into(), input, result: Some((result.into(), false)), nested: false };
+        let lines = |e: &Entry| entry_lines(e, 40, false, "/p");
+        let bash = lines(&entry("Bash", serde_json::json!({"command": "ls"}), "a\nb"));
+        assert!(bash[0].spans.iter().all(|s| s.style.bg.is_none()), "the blank line above the call is not part of it");
+        for l in &bash[1..] {
+            assert_eq!(l.spans.iter().map(|s| s.content.width()).sum::<usize>(), 40, "full width: {l}");
+            assert!(l.spans.iter().all(|s| s.style.bg.is_some() && s.style.fg.is_some()), "{l}");
+        }
+        let edit = lines(&entry("Edit", serde_json::json!({"file_path": "/p/a.rs", "old_string": "x", "new_string": "y"}), "ok"));
+        let band = theme::tool_band("Edit").unwrap().bg;
+        let changed: Vec<_> = edit.iter().filter(|l| l.to_string().contains("+ y") || l.to_string().contains("- x")).collect();
+        assert_eq!(changed.len(), 2);
+        assert!(changed.iter().all(|l| l.spans.iter().any(|s| s.style.bg.is_some() && s.style.bg != band)), "a diff line keeps its green or red");
+        assert!(edit[1].spans.iter().all(|s| s.style.bg == band), "the header is on the band");
+        for name in ["Read", "Write", "Glob", "Grep", "NotebookEdit"] {
+            assert!(theme::tool_band(name).is_some(), "{name}");
+        }
+        let other = lines(&entry("mcp__x__y", serde_json::json!({}), "ok"));
+        assert!(other.iter().flat_map(|l| &l.spans).all(|s| s.style.bg.is_none()));
+    }
+
+    #[test]
     fn edit_tool_shows_diff_not_result() {
         let input = serde_json::json!({"file_path": "/p/a.rs", "old_string": "x", "new_string": "y\nz"});
         let mut out = Vec::new();
@@ -1445,4 +1709,18 @@ fn folding_wraps_only_what_shows_and_counts_the_rest() {
     let big: String = (0..100_000).map(|i| format!("line {i}\n")).collect();
     fold(&big, 80, false);
     assert!(s.elapsed() < std::time::Duration::from_millis(250), "{:?}", s.elapsed());
+}
+
+#[cfg(test)]
+#[test]
+fn a_band_runs_into_the_side_room_and_plain_text_leaves_it_blank() {
+    let mut band = Vec::new();
+    user_lines(&mut band, "hi", 20, true);
+    let mut plain = Line::raw("text");
+    side_room(&mut band[0], 2);
+    side_room(&mut plain, 2);
+    let bg = theme::user_band().bg;
+    assert!(bg.is_some());
+    assert_eq!((band[0].spans[0].style.bg, band[0].spans.last().unwrap().style.bg), (bg, bg));
+    assert_eq!((plain.spans[0].style.bg, plain.spans.last().unwrap().style.bg), (None, None));
 }

@@ -279,7 +279,7 @@ fn hostile_transcript_files_never_panic_resume_or_the_readers() {
         std::fs::write(&path, &bytes).unwrap();
         let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let mut s = Session::new(1, String::new());
-            s.show_history(&path);
+            s.show_history(crate::history::Loaded::read(&path), &path);
             let _ = (history::preview(&path, 10), history::prompts(&path), history::session_name(&path), history::session_color(&path), history::agent_reports(&path));
         }));
         assert!(res.is_ok(), "transcript {} panicked resume or a reader (kept for inspection)", path.display());

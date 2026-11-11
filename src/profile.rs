@@ -128,7 +128,7 @@ fn strings(v: &Value) -> Vec<String> {
 }
 
 fn path(merged: &Map<String, Value>, key: &str, p: &str) -> String {
-    let p = p.strip_prefix("~/").map(|r| std::env::home_dir().unwrap_or_default().join(r).to_string_lossy().into_owned()).unwrap_or_else(|| p.to_string());
+    let p = crate::config::under_home(p).map_or_else(|| p.to_string(), |h| h.to_string_lossy().into_owned());
     match merged.get(&format!("__dir:{key}")).and_then(Value::as_str) {
         Some(d) if !Path::new(&p).is_absolute() => Path::new(d).join(p).to_string_lossy().into_owned(),
         _ => p,

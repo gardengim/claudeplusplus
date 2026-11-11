@@ -106,17 +106,12 @@ pub fn until(secs: f64) -> String {
     }
 }
 
-fn bar(frac: f64, width: usize) -> String {
-    let full = ((frac.clamp(0.0, 1.0) * width as f64).round() as usize).min(width);
-    format!("{}{}", "█".repeat(full), "░".repeat(width - full))
-}
-
 pub fn view(u: &Usage, width: usize, now: f64) -> View {
     let mut body: Vec<Line> = vec![];
     for l in &u.plan {
         let style = if l.percent >= 90.0 { theme::danger() } else if l.percent >= 70.0 { theme::attention() } else { theme::accent() };
         let reset = if l.resets_at > 0.0 { format!("  resets in {}", until(l.resets_at - now)) } else { String::new() };
-        body.push(Line::from(vec![Span::styled(format!("{:<14}", l.name), theme::bold()), Span::styled(bar(l.percent / 100.0, 20), style), Span::raw(format!(" {:>3.0}%", l.percent)), Span::styled(reset, theme::dim())]));
+        body.push(Line::from(vec![Span::styled(format!("{:<14}", l.name), theme::bold()), Span::styled(crate::motion::bar(l.percent / 100.0, 20), style), Span::raw(format!(" {:>3.0}%", l.percent)), Span::styled(reset, theme::dim())]));
     }
     let mut hint = String::new();
     match &u.ctx {
@@ -146,7 +141,7 @@ pub fn view(u: &Usage, width: usize, now: f64) -> View {
                 body.push(Line::from(vec![
                     Span::styled(format!("  {label:<34}"), if dim { theme::dim() } else { Default::default() }),
                     Span::styled(format!("{:>7} ", tokens(*t)), if dim { theme::dim() } else { theme::bold() }),
-                    Span::styled(bar(*t as f64 / top as f64, 16), bar_style),
+                    Span::styled(crate::motion::bar(*t as f64 / top as f64, 16), bar_style),
                     Span::styled(share, theme::dim()),
                 ]));
             }

@@ -2,12 +2,209 @@
 
 use super::*;
 
+/// Every full panel that takes over the keys and the screen's bottom. Declared in the order they win when
+/// several are open: keys, drawing and `overlay_open` all follow this one list.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum Panel {
+    Explorer,
+    Color,
+    Model,
+    Rewind,
+    Settings,
+    Items,
+    Open,
+    Worktree,
+    Term,
+    TabCfg,
+    Instr,
+    Perms,
+    Opt,
+    Ctx,
+    Procs,
+    Lanes,
+    Sched,
+    Queue,
+    Search,
+    Usage,
+    Supervisor,
+}
+
+impl App {
+    /// The panel in front, if any.
+    pub(crate) fn front_panel(&self) -> Option<Panel> {
+        let open = [
+            (self.explorer.is_some(), Panel::Explorer),
+            (self.color_picker.is_some(), Panel::Color),
+            (self.model_picker.is_some(), Panel::Model),
+            (self.rewind.is_some(), Panel::Rewind),
+            (self.settings.is_some(), Panel::Settings),
+            (self.items_ui.is_some(), Panel::Items),
+            (self.open_ui.is_some(), Panel::Open),
+            (self.wt_ui.is_some(), Panel::Worktree),
+            (self.term_ui.is_some(), Panel::Term),
+            (self.tabcfg.is_some(), Panel::TabCfg),
+            (self.instr.is_some(), Panel::Instr),
+            (self.perms.is_some(), Panel::Perms),
+            (self.opt.is_some(), Panel::Opt),
+            (self.ctx_ui.is_some(), Panel::Ctx),
+            (self.procs_ui.is_some(), Panel::Procs),
+            (self.lanes.is_some(), Panel::Lanes),
+            (self.sched_ui.is_some(), Panel::Sched),
+            (self.queue_ui.is_some(), Panel::Queue),
+            (self.search.is_some(), Panel::Search),
+            (self.usage_open, Panel::Usage),
+            (self.sup_ui.is_some(), Panel::Supervisor),
+        ];
+        open.into_iter().find(|p| p.0).map(|p| p.1)
+    }
+}
+
 impl App {
     /// Ask Claude Code for the context breakdown and plan limits (free: no model call) and show the panel,
     /// which fills in when the replies arrive.
     pub(crate) fn open_usage(&mut self) {
         self.usage_open = true;
         self.ask_usage();
+    }
+
+    /// `/procs`: open the panel at once and fill it in when the process list has been read (off the UI thread).
+    pub(crate) fn open_supervisor(&mut self) {
+        self.sup_ui = Some(Default::default());
+        if let Some(c) = self.sup.as_ref().filter(|c| c.alive() && c.manages()) {
+            c.ask_status();
+        }
+    }
+
+    /// How this window stands with the supervisor, and its pid when connected.
+    pub(crate) fn sup_link(&self) -> (supui::Link, Option<u32>) {
+        // The window's own supervisor is not the one this panel is about.
+        match self.sup.as_ref().filter(|c| c.alive() && !c.is_private()) {
+            Some(c) if c.manages() => (supui::Link::Live, c.pid()),
+            Some(c) => (supui::Link::Old, c.pid()),
+            None => {
+                let env = std::env::var("CLAUDEPP_SUPERVISOR").is_ok_and(|v| v == "off");
+                (supui::Link::Down { stopped: self.sup_paths.stopped_marker().exists(), env }, None)
+            }
+        }
+    }
+
+    /// What setting `i` of the supervisor is now: its own word while it answers, else what is saved.
+    pub(crate) fn sup_setting(&self, i: usize) -> String {
+        self.sup_setting_in(i, self.sup_ui.as_ref().and_then(|ui| ui.status.as_ref()))
+    }
+
+    fn sup_setting_in(&self, i: usize, status: Option<&serde_json::Value>) -> String {
+        let s = &supui::SETTINGS[i];
+        let live = status.map(|st| &st["settings"][s.key]).filter(|v| !v.is_null()).filter(|_| self.sup_link().0 == supui::Link::Live);
+        if let Some(v) = live {
+            return match v {
+                serde_json::Value::Bool(b) => match (s.key, b) {
+                    ("budget", false) => "paused".into(),
+                    (_, true) => "on".into(),
+                    _ => "off".into(),
+                },
+                v => v.as_str().map_or_else(|| v.to_string(), String::from),
+            };
+        }
+        let saved = self.config_path.as_deref().and_then(|p| config::get_str(p, &format!("supervisor_{}", s.key)));
+        saved.unwrap_or_else(|| s.choices[0].0.to_string())
+    }
+
+    pub(crate) fn sup_key(&mut self, k: KeyEvent) {
+        use supui::Act;
+        let Some(mut ui) = self.sup_ui.take() else { return };
+        let (link, _) = self.sup_link();
+        let rows = supui::rows(link, ui.status.as_ref().filter(|_| link == supui::Link::Live));
+        let act = ui.key(k, link, &rows);
+        let paths = self.sup_paths.clone();
+        let mut keep = true;
+        match act {
+            Act::None => {}
+            Act::Close => keep = false,
+            Act::Change(i, delta) => {
+                let s = &supui::SETTINGS[i];
+                let now = self.sup_setting_in(i, ui.status.as_ref());
+                let at = s.choices.iter().position(|c| c.0 == now).map_or(-1, |p| p as isize);
+                let next = s.choices[(at + delta).rem_euclid(s.choices.len() as isize) as usize].0;
+                if let Some(p) = self.config_path.clone()
+                    && let Err(e) = config::set_str(&p, &format!("supervisor_{}", s.key), next)
+                {
+                    self.flash(format!("could not save {}: {e}", p.display()));
+                }
+                if let Some(c) = self.sup.as_ref().filter(|c| c.alive() && c.manages()) {
+                    c.set(s.key, next);
+                }
+            }
+            Act::McpRestart(i) => {
+                let key = ui.status.as_ref().and_then(|s| s["mcp"][i]["key"].as_str().map(String::from));
+                if let (Some(key), Some(c)) = (key, self.sup.as_ref()) {
+                    c.restart_mcp(&key);
+                    self.flash("restarting the MCP server: the next message starts it again");
+                    ui.asked = Instant::now() - Duration::from_secs(60); // look again at the next tick
+                }
+            }
+            Act::Restart | Act::Stop => {
+                let stop = matches!(act, Act::Stop);
+                if !stop {
+                    supervisor::allow_start(&paths);
+                }
+                if let Some(e) = stop.then(|| supervisor::stop_on_purpose(&paths)).and_then(Result::err) {
+                    self.flash(format!("could not stop it: {e}"));
+                } else {
+                    let sent = match self.sup.as_ref().filter(|c| c.alive()) {
+                        Some(c) if c.manages() => {
+                            c.shutdown();
+                            true
+                        }
+                        Some(c) => c.pid().is_some_and(supervisor::terminate_old),
+                        None => true,
+                    };
+                    if sent {
+                        // Windows notice the lost connection and, unless it was stopped on purpose, start a new one.
+                        self.sup_tried = Instant::now().checked_sub(Duration::from_secs(8)).unwrap_or_else(Instant::now);
+                        ui.status = None;
+                        self.flash(if stop { "supervisor stopped; /supervisor starts it again" } else { "restarting the supervisor…" });
+                    } else {
+                        self.flash("could not stop the supervisor: its process is not one claude++ can identify as its own");
+                    }
+                }
+            }
+            Act::Start => {
+                supervisor::allow_start(&paths);
+                self.sup_tried = Instant::now().checked_sub(Duration::from_secs(60)).unwrap_or_else(Instant::now);
+                self.flash("starting the supervisor…");
+            }
+        }
+        if keep {
+            self.sup_ui = Some(ui);
+        }
+    }
+
+    /// While `/supervisor` is open: ask it again every second, so the numbers move.
+    pub(crate) fn refresh_supervisor(&mut self) {
+        if let Some(ui) = self.sup_ui.as_mut()
+            && ui.asked.elapsed() > Duration::from_secs(1)
+        {
+            ui.asked = Instant::now();
+            if let Some(c) = self.sup.as_ref().filter(|c| c.alive() && c.manages()) {
+                c.ask_status();
+            }
+        }
+    }
+
+    pub(crate) fn open_procs(&mut self) {
+        self.procs_ui = Some(Default::default());
+        self.read_procs();
+    }
+
+    pub(crate) fn read_procs(&mut self) {
+        if let Some(ui) = self.procs_ui.as_mut() {
+            ui.set(None);
+        }
+        let tx = self.tx.clone();
+        std::thread::spawn(move || {
+            let _ = tx.send(AppEvent::Procs(procs::report()));
+        });
     }
 
     pub(crate) fn ask_usage(&mut self) {
@@ -17,6 +214,26 @@ impl App {
         s.warm(&launch, &tx);
         s.control("get_context_usage", json!({}));
         s.control("get_usage", json!({}));
+    }
+
+    /// `/btw <question>`: ask in the background and show the question in the transcript, where the answer
+    /// fills in. Nothing opens and nothing is interrupted, so it works while Claude is mid-turn, and several
+    /// can be out at once.
+    pub(crate) fn btw_cmd(&mut self, question: &str) {
+        if question.is_empty() {
+            return self.flash("usage: /btw <question>");
+        }
+        let launch = self.launch_for(self.active);
+        let (cwd, tx) = (self.cwd().to_string(), self.tx.clone());
+        self.btw_seq += 1;
+        let id = self.btw_seq;
+        let s = self.s();
+        let (tab, args) = (s.id, btw::args(s.session_id.as_deref(), &s.model));
+        s.start_side(id, question);
+        let question = question.to_string();
+        std::thread::spawn(move || {
+            let _ = tx.send(AppEvent::Btw(tab, id, btw::ask(&launch.bin, &launch.env, &cwd, &args, &question)));
+        });
     }
 
     /// `/optimize [level|off|now]`.
@@ -58,8 +275,8 @@ impl App {
 
     pub(crate) fn opt_key(&mut self, k: KeyEvent) {
         let Some(mut ui) = self.opt.take() else { return };
-        let ctrl_c = k.code == KeyCode::Char('c') && k.modifiers.contains(KeyModifiers::CONTROL);
-        if matches!(k.code, KeyCode::Esc | KeyCode::Char('q')) || ctrl_c {
+        let ctrl_c = crate::panel::is_ctrl_c(&k);
+        if k.code == KeyCode::Esc || ctrl_c {
             return;
         }
         if ui.loading {
@@ -67,15 +284,18 @@ impl App {
             return;
         }
         let n = ui.items.len();
+        // Two menus, one with the keys: the level (left and right) and the items (up and down).
+        if let Some(to) = panel::menu_after(&k, ui.on_level as usize, 2) {
+            ui.on_level = to == 1;
+        }
         match k.code {
-            KeyCode::Up | KeyCode::Down if n > 0 => ui.sel = panel::cycle(ui.sel, n, k.code == KeyCode::Up),
-            KeyCode::Left | KeyCode::BackTab => ui.step_level(-1),
-            KeyCode::Right | KeyCode::Tab => ui.step_level(1),
+            KeyCode::Left | KeyCode::Right if ui.on_level => ui.step_level(if k.code == KeyCode::Left { -1 } else { 1 }),
+            KeyCode::Up | KeyCode::Down if n > 0 && !ui.on_level => ui.sel = panel::cycle(ui.sel, n, k.code == KeyCode::Up),
             KeyCode::Char('c') if !ctrl_c => {
                 let cwd = self.cwd().to_string();
                 ui.ask_claude(&self.launch.bin, &self.launch.env, &cwd);
             }
-            KeyCode::Char(' ') | KeyCode::Char('x') => {
+            KeyCode::Char(' ') | KeyCode::Char('x') if !ui.on_level => {
                 if let Some(it) = ui.items.get_mut(ui.sel) {
                     it.on = !it.on;
                 }
@@ -109,7 +329,7 @@ impl App {
     pub(crate) fn perms_key(&mut self, k: KeyEvent) {
         use permissions::Stage;
         let Some(mut ui) = self.perms.take() else { return };
-        let ctrl_c = k.code == KeyCode::Char('c') && k.modifiers.contains(KeyModifiers::CONTROL);
+        let ctrl_c = crate::panel::is_ctrl_c(&k);
         ui.note = None;
         match ui.stage.clone() {
             Stage::Typing(mut text) => {
@@ -133,7 +353,7 @@ impl App {
             Stage::Where(rule, w) => match k.code {
                 KeyCode::Esc => ui.stage = Stage::Typing(rule),
                 KeyCode::Up => ui.stage = Stage::Where(rule, (w + 2) % 3),
-                KeyCode::Down | KeyCode::Tab => ui.stage = Stage::Where(rule, (w + 1) % 3),
+                KeyCode::Down => ui.stage = Stage::Where(rule, (w + 1) % 3),
                 KeyCode::Enter => {
                     let scope = permissions::Scope::ALL[w];
                     let res = permissions::Scope::file(scope, self.cwd()).ok_or("no settings location".to_string()).and_then(|f| permissions::add(&f, ui.tab, &rule));
@@ -151,10 +371,12 @@ impl App {
                 _ => {}
             },
             stage => match k.code {
-                KeyCode::Esc | KeyCode::Char('q') => return,
+                KeyCode::Esc => return,
                 _ if ctrl_c => return,
-                KeyCode::Left | KeyCode::BackTab => ui.switch(-1),
-                KeyCode::Right | KeyCode::Tab => ui.switch(1),
+                // Two menus, one with the keys: the allow/ask/deny strip and the rules.
+                KeyCode::Tab | KeyCode::BackTab => ui.on_strip = !ui.on_strip,
+                KeyCode::Left | KeyCode::Right if ui.on_strip => ui.switch(if k.code == KeyCode::Left { -1 } else { 1 }),
+                _ if ui.on_strip => {}
                 KeyCode::Up => {
                     ui.sel = (ui.sel + ui.shown().len()) % (ui.shown().len() + 1);
                     ui.stage = Stage::List;
@@ -190,7 +412,7 @@ impl App {
         let Some(mut ui) = self.instr.take() else { return };
         let rows = ui.rows();
         let sel = ui.sel.min(rows.len().saturating_sub(1));
-        let close = matches!(k.code, KeyCode::Esc | KeyCode::Char('q')) || (k.code == KeyCode::Char('c') && k.modifiers.contains(KeyModifiers::CONTROL));
+        let close = k.code == KeyCode::Esc || crate::panel::is_ctrl_c(&k);
         if close {
             if ui.dirty {
                 if let Some(f) = instructions::rules_path() {
@@ -253,14 +475,24 @@ impl App {
             return;
         }
         let delta = match k.code {
-            KeyCode::Left | KeyCode::BackTab => -1,
-            KeyCode::Right | KeyCode::Tab | KeyCode::Char(' ') => 1,
+            KeyCode::Left => -1,
+            KeyCode::Right | KeyCode::Char(' ') => 1,
             _ => 0,
         };
         match (k.code, &rows[sel]) {
             (KeyCode::Esc, _) => return,
             (KeyCode::Char('c'), _) if k.modifiers.contains(KeyModifiers::CONTROL) => return,
             (KeyCode::Up | KeyCode::Down, _) => ui.sel = panel::cycle(sel, rows.len(), k.code == KeyCode::Up),
+            (KeyCode::Char(c @ ('c' | 'p')), _) => {
+                let info = tabcfg::info(&self.sessions[self.active], self.cwd());
+                let (what, value) = if c == 'c' { ("session id", info[0].1.clone()) } else { ("transcript path", info[6].1.clone()) };
+                if value.starts_with('—') {
+                    self.flash(format!("no {what} yet: send a message first"));
+                } else {
+                    self.copy_text(&value);
+                    self.flash(format!("copied the {what}"));
+                }
+            }
             (KeyCode::Enter, Row::Add) | (_, Row::Add) if delta != 0 || k.code == KeyCode::Enter => ui.adding = Some(String::new()),
             (_, Row::Mode) if delta != 0 || k.code == KeyCode::Enter => {
                 let modes = tabcfg::modes();
@@ -292,12 +524,16 @@ impl App {
         match k.code {
             KeyCode::Esc => return, // closed
             KeyCode::Char('c') if ctrl => return,
+            // Two menus, one with the keys: the sections (a strip) and the rows (a list, each with its choices).
+            KeyCode::Tab | KeyCode::BackTab => ui.strip = !ui.strip,
+            KeyCode::Left | KeyCode::Right if ui.strip => ui.switch(if k.code == KeyCode::Left { -1 } else { 1 }),
+            _ if ui.strip => {}
             KeyCode::Up => ui.step(-1),
             KeyCode::Down => ui.step(1),
             KeyCode::PageUp => ui.step(-10),
             KeyCode::PageDown => ui.step(10),
-            KeyCode::Left => self.change_setting(ui.sel, -1),
-            KeyCode::Right | KeyCode::Enter | KeyCode::Char(' ') => self.change_setting(ui.sel, 1),
+            KeyCode::Left => self.change_setting(ui.current(), -1),
+            KeyCode::Right | KeyCode::Enter | KeyCode::Char(' ') => self.change_setting(ui.current(), 1),
             _ => {}
         }
         self.settings = Some(ui);
@@ -316,7 +552,7 @@ impl App {
                 ui.step(if k.code == KeyCode::Up { -1 } else { 1 });
                 changed = false;
             }
-            KeyCode::Char(' ') | KeyCode::Enter | KeyCode::Right | KeyCode::Left => ui.toggle(&mut self.line_items),
+            KeyCode::Char(' ') | KeyCode::Enter => ui.toggle(&mut self.line_items),
             KeyCode::Char('r') => {
                 self.line_items = segments::DEFAULT.to_vec();
                 ui.sel = 0;
@@ -423,6 +659,7 @@ impl App {
             "statusline" => self.statusline_mode.name().to_string(),
             "profile" => self.default_profile.clone(),
             "images" => image::mode().to_string(),
+            "spinner" | "progress" | "motion" => motion::look().raw(key).to_string(),
             "cache_ttl_min" => (self.cache_ttl.as_secs() / 60).to_string(),
             "idle_suspend_s" => self.idle_suspend.as_secs().to_string(),
             "autocompact_k" => self.autocompact_k.to_string(),
@@ -430,11 +667,12 @@ impl App {
             "mem_budget_mb" => (self.mem_budget_kb / 1024).to_string(),
             "notify" => self.notify.clone(),
             "mouse" => if self.mouse { "on" } else { "off" }.to_string(),
-            "autocopy" => if self.autocopy { "on" } else { "off" }.to_string(),
             "side_panel" => if self.dock_mode { "on" } else { "off" }.to_string(),
             "input_mode" => if self.vim.on { "vim" } else if self.editor_mode { "editor" } else { "default" }.to_string(),
             "theme" => theme::mode_name().to_string(),
             "queue" => if self.queue_on { "on" } else { "off" }.to_string(),
+            "limit_warn" => self.limit_warn.to_string(),
+            "limit_hold" => self.limit_hold.to_string(),
             "share_mcp" => if self.share_mcp { "on" } else { "off" }.to_string(),
             "agent_term" => if self.agent_term { "on" } else { "off" }.to_string(),
             "shell" => if self.shell_login { "login" } else { "sh" }.to_string(),
@@ -459,6 +697,7 @@ impl App {
             }
             "profile" => self.default_profile = value.into(),
             "images" => image::set_mode(value),
+            "spinner" | "progress" | "motion" => motion::set(key, value),
             "cache_ttl_min" => {
                 self.cache_ttl = Duration::from_secs(num * 60);
                 let ttl = self.cache_ttl;
@@ -468,9 +707,8 @@ impl App {
             "autocompact_k" => self.autocompact_k = num,
             "precompact_k" => self.precompact_k = num,
             "mem_budget_mb" => self.mem_budget_kb = num * 1024,
-            "mouse" => self.set_mouse(value != "off"),
-            "autocopy" => self.autocopy = value == "on",
             "notify" => self.notify = value.into(),
+            "mouse" => self.set_mouse(value != "off"),
             "theme" => {
                 theme::set_mode(value);
                 self.restyle();
@@ -482,6 +720,11 @@ impl App {
                 self.vim_shape();
             }
             "queue" => self.queue_on = value == "on",
+            "limit_warn" => self.limit_warn = num.min(100) as u8,
+            "limit_hold" => {
+                self.limit_hold = num.min(100) as u8;
+                self.limit_released = None;
+            }
             "share_mcp" => self.share_mcp = value == "on",
             "agent_term" => self.agent_term = value == "on",
             "shell" => self.shell_login = value != "sh",
@@ -510,7 +753,7 @@ impl App {
         let sel = self.current_model().unwrap_or(0);
         let effort = self.model_list().get(sel).and_then(|m| m.efforts.iter().position(|e| *e == s.effort)).unwrap_or(0);
         let fast = s.fast_mode || s.fast_pref == Some(true);
-        self.model_picker = Some(ModelPicker { sel, effort, fast });
+        self.model_picker = Some(ModelPicker { sel, effort, fast, focus: 0 });
     }
 
     /// The colour the whole UI wears: the highlighted one while `/color` is open, else that of the conversation
@@ -574,7 +817,7 @@ impl App {
             return self.flash("nothing to rewind to");
         }
         self.flash = None;
-        self.rewind = Some(RewindPicker { sel: n - 1, restore: 0 });
+        self.rewind = Some(RewindPicker { sel: n - 1, restore: 0, on_restore: false });
     }
 
     pub(crate) fn rewind_key(&mut self, k: KeyEvent) {
@@ -589,9 +832,9 @@ impl App {
         match k.code {
             KeyCode::Esc => return self.rewind = None,
             KeyCode::Char('c') if k.modifiers.contains(KeyModifiers::CONTROL) => return self.rewind = None,
-            KeyCode::Up | KeyCode::Down => p.sel = panel::cycle(p.sel, n, k.code == KeyCode::Up),
-            KeyCode::Left => p.restore = p.restore.saturating_sub(1),
-            KeyCode::Right => p.restore += 1,
+            KeyCode::Tab | KeyCode::BackTab if choices.len() > 1 => p.on_restore = !p.on_restore,
+            KeyCode::Up | KeyCode::Down if !p.on_restore => p.sel = panel::cycle(p.sel, n, k.code == KeyCode::Up),
+            KeyCode::Left | KeyCode::Right if p.on_restore => p.restore = panel::cycle(p.restore.min(choices.len() - 1), choices.len(), k.code == KeyCode::Left),
             KeyCode::Enter => {
                 self.rewind = None;
                 let (_, conversation, code) = choices[p.restore.min(choices.len() - 1)];
@@ -610,27 +853,56 @@ impl App {
         self.rewind = Some(p);
     }
 
+    /// `/model`: four menus and exactly one has the keys (Tab moves it). Models and versions are vertical lists
+    /// (up and down), effort and fast mode are rows of choices (left and right).
     pub(crate) fn picker_key(&mut self, k: KeyEvent) {
         let n = self.model_list().len();
         let Some(mut p) = self.model_picker else { return };
         // The list can shrink under an open picker (the backend's own list replaces the cached one).
         p.sel = p.sel.min(n.saturating_sub(1));
         let levels = |sel: usize| self.model_list().get(sel).map_or(0, |m| m.efforts.len());
-        let next = match k.code {
-            KeyCode::Esc => return self.model_picker = None,
-            KeyCode::Char('c') if k.modifiers.contains(KeyModifiers::CONTROL) => return self.model_picker = None,
-            KeyCode::Enter => return self.apply_model_picker(),
-            KeyCode::Up | KeyCode::Down if n > 0 => {
-                let new = panel::cycle(p.sel, n, k.code == KeyCode::Up);
-                // Keep the same level name when the next model offers it.
-                let name = self.model_list()[p.sel].efforts.get(p.effort).cloned();
-                let keep = name.and_then(|e| self.model_list()[new].efforts.iter().position(|x| *x == e));
-                ModelPicker { sel: new, effort: keep.unwrap_or(p.effort.min(levels(new).saturating_sub(1))), ..p }
+        // Move to another model, keeping the same effort level by name when it offers it.
+        let retarget = |p: ModelPicker, new: usize| {
+            let list = self.model_list();
+            let keep = list[p.sel].efforts.get(p.effort).and_then(|e| list[new].efforts.iter().position(|x| x == e));
+            ModelPicker { sel: new, effort: keep.unwrap_or(p.effort.min(levels(new).saturating_sub(1))), ..p }
+        };
+        let usable = ModelPicker::usable(self.model_list(), p.sel);
+        let focus = p.focused(usable);
+        let up = k.code == KeyCode::Up || k.code == KeyCode::Left;
+        let next = match (focus, k.code) {
+            (_, KeyCode::Esc) => return self.model_picker = None,
+            (_, KeyCode::Char('c')) if k.modifiers.contains(KeyModifiers::CONTROL) => return self.model_picker = None,
+            (_, KeyCode::Enter) => return self.apply_model_picker(),
+            (_, KeyCode::Tab | KeyCode::BackTab) => {
+                let mut to = focus;
+                for _ in 0..4 {
+                    to = panel::menu_after(&k, to, 4).unwrap_or(to);
+                    if usable[to] {
+                        break;
+                    }
+                }
+                ModelPicker { focus: to as u8, ..p }
             }
-            KeyCode::Left => ModelPicker { effort: p.effort.saturating_sub(1), ..p },
-            KeyCode::Right => ModelPicker { effort: (p.effort + 1).min(levels(p.sel).saturating_sub(1)), ..p },
-            // Space (as in Claude Code's /fast) or f toggles fast mode, for models that have it.
-            KeyCode::Char(' ' | 'f') if self.model_list().get(p.sel).is_some_and(|m| m.fast) => ModelPicker { fast: !p.fast, ..p },
+            // Models: up and down. It lands on the same version when the family has it, else on its newest.
+            (0, KeyCode::Up | KeyCode::Down) if n > 0 => {
+                let fams = crate::session::families(self.model_list());
+                let at = fams.iter().position(|f| f.1.contains(&p.sel)).unwrap_or(0);
+                let to = &fams[panel::cycle(at, fams.len(), up)].1;
+                let version = self.model_list()[p.sel].parts().1;
+                let new = to.iter().copied().find(|&i| version.is_some() && self.model_list()[i].parts().1 == version).unwrap_or(to[0]);
+                retarget(p, new)
+            }
+            // Versions of the family in the first menu: up and down.
+            (1, KeyCode::Up | KeyCode::Down) if n > 0 => {
+                let fams = crate::session::families(self.model_list());
+                let versions = fams.iter().find(|f| f.1.contains(&p.sel)).map_or(vec![p.sel], |f| f.1.clone());
+                let at = versions.iter().position(|&i| i == p.sel).unwrap_or(0);
+                retarget(p, versions[panel::cycle(at, versions.len(), up)])
+            }
+            (2, KeyCode::Left | KeyCode::Right) if levels(p.sel) > 0 => ModelPicker { effort: panel::cycle(p.effort, levels(p.sel), up), ..p },
+            (3, KeyCode::Left | KeyCode::Right) => ModelPicker { fast: !up, ..p },
+            (3, KeyCode::Char(' ' | 'f')) => ModelPicker { fast: !p.fast, ..p },
             _ => return,
         };
         self.model_picker = Some(next);
@@ -672,6 +944,37 @@ impl App {
             self.s().note(format!("{}. Fast mode costs more per token and is billed from usage credits.{cost}{warn}", what.join(" · ")));
         } else {
             self.s().note(format!("{}.{warn}", what.join(" · ")));
+        }
+    }
+}
+
+impl App {
+    pub(crate) fn open_search(&mut self) {
+        let scroll = self.s().scroll;
+        let mut ui = search::Ui::new(scroll);
+        ui.refresh(&self.sessions[self.active].items, &self.history);
+        self.search = Some(ui);
+    }
+
+    pub(crate) fn search_key(&mut self, k: KeyEvent) {
+        let Some(mut ui) = self.search.take() else { return };
+        let out = ui.key(k, &self.sessions[self.active].items, &self.history);
+        let at = ui.reveal();
+        match out {
+            search::Outcome::Stay => {
+                self.s().reveal = at.or(self.s().reveal);
+                self.search = Some(ui);
+            }
+            search::Outcome::Close => self.s().scroll = ui.scroll,
+            search::Outcome::Go => {
+                let s = self.s();
+                s.reveal = at;
+                (s.find_query, s.found) = (ui.query.to_lowercase(), at);
+            }
+            search::Outcome::Recall(i) => {
+                let text = self.history[i].clone();
+                self.set_input(text);
+            }
         }
     }
 }

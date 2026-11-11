@@ -56,7 +56,7 @@ impl Ui {
             KeyCode::Esc => return Act::Close,
             KeyCode::Char('c') if ctrl => return Act::Close,
             KeyCode::Up => self.cursor = panel::cycle(self.cursor, list.len(), true),
-            KeyCode::Down | KeyCode::Tab => self.cursor = panel::cycle(self.cursor, list.len(), false),
+            KeyCode::Down => self.cursor = panel::cycle(self.cursor, list.len(), false),
             KeyCode::Enter if self.custom.trim().is_empty() => return Act::Pick(list[self.cursor].1),
             KeyCode::Enter => return parse_when(self.custom.trim(), now).map_or(Act::Bad, |t| Act::Pick(Some(t))),
             KeyCode::Char('u') if ctrl => self.custom.clear(),

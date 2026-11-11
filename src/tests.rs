@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::backend::Resume;
+use crate::tty::edit_text;
 use serde_json::{Value, json};
 
 fn run_cmd(app: &mut App, cmd: &str) {
@@ -67,26 +68,7 @@ fn cache_clock_counts_down_from_the_last_api_response() {
 #[test]
 fn footprint_output_is_parsed() {
     let out = "======\nclaude [123]: 64-bit    Footprint: 1.5 GB (16384 bytes per page)\n======\nnode [45]: 64-bit    Footprint: 85 MB (16384 bytes per page)\nsleep [6]: 64-bit    Footprint: 1056 KB (16384 bytes per page)\n  Dirty   Clean\n";
-    assert_eq!(parse_footprint(out), vec![(123, 1572864), (45, 87040), (6, 1056)]);
-}
-
-#[test]
-fn over_budget_stops_lru_idle_tab_but_never_the_focused_or_busy_one() {
-    let (mut app, dir) = fake_app("budget");
-    app.new_tab();
-    app.new_tab(); // tabs 0,1,2; focus on 2
-    for s in &mut app.sessions {
-        s.session_id = Some("sid".into());
-        s.backend = Some(Backend::spawn(&app.launch, Resume::New, app.tx.clone(), |_, m| AppEvent::Backend(0, 0, m)).unwrap());
-        s.mem_kb = 100 * 1024;
-    }
-    app.sessions[0].last_active = Instant::now() - Duration::from_secs(100);
-    app.sessions[1].last_active = Instant::now() - Duration::from_secs(50);
-    app.mem_budget_kb = 250 * 1024;
-    app.sessions[0].busy = true; // oldest is mid-turn: protected, so the next-oldest goes
-    app.enforce_budget();
-    assert!(app.sessions[0].backend.is_some() && app.sessions[1].backend.is_none() && app.sessions[2].backend.is_some());
-    let _ = dir;
+    assert_eq!(memory::parse_footprint(out), vec![(123, 1572864), (45, 87040), (6, 1056)]);
 }
 
 #[test]
@@ -112,24 +94,6 @@ fn a_backend_nobody_sent_to_may_be_stopped_but_not_one_that_was_until_it_has_a_s
     app.sessions[0].submit("hi".into(), &[], &launch, &tx);
     app.sessions[0].busy = false; // the turn ended without an init event, so there is still no session id
     assert!(app.sessions[0].session_id.is_none() && !app.sessions[0].can_suspend(), "a message went to it: stopping would lose the conversation");
-}
-
-#[test]
-fn the_tab_in_front_is_stopped_only_after_you_have_been_away_five_times_the_idle_time() {
-    let (mut app, _d) = fake_app("unused");
-    let (launch, tx) = (app.launch.clone(), app.tx.clone());
-    app.idle_suspend = Duration::from_secs(120);
-    app.sessions[0].warm(&launch, &tx);
-    let old = |s: u64| Instant::now() - Duration::from_secs(s);
-    app.sessions[0].last_active = old(300);
-    app.last_sample = old(60);
-    app.last_input = old(300);
-    app.tick();
-    assert!(app.sessions[0].backend.is_some(), "away 5 min of 10: the tab you are using stays up");
-    app.last_sample = old(60);
-    app.last_input = old(700);
-    app.tick();
-    assert!(app.sessions[0].backend.is_none(), "away 11 min: nothing running, so it gives its memory back");
 }
 
 fn key(c: char) -> KeyEvent {
@@ -210,7 +174,7 @@ fn completion_ranks_prefix_first_and_dedupes_local_commands() {
     let (mut app, _d) = fake_app("comp");
     app.known_commands = vec![cmd("compact", "[focus]", "summarize"), cmd("model", "", "theirs"), cmd("context", "", "c")];
     typed(&mut app, "/c");
-    assert_eq!(names(&app), ["cd", "clear", "close", "color", "config", "context", "copy", "compact", "instructions", "schedule", "search"]);
+    assert_eq!(names(&app), ["cd", "clear", "close", "color", "config", "context", "copy", "compact", "instructions", "procs", "schedule", "search"]);
     press(&mut app, KeyCode::Backspace);
     typed(&mut app, "m");
     // prefix matches ("memory", "mode", "model") before names that merely contain "m"; ours before theirs
@@ -537,6 +501,66 @@ fn model(value: &str, resolved: &str, efforts: &[&str]) -> ModelInfo {
 }
 
 #[test]
+fn the_picker_has_four_menus_and_only_the_one_in_focus_answers_the_arrows() {
+    let (mut app, _dir) = fake_app("four-menus");
+    let named = |value: &str, name: &str, efforts: &[&str]| ModelInfo { name: name.into(), desc: format!("desc-{value}"), ..model(value, value, efforts) };
+    app.known_models = vec![
+        named("default", "Default (recommended)", &["low", "high"]),
+        named("sonnet", "Sonnet 5.5", &["low", "high"]),
+        named("haiku", "Haiku 5.5", &["low", "medium", "high"]),
+        named("s5", "Sonnet 5", &["low"]),
+        named("h45", "Haiku 4.5", &[]),
+    ];
+    app.model_picker = Some(ModelPicker { sel: 1, effort: 1, fast: false, focus: 0 });
+    let view = |app: &App| {
+        let v = ui::model_view(app);
+        (v.body.iter().map(|l| l.to_string()).collect::<Vec<_>>(), v.tail.iter().map(|l| l.to_string()).collect::<Vec<_>>())
+    };
+    let sel = |app: &App| app.model_picker.unwrap().sel;
+    let (rows, tail) = view(&app);
+    assert!(rows[1].contains("Sonnet") && rows[2].contains("Haiku") && rows[0].contains("Default"), "one row per family: {rows:?}");
+    assert!(rows[0].contains(" 5.5 ") && rows[1].contains(" 5 "), "the versions of the highlighted family, in a column beside it: {rows:?}");
+    assert!(tail[0].contains("desc-sonnet"), "{tail:?}");
+
+    // Models have the keys: only up and down act, and only on the models.
+    press(&mut app, KeyCode::Right);
+    press(&mut app, KeyCode::Left);
+    assert_eq!((sel(&app), app.model_picker.unwrap().effort), (1, 1), "left and right do nothing here");
+    press(&mut app, KeyCode::Down); // Haiku, on the same version, 5.5
+    assert_eq!(sel(&app), 2);
+    press(&mut app, KeyCode::Up);
+    assert_eq!(sel(&app), 1);
+
+    // Tab: versions. Up and down move the versions only.
+    press(&mut app, KeyCode::Tab);
+    assert_eq!(app.model_picker.unwrap().focus, 1);
+    press(&mut app, KeyCode::Down);
+    assert_eq!(sel(&app), 3, "Sonnet 5");
+    press(&mut app, KeyCode::Down);
+    assert_eq!(sel(&app), 1, "wraps, like every short list");
+    press(&mut app, KeyCode::Left);
+    assert_eq!(sel(&app), 1, "left does nothing in a vertical menu");
+
+    // Tab: effort. Left and right move it; up and down do nothing.
+    press(&mut app, KeyCode::Tab);
+    assert_eq!(app.model_picker.unwrap().focus, 2);
+    press(&mut app, KeyCode::Down);
+    assert_eq!(sel(&app), 1);
+    assert_eq!(app.model_picker.unwrap().effort, 0);
+    press(&mut app, KeyCode::Left);
+    assert_eq!(app.model_picker.unwrap().effort, 1, "wraps, like every short row of choices");
+    press(&mut app, KeyCode::Tab); // Sonnet has no fast mode: round to the models
+    assert_eq!(app.model_picker.unwrap().focus, 0);
+    press(&mut app, KeyCode::BackTab);
+    assert_eq!(app.model_picker.unwrap().focus, 2, "shift+tab goes the other way");
+
+    // A family with a single entry has no versions menu to stop at.
+    app.model_picker = Some(ModelPicker { sel: 0, effort: 0, fast: false, focus: 1 });
+    press(&mut app, KeyCode::Down);
+    assert_eq!(sel(&app), 1, "focus was on an unusable menu: the models have the keys, and Down moves them");
+}
+
+#[test]
 fn model_picker_applies_model_and_effort_and_remembers_them() {
     let (mut app, dir) = fake_app("picker");
     app.known_models = vec![model("sonnet", "claude-sonnet-5-5", &["low", "high"]), model("haiku", "claude-haiku-5-5", &["low", "medium", "high"])];
@@ -550,6 +574,9 @@ fn model_picker_applies_model_and_effort_and_remembers_them() {
 
     press(&mut app, KeyCode::Down); // haiku: "high" is kept by name (index 2)
     assert_eq!(app.model_picker.unwrap().effort, 2);
+    press(&mut app, KeyCode::Left);
+    assert_eq!(app.model_picker.unwrap().effort, 2, "the models have the keys: left does nothing");
+    press(&mut app, KeyCode::Tab); // the effort menu has them now (there are no versions to stop at)
     press(&mut app, KeyCode::Left);
     press(&mut app, KeyCode::Enter);
     assert!(app.model_picker.is_none());
@@ -577,8 +604,8 @@ fn current_model_prefers_the_pick_and_picker_fits_a_short_terminal() {
 
     app.known_models.extend((0..20).map(|i| model(&format!("m{i}"), &format!("id{i}"), &["low", "high"])));
     run_cmd(&mut app, "/model");
-    app.model_picker = Some(ModelPicker { sel: 22, effort: 1, fast: false });
-    let mut t = ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 12)).unwrap();
+    app.model_picker = Some(ModelPicker { sel: 22, effort: 1, fast: false, focus: 0 });
+    let mut t = ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 16)).unwrap();
     t.draw(|f| ui::draw(f, &mut app)).unwrap();
     let text: String = t.backend().buffer().content().iter().map(|c| c.symbol()).collect();
     assert!(text.contains("M19") && text.contains("effort") && text.contains("⏎ apply"), "selected row and effort row both visible");
@@ -595,6 +622,10 @@ fn fast_mode_toggles_in_the_picker_for_opus_only_and_follows_model_switches() {
     press(&mut app, KeyCode::Char(' '));
     assert!(!app.model_picker.unwrap().fast, "sonnet has no fast mode: space does nothing");
     press(&mut app, KeyCode::Down); // opus
+    press(&mut app, KeyCode::Char(' '));
+    assert!(!app.model_picker.unwrap().fast, "the models have the keys, not fast mode");
+    press(&mut app, KeyCode::Tab); // effort
+    press(&mut app, KeyCode::Tab); // fast mode
     press(&mut app, KeyCode::Char(' '));
     assert!(app.model_picker.unwrap().fast);
     press(&mut app, KeyCode::Char('f'));
@@ -647,7 +678,7 @@ fn the_suggestion_popup_uses_the_whole_screen_width() {
     };
     let wide = row(160);
     assert!(wide.matches('d').count() > 120, "the description runs far past the old 90-column limit: {}", wide.matches('d').count());
-    assert!(wide.contains('…') && wide.trim_end().ends_with('│'), "and is cut with an ellipsis inside the frame");
+    assert!(wide.trim_end().ends_with('…') && wide.chars().count() <= 160, "and is cut with an ellipsis inside the screen");
     let narrow = row(60);
     assert!(narrow.matches('d').count() < 40 && narrow.contains('…'), "still truncates on a small screen");
 
@@ -1018,23 +1049,31 @@ fn every_panel_sits_at_the_bottom_above_the_input_with_the_same_frame() {
     let mut check = |app: &mut App, name: &'static str, title: &str, hint: &str| {
         for width in [60u16, 100, 160] {
             let rows = screen(app, width, 30);
-            let input_rule = rows.iter().rposition(|r| r.starts_with("───")).and_then(|end| rows[..end].iter().rposition(|r| r.starts_with("───"))).unwrap_or_else(|| panic!("{name}@{width}: no input rule\n{}", rows.join("\n")));
-            let bottom = input_rule - 1;
-            assert!(rows[bottom].starts_with('└'), "{name}@{width}: the frame must end directly above the input, got {:?}\n{}", rows[bottom], rows.join("\n"));
-            let top = rows[..bottom].iter().rposition(|r| r.starts_with('┌')).unwrap_or_else(|| panic!("{name}@{width}: no top border"));
-            assert!(rows[top].starts_with(&format!("┌ {title}")), "{name}@{width}: title {:?} vs {:?}", title, rows[top]);
-            assert!(rows[bottom - 1].contains(hint), "{name}@{width}: footer {:?} should contain {hint:?}", rows[bottom - 1]);
-            assert!(rows[bottom - 1].starts_with("│ ") && rows[bottom - 1].ends_with('│'), "{name}@{width}: footer sits inside the frame");
+            let last = rows.len() - 1; // the status line
+            if title.is_empty() {
+                // The suggestions belong to the message box: they stay above it, a rule, the rows and the footer.
+                assert!(rows[last - 1].starts_with("───") && rows[last - 3].starts_with("───") && rows[last - 2].starts_with("❯ "), "{name}@{width}: the message box stays\n{}", rows.join("\n"));
+                assert!(rows[last - 4].contains(hint), "{name}@{width}: footer {:?}", rows[last - 4]);
+                assert!(rows[..last - 4].iter().rev().take_while(|r| !r.starts_with("───")).count() >= 1 && rows.iter().all(|r| !r.contains('┌') && !r.contains('└')), "{name}@{width}: rows under a rule, no box\n{}", rows.join("\n"));
+                continue;
+            }
+            assert!(rows[last - 1].contains(hint), "{name}@{width}: footer {:?} should contain {hint:?}\n{}", rows[last - 1], rows.join("\n"));
+            assert!(rows.iter().all(|r| !r.contains("use the panel above") && !r.contains('┌') && !r.contains('└')), "{name}@{width}: no message box, no box around the panel\n{}", rows.join("\n"));
+            let top = rows[..last].iter().rposition(|r| r.starts_with("────")).unwrap_or_else(|| panic!("{name}@{width}: no top rule\n{}", rows.join("\n")));
+            assert_eq!(rows[top].chars().count(), width as usize, "{name}@{width}: the rule runs the full width");
+            assert!(rows[top + 1].starts_with(&format!(" {title}")), "{name}@{width}: title {:?} vs {:?}", title, rows[top + 1]);
+            assert!(rows[top + 2].is_empty() && rows[last - 2].is_empty(), "{name}@{width}: air under the title and above the footer");
+            assert!(rows[top..last].iter().all(|r| !r.starts_with('│') && !r.ends_with('│')), "{name}@{width}: no side borders");
             assert!(rows.iter().all(|r| r.chars().count() <= width as usize), "{name}@{width}: nothing wider than the screen");
         }
         cases.push((name, "ok"));
     };
 
     typed(&mut app, "/comp");
-    check(&mut app, "command suggestions", "Commands", "⇥ complete");
+    check(&mut app, "command suggestions", "", "⇥ complete");
     app.set_input("@".into());
     app.refresh_files();
-    check(&mut app, "file suggestions", "Files", "⇥ complete");
+    check(&mut app, "file suggestions", "", "⇥ complete");
     app.set_input(String::new());
     app.refresh_files();
 
@@ -1082,18 +1121,19 @@ fn blocking_panels_are_yellow_and_the_ones_you_open_are_cyan() {
     use ratatui::style::Color;
     use ratatui::{Terminal, backend::TestBackend};
     let (mut app, _d) = fake_app("frames");
-    let border = |app: &mut App| -> Option<Color> {
+    // The colour of the rule across the top of the panel (the first full-width rule on screen).
+    let rule = |app: &mut App| -> Option<Color> {
         let mut t = Terminal::new(TestBackend::new(60, 20)).unwrap();
         t.draw(|f| ui::draw(f, app)).unwrap();
         let buf = t.backend().buffer().clone();
-        (0..20).flat_map(|y| (0..60).map(move |x| (x, y))).find(|&(x, y)| buf[(x, y)].symbol() == "┌").map(|(x, y)| buf[(x, y)].fg)
+        (0..20).find(|&y| (0..60).all(|x| buf[(x, y)].symbol() == "─")).map(|y| buf[(0, y)].fg)
     };
-    assert_eq!(border(&mut app), None);
+    assert_eq!(rule(&mut app), theme::dim().fg, "no panel: only the message box's own rule");
     run_cmd(&mut app, "/config");
-    assert_eq!(border(&mut app), theme::accent().fg, "you opened it: cyan");
+    assert_eq!(rule(&mut app), theme::accent().fg, "you opened it: cyan");
     press(&mut app, KeyCode::Esc);
     ask(&mut app, QUESTIONS);
-    assert_eq!(border(&mut app), theme::attention().fg, "the agent is waiting: yellow");
+    assert_eq!(rule(&mut app), theme::attention().fg, "the agent is waiting: yellow");
 }
 
 #[test]
@@ -1109,8 +1149,16 @@ fn config_applies_at_once_persists_and_keeps_the_keyboard() {
     app.on_paste("pasted".into());
     assert!(app.input.is_empty());
 
-    // row 1: profile for new tabs
-    press(&mut app, KeyCode::Down);
+    // Tab moves to the section strip, left and right step through the sections (General, Appearance, Sessions,
+    // ...), and Tab or any up/down comes back to the rows. Sessions: the profile for new tabs is its first row.
+    assert!(!app.settings.as_ref().unwrap().strip);
+    let before = app.default_profile.clone();
+    press(&mut app, KeyCode::Tab);
+    assert!(app.settings.as_ref().unwrap().strip);
+    press(&mut app, KeyCode::Right);
+    press(&mut app, KeyCode::Right);
+    assert_eq!(app.default_profile, before, "on the strip, left and right change no setting");
+    press(&mut app, KeyCode::Tab);
     press(&mut app, KeyCode::Right);
     assert_eq!(app.default_profile, "sources");
     assert_eq!(config::get_str(&cfg, "profile").as_deref(), Some("sources"), "saved the moment it changed");
@@ -1122,14 +1170,16 @@ fn config_applies_at_once_persists_and_keeps_the_keyboard() {
     app.new_tab();
     assert_eq!(app.sessions.last().unwrap().profile, "lean", "new tabs use it");
 
-    // row 3: cache lifetime reaches every tab; row 4: idle suspend; row 5: memory budget
-    for _ in 0..2 {
-        press(&mut app, KeyCode::Down);
-    }
+    // Cost & memory: cache lifetime reaches every tab, then (3 rows down) idle suspend and the memory budget
+    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Right);
+    press(&mut app, KeyCode::Tab);
     press(&mut app, KeyCode::Left); // 60 -> 5 min
     assert_eq!(app.cache_ttl, Duration::from_secs(300));
     assert!(app.sessions.iter().all(|s| s.cache_ttl == Duration::from_secs(300)));
-    press(&mut app, KeyCode::Down);
+    for _ in 0..3 {
+        press(&mut app, KeyCode::Down);
+    }
     press(&mut app, KeyCode::Right); // never (the fake app's value) -> 2 min
     assert_eq!(app.idle_suspend, Duration::from_secs(120));
     assert_eq!(config::get_str(&cfg, "idle_suspend_s").as_deref(), Some("120"));
@@ -1138,9 +1188,16 @@ fn config_applies_at_once_persists_and_keeps_the_keyboard() {
     assert_eq!(app.mem_budget_kb, 500 * 1024);
     assert_eq!(config::get_str(&cfg, "mem_budget_mb").as_deref(), Some("500"));
 
-    // row 2: images (a process-wide mode; put it back so other tests are unaffected)
-    for _ in 0..3 {
-        press(&mut app, KeyCode::Up);
+    // Appearance, row 4: images (a process-wide mode; put it back so other tests are unaffected)
+    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Right); // wraps to Rate limits, the last tab
+    press(&mut app, KeyCode::Right); // and on to General
+    press(&mut app, KeyCode::Right);
+    press(&mut app, KeyCode::Down);
+    assert_eq!(app.settings.as_ref().unwrap().sel, 0, "the strip has the keys: up and down do nothing");
+    press(&mut app, KeyCode::Tab); // back on the rows
+    for _ in 0..4 {
+        press(&mut app, KeyCode::Down);
     }
     press(&mut app, KeyCode::Right);
     assert_eq!(image::mode(), "on");
@@ -1164,6 +1221,9 @@ fn the_status_line_config_switches_modes_and_explains_when_claude_has_none() {
     app.config_path = Some(dir.join("config.json"));
     assert_eq!(app.setting_value("statusline"), "builtin");
     run_cmd(&mut app, "/config");
+    for _ in 0..4 {
+        press(&mut app, KeyCode::Down); // General: the Status line row
+    }
     press(&mut app, KeyCode::Right); // builtin -> claude, but Claude Code has no status line
     assert_eq!(app.setting_value("statusline"), "claude", "the choice stands");
     assert!(!app.statusline_on);
@@ -1215,8 +1275,8 @@ fn custom_profiles_reach_the_launch_and_the_dock_keeps_the_keyboard_after_openin
 }
 
 #[test]
-fn scrolling_by_wheel_and_page_keeps_its_place_as_output_arrives_and_can_jump_back() {
-    use ratatui::{Terminal, backend::TestBackend, crossterm::event::{MouseEvent, MouseEventKind}};
+fn scrolling_by_page_keeps_its_place_as_output_arrives_and_can_jump_back() {
+    use ratatui::{Terminal, backend::TestBackend};
     let (mut app, _d) = fake_app("scroll");
     for i in 0..100 {
         app.s().note(format!("line {i}"));
@@ -1228,26 +1288,20 @@ fn scrolling_by_wheel_and_page_keeps_its_place_as_output_arrives_and_can_jump_ba
         (0..24).map(|y| (0..80).map(|x| b[(x, y)].symbol().to_string()).collect::<String>()).collect::<Vec<_>>().join("\n")
     };
     assert!(shown(&mut app).contains("line 99") && !shown(&mut app).contains("lines below"));
-    let wheel = |app: &mut App, kind| app.on_event(AppEvent::Term(Event::Mouse(MouseEvent { kind, column: 5, row: 5, modifiers: KeyModifiers::NONE })));
-    wheel(&mut app, MouseEventKind::ScrollUp);
-    assert_eq!(app.sessions[0].scroll, 3);
-    let screen = shown(&mut app);
-    assert!(screen.contains("↓ 3 lines below") && !screen.contains("line 99"));
     press(&mut app, KeyCode::PageUp);
     let page = app.sessions[0].view_h - 2;
-    assert_eq!(app.sessions[0].scroll, 3 + page, "a page is the viewport minus two lines of overlap");
+    assert_eq!(app.sessions[0].scroll, page, "a page is the viewport minus two lines of overlap");
+    let screen = shown(&mut app);
+    assert!(screen.contains(&format!("↓ {page} lines below")) && !screen.contains("line 99"));
     let top = shown(&mut app).lines().find(|l| l.contains("line ")).unwrap().trim().to_string();
     app.s().note("new output".into());
     let after = shown(&mut app).lines().find(|l| l.contains("line ")).unwrap().trim().to_string();
     assert_eq!(top, after, "the lines in view do not move while new output arrives below");
-    wheel(&mut app, MouseEventKind::ScrollDown);
     app.on_key(KeyEvent::new(KeyCode::End, KeyModifiers::CONTROL));
     assert_eq!(app.sessions[0].scroll, 0);
     assert!(shown(&mut app).contains("new output"));
     app.on_key(KeyEvent::new(KeyCode::Home, KeyModifiers::CONTROL));
     assert!(shown(&mut app).contains("line 0"), "ctrl+home reaches the top");
-    app.apply_setting("mouse", "off");
-    assert!(!app.mouse && app.setting_value("mouse") == "off");
 }
 
 #[test]
@@ -1275,7 +1329,7 @@ fn the_session_panel_sets_mode_and_tool_rules_and_takes_a_typed_rule() {
     assert!(app.tabcfg.is_some());
     typed(&mut app, "zz");
     assert!(app.input.is_empty(), "keys belong to the panel");
-    assert!(screen(&mut app, 100, 30).iter().any(|r| r.starts_with("┌ Session")));
+    assert!(screen(&mut app, 100, 30).iter().any(|r| r.starts_with(" Session")));
     app.sessions[0].mode = "default".into();
     press(&mut app, KeyCode::Right);
     assert_eq!(app.sessions[0].mode, "acceptEdits", "row 0 is the permission mode");
@@ -1300,6 +1354,18 @@ fn the_session_panel_sets_mode_and_tool_rules_and_takes_a_typed_rule() {
     assert!(app.sessions[0].rules.is_empty());
     press(&mut app, KeyCode::Esc);
     assert!(app.tabcfg.is_none());
+}
+
+#[test]
+fn the_session_panel_shows_the_id_and_copies_it() {
+    let (mut app, _d) = fake_app("tabcfg-id");
+    run_cmd(&mut app, "/session");
+    assert!(screen(&mut app, 100, 30).iter().any(|r| r.contains("Session id") && r.contains("none until the first message")));
+    press(&mut app, KeyCode::Char('c'));
+    assert!(app.tabcfg.is_some(), "c keeps the panel open");
+    app.sessions[0].session_id = Some("abc-123".into());
+    assert!(screen(&mut app, 100, 30).iter().any(|r| r.contains("Session id") && r.contains("abc-123")));
+    assert_eq!(tabcfg::info(&app.sessions[0], "/x")[0].1, "abc-123");
 }
 
 #[test]
@@ -1342,7 +1408,7 @@ fn copy_takes_the_last_answer_or_its_last_code_block() {
     assert_eq!(app.sent_notices, [format!("copy:{reply}"), "copy:fn main() {}\nprintln!();".to_string()]);
     run_cmd(&mut app, "/copy nope");
     assert_eq!(app.sent_notices.len(), 2);
-    assert_eq!(last_code_block("no fences"), None);
+    assert_eq!(commands::last_code_block("no fences"), None);
 }
 
 #[test]
@@ -1390,7 +1456,7 @@ fn usage_asks_claude_code_shows_its_answers_and_closes() {
     app.on_event(reply(json!({"rate_limits": {"five_hour": {"utilization": 41, "resets_at": "2099-01-01T00:00:00+00:00"}}})));
     let rows = screen(&mut app, 100, 30);
     let text = rows.join("\n");
-    assert!(rows.iter().any(|r| r.starts_with("┌ Usage")) && text.contains("5-hour") && text.contains("Skills") && text.contains("17.8k of 1.0M"), "{text}");
+    assert!(rows.iter().any(|r| r.starts_with(" Usage")) && text.contains("5-hour") && text.contains("Skills") && text.contains("17.8k of 1.0M"), "{text}");
     assert!(rows.iter().any(|r| r.contains("⎋ close")));
     press(&mut app, KeyCode::Esc);
     assert!(!app.usage_open);
@@ -1406,7 +1472,7 @@ fn context_draws_the_window_from_the_reply_moves_refreshes_acts_and_closes() {
     let (pid, sid) = (app.sessions[0].backend.as_ref().unwrap().pid, app.sessions[0].id);
     app.on_event(AppEvent::Backend(sid, pid, Msg::Line(json!({"type": "control_response", "response": {"subtype": "success", "request_id": "x", "response": context::tests::reply()}}))));
     let text = screen(&mut app, 120, 40).join("\n");
-    assert!(text.contains("┌ Context") && text.contains("20.2k of 1.0M") && text.contains("System tools") && text.contains("last request"), "{text}");
+    assert!(text.contains(" Context") && text.contains("20.2k of 1.0M") && text.contains("System tools") && text.contains("last request"), "{text}");
     assert!(!text.contains("⏎ optimize"), "the first row (system tools) has no action");
     for _ in 0..3 {
         press(&mut app, KeyCode::Down);
@@ -1466,7 +1532,8 @@ fn find_jumps_to_matches_newest_first_steps_both_ways_and_wraps() {
     }
     let top = |app: &mut App| {
         let rows = screen(app, 100, 20);
-        rows.iter().find(|r| r.contains("question")).cloned().unwrap_or_default()
+        // (the first row may be the hint naming the message above; the matches are the NEEDLE ones)
+        rows.iter().find(|r| r.contains("NEEDLE")).cloned().unwrap_or_default()
     };
     assert_eq!(app.s().scroll, 0);
     run_cmd(&mut app, "/find needle");
@@ -1587,8 +1654,26 @@ fn in_panel_mode_left_docks_the_list_then_goes_full_screen_and_esc_steps_back() 
     press(&mut app, KeyCode::Left);
     assert!(app.dock.is_some() && app.dock_focus && app.explorer.is_none(), "first ← docks and focuses");
     typed(&mut app, "hi");
-    assert!(!app.dock_focus && app.input == "hi", "typing returns to the input and the dock stays");
-    assert!(app.dock.is_some());
+    assert!(app.dock_focus && app.input.is_empty(), "typing is ignored while the list has the keys");
+    app.on_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
+    assert!(app.dock_focus, "ctrl+c does not take the keys from the panel");
+    press(&mut app, KeyCode::Esc);
+    assert!(app.dock.is_none() && !app.dock_focus, "esc hides the panel: there is no docked-but-idle state");
+    typed(&mut app, "hi");
+    assert_eq!(app.input, "hi");
+    // ctrl+x in the focused panel stops the agent the cursor is on (here: the working tab itself).
+    app.sessions[0].session_id = Some("aaa111".into());
+    app.sessions[0].busy = true;
+    app.dock = Some(explorer::Explorer::for_bench(vec![history::Summary { id: "aaa111".into(), title: "T".into(), prompt: "p".into(), modified: std::time::SystemTime::now(), size: 1, cwd: String::new() }]));
+    let open = app.open_states();
+    app.dock.as_mut().unwrap().set_open(open);
+    app.dock_focus = true;
+    press(&mut app, KeyCode::Down); // off the group heading, onto the session
+    app.on_key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::CONTROL));
+    assert!(app.dock_focus, "the panel keeps the keys");
+    assert!(app.flash.as_deref() == Some("stopped"), "{:?}", app.flash);
+    app.sessions[0].busy = false;
+    app.dock_focus = false;
     press(&mut app, KeyCode::Home);
     press(&mut app, KeyCode::Left);
     assert!(app.dock_focus, "← at the start refocuses it");
@@ -1597,9 +1682,11 @@ fn in_panel_mode_left_docks_the_list_then_goes_full_screen_and_esc_steps_back() 
     press(&mut app, KeyCode::Esc);
     assert!(app.explorer.is_none() && app.dock_focus, "Esc steps back to the focused dock");
     press(&mut app, KeyCode::Esc);
-    assert!(app.dock.is_some() && !app.dock_focus, "Esc unfocuses, still docked");
+    assert!(app.dock.is_none() && !app.dock_focus, "Esc hides it");
     app.toggle_sessions();
-    assert!(app.dock.is_none(), "ctrl+r hides it");
+    assert!(app.dock.is_some() && app.dock_focus, "/sessions brings it back, focused");
+    app.toggle_sessions();
+    assert!(app.dock.is_none(), "and hides it");
     app.apply_setting("side_panel", "off");
     press(&mut app, KeyCode::Home);
     press(&mut app, KeyCode::Left);
@@ -1657,7 +1744,7 @@ fn frame_budget() {
     app.set_input("a long message ".repeat(30));
     measure("+ 7-line input", &mut app);
     app.set_input(String::new());
-    app.model_picker = Some(ModelPicker { sel: 3, effort: 1, fast: false });
+    app.model_picker = Some(ModelPicker { sel: 3, effort: 1, fast: false, focus: 0 });
     measure("+ model picker", &mut app);
     app.model_picker = None;
     let sums: Vec<_> = (0..200)
@@ -1729,8 +1816,14 @@ fn permissions_panel_adds_and_deletes_in_the_chosen_file_and_confirms_a_delete()
     typed(&mut app, "abc");
     assert!(app.input.is_empty(), "keys belong to the panel");
 
+    press(&mut app, KeyCode::Right);
+    assert_eq!(app.perms.as_ref().unwrap().tab, permissions::Behavior::Allow, "the rules have the keys: left and right do nothing");
+    press(&mut app, KeyCode::Tab); // the allow/ask/deny strip has them now
+    press(&mut app, KeyCode::Down);
+    assert_eq!(app.perms.as_ref().unwrap().sel, 0, "and up and down do nothing");
     press(&mut app, KeyCode::Right); // Ask tab
     assert_eq!(app.perms.as_ref().unwrap().tab, permissions::Behavior::Ask);
+    press(&mut app, KeyCode::Tab); // back to the rules
     press(&mut app, KeyCode::Down);
     assert_eq!(app.perms.as_ref().unwrap().at().map(|r| r.text.as_str()), Some("Bash(rm:*)"));
     press(&mut app, KeyCode::Char('d'));
@@ -1738,7 +1831,9 @@ fn permissions_panel_adds_and_deletes_in_the_chosen_file_and_confirms_a_delete()
     press(&mut app, KeyCode::Char('d'));
     assert!(!std::fs::read_to_string(&local).unwrap().contains("Bash(rm:*)"), "the second press deletes");
 
+    press(&mut app, KeyCode::Tab);
     press(&mut app, KeyCode::Left); // Allow tab
+    press(&mut app, KeyCode::Tab);
     press(&mut app, KeyCode::Up);
     press(&mut app, KeyCode::Up);
     press(&mut app, KeyCode::Enter);
@@ -1838,6 +1933,161 @@ fn browsing_conversations_wears_the_highlighted_ones_colour() {
 }
 
 #[test]
+fn every_list_rests_on_the_same_conversation() {
+    let sm = |id: &str| history::Summary { id: id.into(), title: id.into(), prompt: "p".into(), modified: std::time::SystemTime::now(), size: 1, cwd: String::new() };
+    let (mut app, _d) = fake_app("selection");
+    app.apply_setting("side_panel", "on");
+    app.sessions[0].session_id = Some("aaa111".into());
+    app.dock = Some(explorer::Explorer::for_bench(vec![sm("aaa111"), sm("bbb222")]));
+    app.dock.as_mut().unwrap().select("bbb222");
+    app.sync_selection();
+    assert_eq!(app.dock.as_ref().unwrap().selected().map(|s| s.0).as_deref(), Some("aaa111"), "an unfocused panel rests on the conversation in view");
+    // The full screen list leads while it is open, and Esc hands its row to the panel.
+    app.explorer = Some(explorer::Explorer::for_bench(vec![sm("aaa111"), sm("bbb222")]));
+    app.explorer.as_mut().unwrap().select("bbb222");
+    press(&mut app, KeyCode::PageUp); // any key that leaves the row alone
+    app.explorer.as_mut().unwrap().select("bbb222");
+    app.sync_selection();
+    assert_eq!(app.dock.as_ref().unwrap().selected().map(|s| s.0).as_deref(), Some("bbb222"));
+    press(&mut app, KeyCode::Esc);
+    assert!(app.explorer.is_none() && app.dock_focus);
+    assert_eq!(app.dock.as_ref().unwrap().selected().map(|s| s.0).as_deref(), Some("bbb222"), "the panel keeps the row Esc came from");
+}
+
+#[test]
+fn the_side_panel_takes_the_keys_on_the_conversation_in_view_and_filters_after_a_slash() {
+    let sm = |id: &str, t: &str| history::Summary { id: id.into(), title: t.into(), prompt: "p".into(), modified: std::time::SystemTime::now(), size: 1, cwd: String::new() };
+    let (mut app, _d) = fake_app("dockfilter");
+    app.apply_setting("side_panel", "on");
+    app.sessions[0].session_id = Some("bbb222".into());
+    app.dock = Some(explorer::Explorer::for_bench(vec![sm("aaa111", "alpha"), sm("bbb222", "beta"), sm("ccc333", "gamma")]));
+    app.dock.as_mut().unwrap().select("aaa111"); // a stale cursor, left from before
+    press(&mut app, KeyCode::Left);
+    assert!(app.dock_focus);
+    assert_eq!(app.dock.as_ref().unwrap().selected().map(|s| s.0).as_deref(), Some("bbb222"), "focusing starts on the conversation in view");
+    typed(&mut app, "gam");
+    assert!(!app.dock.as_ref().unwrap().filtering() && app.input.is_empty(), "letters alone do nothing");
+    press(&mut app, KeyCode::Char('/'));
+    typed(&mut app, "gam");
+    assert!(app.dock.as_ref().unwrap().filtering() && app.dock_focus && app.input.is_empty());
+    assert_eq!(app.dock.as_ref().unwrap().selected().map(|s| s.0).as_deref(), Some("ccc333"));
+    press(&mut app, KeyCode::Esc);
+    assert!(app.dock_focus && !app.dock.as_ref().unwrap().filtering(), "the first esc ends the filter");
+    assert_eq!(app.dock.as_ref().unwrap().selected().map(|s| s.0).as_deref(), Some("ccc333"), "and keeps the cursor where it was");
+    press(&mut app, KeyCode::Esc);
+    assert!(!app.dock_focus && app.dock.is_none());
+}
+
+#[test]
+fn a_conversation_just_opened_from_a_list_is_the_selected_one_before_its_backend_reports_an_id() {
+    let sm = |id: &str| history::Summary { id: id.into(), title: id.into(), prompt: "p".into(), modified: std::time::SystemTime::now(), size: 1, cwd: String::new() };
+    let (mut app, _d) = fake_app("justopened");
+    app.apply_setting("side_panel", "on");
+    app.explorer_outcome(explorer::Outcome::Open("bbb222".into(), "B".into(), None));
+    assert!(app.sessions[app.active].session_id.is_none(), "no id until the first turn");
+    assert_eq!(app.open_states().first().map(|s| s.0.clone()).as_deref(), Some("bbb222"), "yet the tab counts as open on it");
+    app.dock = Some(explorer::Explorer::for_bench(vec![sm("aaa111"), sm("bbb222"), sm("ccc333")]));
+    press(&mut app, KeyCode::Left);
+    assert!(app.dock_focus);
+    assert_eq!(app.dock.as_ref().unwrap().selected().map(|s| s.0).as_deref(), Some("bbb222"));
+}
+
+#[test]
+fn a_list_opens_at_once_before_it_is_read_and_fills_in_on_the_cursors_conversation() {
+    let sm = |id: &str| history::Summary { id: id.into(), title: id.into(), prompt: "p".into(), modified: std::time::SystemTime::now(), size: 1, cwd: String::new() };
+    let (mut app, _d) = fake_app("lazylist");
+    app.sessions[0].session_id = Some("bbb222".into());
+    app.apply_setting("side_panel", "on");
+    press(&mut app, KeyCode::Left); // nothing read yet
+    assert!(app.dock.is_some() && app.dock_focus, "the panel is up without waiting");
+    assert!(screen(&mut app, 140, 30).join("\n").contains("loading…"));
+    app.on_event(AppEvent::Sessions((vec![sm("aaa111"), sm("bbb222"), sm("ccc333")], vec![])));
+    assert!(app.list_cache.is_some());
+    assert_eq!(app.dock.as_ref().unwrap().selected().map(|s| s.0).as_deref(), Some("bbb222"), "the rows arrive with the cursor on the conversation in view");
+    let text = screen(&mut app, 140, 30).join("\n");
+    assert!(!text.contains("loading…"));
+    // The next list opens straight from what was read.
+    app.hide_dock();
+    press(&mut app, KeyCode::Left);
+    assert!(screen(&mut app, 140, 30).join("\n").contains("bbb222"));
+    // What was sent before arrives later and goes under what was sent since.
+    app.history = vec!["new".into()];
+    app.on_event(AppEvent::Sent(vec!["old".into()]));
+    assert_eq!(app.history, vec!["old".to_string(), "new".to_string()]);
+}
+
+#[test]
+fn a_resumed_conversation_arrives_later_and_nothing_is_sent_until_then() {
+    let (mut app, _d) = fake_app("asyncresume");
+    let mine = app.sessions[0].id;
+    app.sessions[0].loading = true; // what a real resume sets while its thread reads the file
+    app.input = "hello".into();
+    app.cursor = 5;
+    app.submit();
+    assert_eq!(app.input, "hello", "kept, not sent");
+    assert!(app.flash.as_deref().is_some_and(|f| f.contains("still reading")));
+    // A read for another tab, or one from before a /clear, changes nothing.
+    app.sessions[0].clear();
+    app.sessions[0].loading = true;
+    app.on_event(AppEvent::Resumed(mine + 99, 0, "x".into(), Box::new(history::Loaded::read(std::path::Path::new("/nonexistent")))));
+    assert!(app.sessions[0].loading, "not this tab's");
+    app.on_event(AppEvent::Resumed(mine, 0, "x".into(), Box::new(history::Loaded::read(std::path::Path::new("/nonexistent")))));
+    assert!(app.sessions[0].loading, "stale: the tab was cleared after that read began");
+}
+
+fn mouse_ev(app: &mut App, kind: ratatui::crossterm::event::MouseEventKind, x: u16, y: u16) {
+    use ratatui::crossterm::event::MouseEvent;
+    app.on_event(AppEvent::Term(Event::Mouse(MouseEvent { kind, column: x, row: y, modifiers: KeyModifiers::NONE })));
+}
+
+#[test]
+fn the_wheel_scrolls_the_conversation_and_never_touches_the_input_history() {
+    use ratatui::crossterm::event::MouseEventKind::{ScrollDown, ScrollUp};
+    let (mut app, _d) = fake_app("wheel");
+    for i in 0..100 {
+        app.s().note(format!("line {i}"));
+    }
+    app.history = vec!["an old message".into()];
+    screen(&mut app, 80, 24);
+    mouse_ev(&mut app, ScrollUp, 5, 5);
+    assert_eq!(app.sessions[0].scroll, 3);
+    assert!(screen(&mut app, 80, 24).join("\n").contains("↓ 3 lines below"));
+    mouse_ev(&mut app, ScrollDown, 5, 5);
+    assert_eq!(app.sessions[0].scroll, 0);
+    assert!(app.input.is_empty(), "the history was not walked");
+}
+
+#[test]
+fn dragging_selects_and_copies_on_release_and_double_and_triple_clicks_take_a_word_and_a_line() {
+    use ratatui::crossterm::event::{MouseButton::Left, MouseEventKind::{Down, Drag, Up}};
+    let (mut app, _d) = fake_app("select");
+    app.s().push(session::Entry::Assistant { text: "alpha beta gamma\n\nsecond paragraph here".into(), msg_id: String::new(), streaming: false });
+    let rows = screen(&mut app, 100, 24); // the app learns its panes from this frame
+    let (y, x) = rows.iter().enumerate().find_map(|(y, r)| r.find("alpha").map(|i| (y as u16, r[..i].chars().count() as u16))).unwrap();
+    let press = |app: &mut App, x: u16, y: u16, to: u16| {
+        mouse_ev(app, Down(Left), x, y);
+        screen(app, 100, 24); // the frame drawn while the button is down takes the screen
+        mouse_ev(app, Drag(Left), to, y);
+        screen(app, 100, 24); // each frame reads the text under the ends, and the copy follows it
+        mouse_ev(app, Up(Left), to, y);
+        screen(app, 100, 24);
+    };
+    press(&mut app, x, y, x + 9);
+    assert!(app.sent_notices.contains(&"copy:alpha beta".to_string()), "{:?}", app.sent_notices);
+    assert!(screen(&mut app, 100, 24).len() == 24 && app.sessions[0].sel.span().is_some(), "the selection stays drawn");
+    app.on_event(AppEvent::Term(Event::Key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE))));
+    assert!(app.sessions[0].sel.span().is_none(), "a key drops it");
+    // Double click: the word under the pointer.
+    app.sent_notices.clear();
+    press(&mut app, x + 7, y, x + 7);
+    press(&mut app, x + 7, y, x + 7);
+    assert!(app.sent_notices.contains(&"copy:beta".to_string()), "{:?}", app.sent_notices);
+    // Triple click: the whole line.
+    press(&mut app, x + 7, y, x + 7);
+    assert!(app.sent_notices.iter().any(|n| n.ends_with("alpha beta gamma")), "{:?}", app.sent_notices);
+}
+
+#[test]
 fn redo_undoes_an_undo_and_any_new_edit_forgets_it() {
     let (mut app, _d) = fake_app("redo");
     let key = |app: &mut App, c, m| app.on_key(KeyEvent::new(c, m));
@@ -1894,28 +2144,7 @@ fn up_and_down_move_between_rows_before_they_walk_history_and_the_draft_comes_ba
 }
 
 #[test]
-fn right_arrow_opens_the_highlighted_conversation_and_clicks_pick_tabs_and_rows() {
-    use ratatui::{Terminal, backend::TestBackend};
-    use ratatui::crossterm::event::MouseEvent;
-    let (mut app, _d) = fake_app("clicks");
-    app.sessions[0].title = "first".into();
-    app.new_tab();
-    app.sessions[1].title = "second".into();
-    let mut t = Terminal::new(TestBackend::new(120, 24)).unwrap();
-    t.draw(|f| ui::draw(f, &mut app)).unwrap();
-    let click = |app: &mut App, col, row| app.on_event(AppEvent::Term(Event::Mouse(MouseEvent { kind: MouseEventKind::Down(MouseButton::Left), column: col, row, modifiers: KeyModifiers::NONE })));
-    let (a, _) = app.hits.tabs[0];
-    click(&mut app, a + 1, 0);
-    assert_eq!(app.active, 0, "a click on a tab switches to it");
-    // A picker: the first click moves the cursor to the row, a click on that row applies it.
-    run_cmd(&mut app, "/color");
-    t.draw(|f| ui::draw(f, &mut app)).unwrap();
-    let h = app.hits.list.expect("the picker's rows are known");
-    click(&mut app, h.body.x + 2, h.body.y + 3);
-    assert_eq!(app.color_picker, Some(3));
-    t.draw(|f| ui::draw(f, &mut app)).unwrap();
-    click(&mut app, h.body.x + 2, h.body.y + 3);
-    assert_eq!(app.sessions[0].color.as_deref(), Some("green"));
+fn right_arrow_opens_the_highlighted_conversation() {
     // → on a session in the list opens it, in the full screen list and the dock.
     let mut e = explorer::Explorer::for_bench(vec![history::Summary { id: "aaa111".into(), title: "T".into(), prompt: "p".into(), modified: std::time::SystemTime::now(), size: 1, cwd: String::new() }]);
     assert!(matches!(e.key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE)), explorer::Outcome::OpenHere(id, ..) if id == "aaa111"));
@@ -1942,8 +2171,7 @@ fn right_arrow_opens_the_highlighted_conversation_and_clicks_pick_tabs_and_rows(
 }
 
 #[test]
-fn a_command_run_folds_per_call_by_click_or_alt_o_and_failures_show_their_end() {
-    use ratatui::crossterm::event::{MouseEvent, MouseEventKind};
+fn a_command_run_folds_per_call_by_alt_o_and_failures_show_their_end() {
     let (mut app, _d) = fake_app("fold");
     let out: String = (1..=20).map(|i| format!("line {i}\n")).collect();
     let bash = |id: &str, cmd: &str, r: &str, err| Entry::Tool { id: id.into(), name: "Bash".into(), input: json!({"command": cmd, "description": "why"}), result: Some((r.into(), err)), nested: false };
@@ -1953,14 +2181,6 @@ fn a_command_run_folds_per_call_by_click_or_alt_o_and_failures_show_their_end() 
     assert!(text.contains("line 4") && !text.contains("line 5") && text.contains("+16 lines"), "a passing run shows its start: {text}");
     assert!(text.contains("16 earlier lines") && text.contains("line 20") && !text.contains("line 16"), "a failing one its end: {text}");
     assert!(text.contains("whole command"), "{text}");
-    // Clicking the first call unfolds it only.
-    let &(y, _, _) = app.hits.calls.first().expect("calls are clickable");
-    let mouse = |app: &mut App, kind| app.on_event(AppEvent::Term(Event::Mouse(MouseEvent { kind, column: 3, row: y, modifiers: KeyModifiers::NONE })));
-    mouse(&mut app, MouseEventKind::Down(MouseButton::Left));
-    screen(&mut app, 80, 40); // the frame drawn while the button is down
-    mouse(&mut app, MouseEventKind::Up(MouseButton::Left)); // the click lands on release
-    let text = screen(&mut app, 80, 80).join("\n");
-    assert!(text.contains("line 20") && text.contains("▴ fold") && text.contains("16 earlier lines"), "{text}");
     // alt+o flips the latest call; ctrl+o resets them all to the global setting.
     app.handle_key(KeyEvent::new(KeyCode::Char('o'), KeyModifiers::ALT));
     let text = screen(&mut app, 80, 80).join("\n");
@@ -2075,7 +2295,10 @@ fn search_filters_the_conversation_as_you_type_and_tab_searches_what_you_sent() 
     let text = screen(&mut app, 100, 30).join("\n");
     assert!(text.contains("Search · 1 match") && text.contains("answer 7 with the NEEDLE"), "{text}");
     assert!(text.contains("question 6") || text.contains("answer 7"), "the conversation scrolled to the match");
-    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Right);
+    assert!(!app.search.as_ref().unwrap().history, "the matches have the keys: left and right do nothing");
+    press(&mut app, KeyCode::Tab); // the scope strip
+    press(&mut app, KeyCode::Right);
     let text = screen(&mut app, 100, 30).join("\n");
     assert!(text.contains("old needle message"), "{text}");
     press(&mut app, KeyCode::Enter);
@@ -2209,9 +2432,7 @@ fn config_turns_vim_keys_and_the_message_queue_on_and_off() {
     let _ = std::fs::remove_file(&cfg);
     app.config_path = Some(cfg.clone());
     run_cmd(&mut app, "/config");
-    let last = settings::ITEMS.len() - 1;
-    (0..last - 1).for_each(|_| press(&mut app, KeyCode::Down));
-    press(&mut app, KeyCode::Right);
+    press(&mut app, KeyCode::Right); // General opens first: its first row is Input mode
     assert!(app.vim.on, "the Input mode row: default → vim");
     assert_eq!(config::get_str(&cfg, "input_mode").as_deref(), Some("vim"));
     press(&mut app, KeyCode::Down);
@@ -2407,32 +2628,6 @@ fn the_first_message_waits_for_mcp_servers_still_connecting_and_esc_drops_it() {
 }
 
 #[test]
-fn dragging_over_the_conversation_copies_it_on_release_only_when_autocopy_is_on() {
-    use ratatui::crossterm::event::{MouseEvent, MouseEventKind};
-    let (mut app, _d) = fake_app("autocopy");
-    app.s().push(Entry::Assistant { text: "alpha beta\n\ngamma delta".into(), msg_id: "m".into(), streaming: false });
-    let rows = screen(&mut app, 60, 20);
-    let (ay, ax) = rows.iter().enumerate().find_map(|(y, r)| r.find("alpha").map(|x| (y as u16, r[..x].chars().count() as u16))).unwrap();
-    let (gy, gx) = rows.iter().enumerate().find_map(|(y, r)| r.find("gamma").map(|x| (y as u16, r[..x].chars().count() as u16))).unwrap();
-    let mouse = |app: &mut App, kind, column, row| app.on_event(AppEvent::Term(Event::Mouse(MouseEvent { kind, column, row, modifiers: KeyModifiers::NONE })));
-    let drag = |app: &mut App| {
-        mouse(app, MouseEventKind::Down(MouseButton::Left), ax, ay);
-        screen(app, 60, 20);
-        mouse(app, MouseEventKind::Drag(MouseButton::Left), gx + 4, gy);
-        screen(app, 60, 20);
-        mouse(app, MouseEventKind::Up(MouseButton::Left), gx + 4, gy);
-    };
-    drag(&mut app);
-    assert!(app.sent_notices.iter().all(|n| !n.starts_with("copy:")), "selecting alone copies nothing");
-    app.handle_key(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::CONTROL));
-    assert!(app.sent_notices.contains(&"copy:alpha beta\n\n  gamma".to_string()), "ctrl+y copies the selection");
-    app.sent_notices.clear();
-    app.apply_setting("autocopy", "on");
-    drag(&mut app);
-    assert!(app.sent_notices.contains(&"copy:alpha beta\n\n  gamma".to_string()), "{:?}", app.sent_notices);
-}
-
-#[test]
 fn a_scheduled_message_waits_for_its_time_shares_the_queue_and_does_not_get_held_by_an_interrupt() {
     let (mut app, _d) = fake_app("schedule");
     // Not a complete command: a list of times, then the message goes in the ordinary box.
@@ -2621,7 +2816,7 @@ fn hostile_backend_messages_and_keys_never_panic_the_ui() {
                 app.sessions[0].handle(&m);
                 if step % 25 == 7 {
                     // Panels that only read: the rest write settings files, which a random key must never reach.
-                    const PANELS: [&str; 14] = ["/context", "/usage", "/tasks", "/sessions", "/help", "/model", "/effort", "/mode", "/session", "/find a", "/search", "/queue", "/color", "/config"];
+                    const PANELS: [&str; 15] = ["/context", "/usage", "/tasks", "/procs", "/sessions", "/help", "/model", "/effort", "/mode", "/session", "/find a", "/search", "/queue", "/color", "/config"];
                     run_cmd(&mut app, PANELS[r.below(PANELS.len())]);
                 }
                 if r.below(3) == 0 {
@@ -2724,13 +2919,13 @@ fn compaction_size_is_passed_on_and_a_very_long_conversation_is_told_about_it_on
     assert!(app.launch_for(0).args.windows(2).any(|w| w == ["--autocompact", "200k"]));
     app.apply_setting("autocompact_k", "0");
     app.sessions[0].ctx_tokens = 450_000;
-    app.on_mem(vec![], 0);
-    app.on_mem(vec![], 0);
+    app.on_mem();
+    app.on_mem();
     let notes = |a: &App| a.sessions[0].items.iter().filter(|i| matches!(&i.entry, session::Entry::Note(t) if t.contains("450k tokens"))).count();
     assert_eq!(notes(&app), 1, "said once");
     app.sessions[0].long_hinted = false;
     app.apply_setting("autocompact_k", "300");
-    app.on_mem(vec![], 0);
+    app.on_mem();
     assert_eq!(notes(&app), 1, "not at all once a size is chosen");
 }
 
@@ -2975,8 +3170,7 @@ fn the_shell_setting_picks_login_or_sh() {
 }
 
 #[test]
-fn open_lists_links_and_files_opens_them_and_a_click_on_one_does_too() {
-    use ratatui::crossterm::event::MouseEvent;
+fn open_lists_links_and_files_opens_them() {
     let (mut app, d) = fake_app("open");
     let dir = d.join("proj");
     std::fs::create_dir_all(dir.join("src")).unwrap();
@@ -2989,7 +3183,7 @@ fn open_lists_links_and_files_opens_them_and_a_click_on_one_does_too() {
     run_cmd(&mut app, "/open");
     assert_eq!(app.open_ui.as_ref().unwrap().found.len(), 2);
     let rows = screen(&mut app, 100, 24);
-    assert!(rows.iter().any(|r| r.starts_with("┌ Open")) && rows.iter().any(|r| r.contains("https://example.com/guide")) && rows.iter().any(|r| r.contains("src/lib.rs:7")), "{}", rows.join("\n"));
+    assert!(rows.iter().any(|r| r.starts_with(" Open")) && rows.iter().any(|r| r.contains("https://example.com/guide")) && rows.iter().any(|r| r.contains("src/lib.rs:7")), "{}", rows.join("\n"));
     press(&mut app, KeyCode::Enter);
     assert!(app.open_ui.is_none() && opened().last().unwrap().last().unwrap() == "https://example.com/guide", "{:?}", opened());
 
@@ -3003,17 +3197,6 @@ fn open_lists_links_and_files_opens_them_and_a_click_on_one_does_too() {
     app.on_key(KeyEvent::new(KeyCode::Char('e'), KeyModifiers::NONE));
     assert_eq!(app.edit_file.as_deref(), Some(dir.join("src/lib.rs").as_path()), "e edits the file here");
     assert_eq!(opened().len(), n, "and opens nothing outside");
-
-    // A click on the link in the conversation, on release.
-    let rows = screen(&mut app, 100, 24);
-    let (y, x) = rows.iter().enumerate().find_map(|(y, r)| r.find("https://example.com").map(|i| (y, r[..i].chars().count()))).unwrap();
-    let mouse = |app: &mut App, kind| app.on_event(AppEvent::Term(Event::Mouse(MouseEvent { kind, column: x as u16 + 3, row: y as u16, modifiers: KeyModifiers::NONE })));
-    mouse(&mut app, MouseEventKind::Down(MouseButton::Left));
-    assert_eq!(opened().len(), n, "nothing happens on the press");
-    screen(&mut app, 100, 24);
-    mouse(&mut app, MouseEventKind::Up(MouseButton::Left));
-    assert_eq!(opened().len(), n + 1);
-    assert_eq!(opened().last().unwrap().last().unwrap(), "https://example.com/guide");
 }
 
 #[test]
@@ -3049,7 +3232,7 @@ fn worktree_adds_opens_a_tab_in_the_new_folder_lists_and_removes_it_after_a_seco
     app.goto(0);
     run_cmd(&mut app, "/wt");
     let rows = screen(&mut app, 120, 24);
-    assert!(rows.iter().any(|r| r.starts_with("┌ Worktrees")) && rows.iter().any(|r| r.contains("feat/x") && r.contains("1 tab")) && rows.iter().any(|r| r.contains("main") && r.contains("this tab")), "{}", rows.join("\n"));
+    assert!(rows.iter().any(|r| r.starts_with(" Worktrees")) && rows.iter().any(|r| r.contains("feat/x") && r.contains("1 tab")) && rows.iter().any(|r| r.contains("main") && r.contains("this tab")), "{}", rows.join("\n"));
     press(&mut app, KeyCode::Down);
     press(&mut app, KeyCode::Char('d'));
     press(&mut app, KeyCode::Char('d'));
@@ -3132,4 +3315,618 @@ fn the_agent_terminal_is_offered_only_when_on_and_slash_term_drives_a_real_shell
     assert!(terms.all().is_empty() && app.term_ui.is_some());
     press(&mut app, KeyCode::Esc);
     assert!(app.term_ui.is_none());
+}
+
+
+/// Every `draw` must reach the terminal as ONE synchronized update, and the cursor must end each one where the
+/// input box wants it (or hidden while something else has the keyboard). ratatui's backend flushes after each
+/// cursor command, which used to split a frame in two: cells, then the cursor shown where the last cell ended.
+#[test]
+fn each_frame_is_one_update_and_the_cursor_only_ever_rests_in_the_input() {
+    use std::sync::{Arc, Mutex};
+    #[derive(Clone)]
+    struct Sink(Arc<Mutex<Vec<u8>>>);
+    impl std::io::Write for Sink {
+        fn write(&mut self, b: &[u8]) -> std::io::Result<usize> { self.0.lock().unwrap().extend_from_slice(b); Ok(b.len()) }
+        fn flush(&mut self) -> std::io::Result<()> { Ok(()) }
+    }
+    let sink = Sink(Arc::new(Mutex::new(vec![])));
+    let (mut app, _d) = fake_app("cursortrace");
+    let frames = crate::screen::Frames::new(sink.clone());
+    let mut term = ratatui::Terminal::new(ratatui::backend::CrosstermBackend::new(frames.clone())).unwrap();
+    term.resize(ratatui::layout::Rect::new(0, 0, 100, 30)).unwrap();
+    let mut parser = vt100::Parser::new(std::num::NonZero::new(30).unwrap(), std::num::NonZero::new(100).unwrap(), 0);
+    app.input = "hello".into();
+    app.cursor = 5;
+    let mut at = None;
+    for step in 0..40 {
+        if step == 5 { app.s().busy = true; app.s().busy_since = std::time::Instant::now(); }
+        if step == 15 { app.s().note(format!("some output line {step}")); }
+        if step == 30 { app.dock_focus = true; }
+        term.draw(|f| ui::draw(f, &mut app)).unwrap();
+        frames.present().unwrap();
+        let bytes: Vec<u8> = std::mem::take(&mut *sink.0.lock().unwrap());
+        let text = String::from_utf8_lossy(&bytes);
+        assert!(text.matches("\x1b[?2026h").count() <= 1, "step {step}: more than one update in a frame: {text:?}");
+        assert_eq!(text.matches("\x1b[?2026h").count(), text.matches("\x1b[?2026l").count(), "step {step}: update left open");
+        parser.process(&bytes);
+        let s = parser.screen();
+        if step == 30 {
+            assert!(s.hide_cursor(), "the side list has the keyboard: no cursor in the input box");
+        } else if step < 30 {
+            assert!(!s.hide_cursor(), "step {step}: cursor visible");
+            // ...and where the text ends, whatever was drawn above it
+            let here = s.cursor_position();
+            assert_eq!(here.1 as usize, 2 + 5, "step {step}: cursor column after `hello`: {here:?}");
+            at.get_or_insert(here.0);
+            assert_eq!(Some(here.0), at, "step {step}: the cursor row moved as the screen changed");
+        }
+    }
+}
+
+/// Work shows as a spinner, the turn's clock and, while tasks are open, how many are done as a bar.
+#[test]
+fn a_working_tab_shows_the_spinner_and_how_far_its_tasks_are() {
+    let (mut app, _d) = fake_app("working-look");
+    let s = &mut app.sessions[0];
+    s.busy = true;
+    s.activity = "calling Bash".into();
+    s.tasks = ["completed", "in_progress", "pending"].iter().map(|st| ("1".into(), "t".into(), st.to_string())).collect();
+    let rows = screen(&mut app, 100, 24);
+    let line = rows.iter().find(|r| r.contains("Calling Bash…")).expect("the spinner line");
+    assert!(line.contains("1/3") && line.contains("█") && line.contains("esc to interrupt"), "{line}");
+}
+
+#[test]
+fn btw_asks_mid_turn_without_touching_the_turn_the_input_or_the_conversation() {
+    let dir = std::env::temp_dir().join(format!("claudeplusplus-btw-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let script = dir.join("claude");
+    let d = dir.display();
+    std::fs::write(&script, format!("#!/bin/sh\ncase \"$*\" in *--fork-session*) echo \"$@\" > {d}/args; cat > {d}/question; echo '{{\"result\":\"because of **X**\",\"total_cost_usd\":0.0042,\"is_error\":false}}';; *) cat > /dev/null;; esac\n")).unwrap();
+    std::process::Command::new("chmod").arg("+x").arg(&script).status().unwrap();
+    let (tx, rx) = mpsc::channel();
+    let mut app = App::new(Launch { bin: script.to_string_lossy().into(), ..Default::default() }, dir.to_string_lossy().into(), tx, Duration::ZERO);
+    app.new_tab();
+    app.s().session_id = Some("sid-1".into());
+    app.s().busy = true; // Claude is mid-turn
+    app.queue_on = true; // and ordinary messages would wait in line
+    let sid = app.s().id;
+    let items = app.s().items.len();
+
+    run_cmd(&mut app, "/btw");
+    assert_eq!(app.s().items.len(), items, "a question is required");
+    run_cmd(&mut app, "/btw why is it so?");
+    assert!(app.s().busy && app.s().queue.is_empty(), "the turn is untouched and the question did not queue");
+    assert!(matches!(&app.s().items.last().unwrap().entry, session::Entry::Side { answer: None, .. }), "shown at once, waiting");
+    typed(&mut app, "next thing");
+    assert_eq!(app.input, "next thing", "no panel took the keyboard");
+
+    let ev = (0..100).find_map(|_| match rx.recv_timeout(Duration::from_secs(5)) {
+        Ok(e @ AppEvent::Btw(..)) => Some(e),
+        _ => None,
+    });
+    app.on_event(ev.expect("the answer arrived"));
+    assert!(matches!(&app.s().items.last().unwrap().entry, session::Entry::Side { answer: Some(Ok((t, _))), .. } if t.contains("because of")));
+    assert!(app.s().busy, "still the same turn");
+
+    let args = std::fs::read_to_string(dir.join("args")).unwrap();
+    assert!(args.contains("--resume sid-1 --fork-session") && args.contains("--no-session-persistence"), "{args}");
+    assert_eq!(std::fs::read_to_string(dir.join("question")).unwrap(), "why is it so?");
+
+    // it is on screen, and an answer for a cleared conversation is dropped
+    let lines = ui::entry_lines(&app.s().items.last().unwrap().entry, 60, false, "/");
+    let text = lines.iter().map(|l| l.to_string()).collect::<Vec<_>>().join("\n");
+    assert!(text.contains("btw") && text.contains("why is it so?") && text.contains("because of") && text.contains("$0.0042"), "{text}");
+    app.on_event(AppEvent::Btw(sid, 99, Ok(("late".into(), 0.0))));
+    app.on_event(AppEvent::Btw(sid + 1000, 1, Ok(("elsewhere".into(), 0.0))));
+}
+
+#[test]
+fn procs_shows_what_is_read_groups_it_by_owner_and_closes() {
+    let (mut app, _d) = fake_app("procs");
+    run_cmd(&mut app, "/procs");
+    typed(&mut app, "zz");
+    assert!(app.input.is_empty(), "keys belong to the panel");
+    // Until the (off-thread) read reports, the panel says so; the real read cannot be relied on in a test.
+    app.procs_ui.as_mut().unwrap().set(None);
+    assert!(screen(&mut app, 100, 30).join("\n").contains("reading the process list"));
+    let row = |pid, kind, mb, cmd: &str| procs::Row { pid, kind, mb, cmd: cmd.into() };
+    let report = procs::Report {
+        rows: vec![row(10, procs::Kind::Ours, 190.0, "claude -p --input-format stream-json"), row(20, procs::Kind::Spare, 265.0, "claude bg-spare --bg-spare x")],
+        source: "footprint",
+    };
+    app.procs_ui.as_mut().unwrap().set(Some(report));
+    let text = screen(&mut app, 100, 30).join("\n");
+    assert!(text.contains("ours (this claude++)") && text.contains("daemon spare workers") && text.contains("455 MB") && text.contains("bg-spare") && text.contains("only \"ours\" is controlled"), "{text}");
+    press(&mut app, KeyCode::Char('r'));
+    assert!(app.procs_ui.as_ref().unwrap().report.is_none(), "r reads the list again");
+    press(&mut app, KeyCode::Esc);
+    assert!(app.procs_ui.is_none() && !app.overlay_open());
+}
+
+fn three_tabs_with_backends(tag: &str) -> (App, std::path::PathBuf) {
+    let (mut app, dir) = fake_app(tag);
+    app.new_tab();
+    app.new_tab(); // tabs 0,1,2; focus on 2
+    for s in &mut app.sessions {
+        s.session_id = Some("sid".into());
+        s.backend = Some(Backend::spawn(&app.launch, Resume::New, app.tx.clone(), |_, m| AppEvent::Backend(0, 0, m)).unwrap());
+        s.mem_kb = 100 * 1024;
+    }
+    (app, dir)
+}
+
+#[test]
+fn the_tab_in_front_goes_only_when_the_supervisor_found_the_window_left_and_nothing_here_says_otherwise() {
+    let (mut app, _d) = three_tabs_with_backends("sup-front");
+    let front = app.active;
+    let tab = app.sessions[front].id;
+    let ask = |app: &mut App, front: bool| app.on_event(AppEvent::Sup(supervisor::Msg::Suspend { tab, why: "the tab was idle 600 s".into(), front }));
+    app.idle_suspend = Duration::from_secs(120);
+    app.last_input = Instant::now() - Duration::from_secs(300);
+    app.sessions[front].last_active = Instant::now() - Duration::from_secs(600);
+    ask(&mut app, false);
+    assert!(app.sessions[front].backend.is_some(), "a plain request never stops the tab in front");
+    app.on_event(AppEvent::Term(Event::FocusGained));
+    ask(&mut app, true);
+    assert!(app.sessions[front].backend.is_some(), "the terminal has focus and you were here within five times the idle time: this is where you are");
+    app.on_event(AppEvent::Term(Event::FocusLost));
+    app.last_input = Instant::now();
+    ask(&mut app, true);
+    assert!(app.sessions[front].backend.is_some(), "you typed a moment ago");
+    app.last_input = Instant::now() - Duration::from_secs(600);
+    app.sessions[front].last_active = Instant::now();
+    ask(&mut app, true);
+    assert!(app.sessions[front].backend.is_some(), "the tab did something a moment ago: the report was stale");
+    app.sessions[front].last_active = Instant::now() - Duration::from_secs(600);
+    ask(&mut app, true);
+    assert!(app.sessions[front].backend.is_none(), "left, quiet, and the supervisor says so: it goes");
+}
+
+#[test]
+fn a_key_is_evidence_of_focus_and_a_terminal_that_never_reports_it_stays_unknown() {
+    let (mut app, _d) = fake_app("unused");
+    app.on_event(AppEvent::Term(Event::FocusLost));
+    app.last_input = Instant::now() - Duration::from_secs(500);
+    app.on_event(AppEvent::Term(Event::Key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE))));
+    assert_eq!(app.focus, Some(true), "a key that reaches this window is evidence that the terminal has focus");
+    app.on_event(AppEvent::Term(Event::Paste("x".into())));
+    app.focus = None;
+    app.on_event(AppEvent::Term(Event::Key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE))));
+    assert_eq!(app.focus, None, "a terminal that never reports focus stays unknown");
+}
+
+#[test]
+fn the_window_reports_what_each_tab_may_lose_and_the_supervisor_reports_what_each_holds() {
+    let (mut app, _d) = three_tabs_with_backends("sup-report");
+    app.sessions[0].busy = true;
+    app.sessions[1].last_active = Instant::now() - Duration::from_secs(100);
+    let tabs = app.tab_report();
+    let by = |i: usize| tabs[i].clone();
+    assert_eq!((by(0)["safe"].as_bool(), by(1)["safe"].as_bool(), by(2)["safe"].as_bool()), (Some(false), Some(true), Some(false)), "busy: no; idle in the background: yes; in front: not as an ordinary tab");
+    assert_eq!(by(2)["safe_front"], true, "the tab in front may go when the window is found to be away");
+    assert_eq!(by(1)["idle_s"], 90, "idle time in 30 s steps");
+    assert!(by(0).get("mb").is_none(), "what a tab holds is measured by the supervisor, not said by the window");
+
+    // The numbers come back with the peers, for this window's processes.
+    let me = std::process::id();
+    let pid = |i: usize| app.sessions[i].backend.as_ref().unwrap().pid;
+    let tab = |i: usize, mb| supervisor::TabInfo { id: app.sessions[i].id, pid: Some(pid(i)), busy: false, mb, cwd: String::new() };
+    let peers = vec![
+        supervisor::Peer { pid: me, ui_mb: 12, tabs: vec![tab(0, 300), tab(2, 150)] },
+        supervisor::Peer { pid: me + 1, ui_mb: 99, tabs: vec![tab(1, 9999)] },
+    ];
+    app.on_event(AppEvent::Sup(supervisor::Msg::Peers(peers)));
+    assert_eq!((app.sessions[0].mem_kb, app.sessions[1].mem_kb, app.sessions[2].mem_kb, app.ui_mem_kb), (300 * 1024, 0, 150 * 1024, 12 * 1024));
+}
+
+#[test]
+fn a_notice_from_the_supervisor_is_said_in_the_window() {
+    let (mut app, _d) = fake_app("unused");
+    app.on_event(AppEvent::Sup(supervisor::Msg::Notice("over the memory budget".into())));
+    assert!(app.flash.as_deref().is_some_and(|f| f.contains("over the memory budget")));
+}
+
+#[test]
+fn scrolling_to_read_counts_as_using_the_window() {
+    let (mut app, _d) = fake_app("unused");
+    app.last_input = Instant::now() - Duration::from_secs(600);
+    app.on_event(AppEvent::Term(Event::Mouse(ratatui::crossterm::event::MouseEvent {
+        kind: ratatui::crossterm::event::MouseEventKind::ScrollDown,
+        column: 1,
+        row: 1,
+        modifiers: KeyModifiers::NONE,
+    })));
+    assert!(app.last_input.elapsed() < Duration::from_secs(5));
+}
+
+#[test]
+fn the_supervisor_picks_the_tab_and_this_window_only_refuses_one_it_cannot_stop() {
+    let (mut app, _d) = three_tabs_with_backends("sup-suspend");
+    let ask = |app: &mut App, i: usize| {
+        let tab = app.sessions[i].id;
+        app.on_event(AppEvent::Sup(supervisor::Msg::Suspend { tab, why: "all claude++ windows hold 900 MB, budget 500 MB".into(), front: false }));
+    };
+    ask(&mut app, 2);
+    assert!(app.sessions[2].backend.is_some(), "the tab in front is never stopped");
+    app.sessions[0].busy = true;
+    ask(&mut app, 0);
+    assert!(app.sessions[0].backend.is_some(), "a tab that started working since is refused");
+    ask(&mut app, 1);
+    assert!(app.sessions[1].backend.is_none(), "an idle tab in the background goes");
+    app.on_event(AppEvent::Sup(supervisor::Msg::Suspend { tab: 424242, why: String::new(), front: false })); // a tab closed meanwhile
+}
+
+/// Seconds since the epoch, `ahead` from now: when a plan window resets.
+fn reset_in(ahead: u64) -> f64 {
+    (SystemTime::now() + Duration::from_secs(ahead)).duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs_f64()
+}
+
+#[test]
+fn a_plan_window_warns_once_when_it_fills_and_again_only_after_it_resets() {
+    let (mut app, _d) = fake_app("limit-warn");
+    app.sessions[0].five_hour = Some((85.0, reset_in(3600)));
+    app.warn_on_limits();
+    assert!(app.flash.is_none(), "90% is the default level: 85% is quiet");
+    app.sessions[0].five_hour = Some((92.0, reset_in(3600)));
+    app.warn_on_limits();
+    let notes = |app: &mut App| app.s().items.iter().filter(|i| i.entry.text().contains("5-hour limit at 92%")).count();
+    assert_eq!(notes(&mut app), 1);
+    assert!(app.flash.is_some());
+    app.warn_on_limits();
+    app.sessions[0].five_hour = Some((96.0, app.sessions[0].five_hour.unwrap().1));
+    app.warn_on_limits();
+    assert_eq!(notes(&mut app), 1, "the same window does not warn again as it climbs");
+    app.sessions[0].five_hour = Some((91.0, reset_in(5 * 3600)));
+    app.warn_on_limits();
+    assert_eq!(app.s().items.iter().filter(|i| i.entry.text().contains("5-hour limit at")).count(), 2, "a new window warns again");
+    app.apply_setting("limit_warn", "0");
+    app.limit_warned.clear();
+    app.flash = None;
+    app.warn_on_limits();
+    assert!(app.flash.is_none(), "off is off");
+}
+
+#[test]
+fn a_message_over_the_hold_level_waits_for_the_reset_and_send_now_goes_ahead() {
+    let (mut app, _d) = fake_app("limit-hold");
+    let cfg = std::env::temp_dir().join(format!("claudeplusplus-cfg-limit-{}", std::process::id())).join("config.json");
+    let _ = std::fs::remove_file(&cfg);
+    app.config_path = Some(cfg.clone());
+    app.sessions[0].seven_day = Some((97.0, reset_in(7200)));
+    typed(&mut app, "before");
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(sent(&mut app), ["before"], "the hold is off until chosen");
+    app.s().busy = false;
+
+    app.apply_setting("limit_hold", "95");
+    assert_eq!(config::get_str(&cfg, "limit_hold").as_deref(), Some("95"));
+    typed(&mut app, "held");
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(sent(&mut app), ["before"]);
+    assert_eq!(queued(&mut app), ["held"]);
+    let due = app.s().queue[0].due.expect("due at the reset").duration_since(SystemTime::now()).unwrap().as_secs();
+    assert!((7190..=7200).contains(&due), "{due}");
+    assert!(app.s().items.iter().any(|i| i.entry.text().contains("7-day limit at 97%") && i.entry.text().contains("held")));
+    app.drain_queues();
+    assert_eq!(sent(&mut app), ["before"], "the clock has not come");
+
+    run_cmd(&mut app, "/help");
+    assert!(app.s().queue.len() == 1 && app.s().items.iter().any(|i| i.entry.text().contains("KEYS")), "a slash command is not held");
+
+    // A message that waited for a turn also waits for the window.
+    app.s().queue.push(session::Queued { text: "behind".into(), atts: vec![], due: None });
+    app.drain_queues();
+    assert!(app.s().queue.iter().all(|q| q.due.is_some()) && sent(&mut app) == ["before"]);
+
+    // Send now: this window no longer holds, the next one will.
+    alt(&mut app, KeyCode::Char('q'));
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Esc);
+    app.s().busy = false;
+    app.drain_queues();
+    assert_eq!(sent(&mut app), ["before", "held"]);
+    app.s().busy = false;
+    typed(&mut app, "after");
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(sent(&mut app), ["before", "held", "after"], "released for the rest of this window");
+    app.sessions[0].seven_day = Some((98.0, reset_in(9000)));
+    app.s().busy = false;
+    typed(&mut app, "next window");
+    press(&mut app, KeyCode::Enter);
+    assert!(queued(&mut app).contains(&"next window".to_string()), "a different window holds again");
+}
+
+#[test]
+fn rate_limits_are_a_config_tab_and_a_window_only_counts_until_it_resets() {
+    let (mut app, _d) = fake_app("limit-cfg");
+    app.sessions[0].five_hour = Some((99.0, reset_in(60)));
+    app.apply_setting("limit_hold", "99");
+    assert!(app.limit_block().is_some());
+    app.sessions[0].five_hour = Some((99.0, reset_in(0).min(1.0)));
+    assert!(app.limit_block().is_none(), "a window past its reset holds nothing");
+    assert_eq!(app.setting_value("limit_hold"), "99");
+    assert_eq!(app.setting_value("limit_warn"), "90");
+    run_cmd(&mut app, "/config");
+    press(&mut app, KeyCode::Tab); // the section strip has the keys
+    for _ in 0..4 {
+        press(&mut app, KeyCode::Right);
+    }
+    let text = screen(&mut app, 110, 30).join("\n");
+    assert!(text.contains("Rate limits") && text.contains("Warn at") && text.contains("Hold messages at"), "{text}");
+}
+
+fn sup_dir(tag: &str) -> supervisor::Paths {
+    let dir = std::env::temp_dir().join(format!("cpp-supui-{}-{tag}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    supervisor::Paths { dir }
+}
+
+#[test]
+fn supervisor_panel_without_a_supervisor_edits_the_saved_settings_and_starts_it() {
+    let (mut app, _d) = fake_app("supui-down");
+    app.sup_paths = sup_dir("down");
+    let cfg = std::env::temp_dir().join(format!("claudeplusplus-cfg-supui-{}", std::process::id())).join("config.json");
+    let _ = std::fs::remove_file(&cfg);
+    app.config_path = Some(cfg.clone());
+    run_cmd(&mut app, "/supervisor");
+    assert!(app.sup_ui.is_some());
+    let text = screen(&mut app, 110, 30).join("\n");
+    assert!(text.contains(" Supervisor") && text.contains("NOT RUNNING") && text.contains("Stays after the last window") && text.contains("Start"), "{text}");
+    assert!(!text.contains("use the panel above"), "a panel, not the message box\n{text}");
+    press(&mut app, KeyCode::Down);
+    press(&mut app, KeyCode::Right); // Clean up after a crash: on -> off
+    assert_eq!(config::get_str(&cfg, "supervisor_cleanup").as_deref(), Some("off"));
+    press(&mut app, KeyCode::Down);
+    press(&mut app, KeyCode::Left); // Memory budget: enforced -> paused (wraps)
+    assert_eq!(config::get_str(&cfg, "supervisor_budget").as_deref(), Some("paused"));
+    assert!(supervisor::Config::user().enforce, "the user's own config is not this test's");
+    // Start: allowed again, and the next connect attempt is due at once.
+    supervisor::stop_on_purpose(&app.sup_paths).unwrap();
+    assert!(screen(&mut app, 110, 30).join("\n").contains("STOPPED") && screen(&mut app, 110, 30).join("\n").contains("nothing starts it"));
+    press(&mut app, KeyCode::Down);
+    press(&mut app, KeyCode::Enter);
+    assert!(!app.sup_paths.stopped_marker().exists() && app.sup_tried.elapsed() > Duration::from_secs(30));
+    press(&mut app, KeyCode::Esc);
+    assert!(app.sup_ui.is_none());
+}
+
+#[test]
+fn supervisor_panel_shows_the_live_state_and_manages_it() {
+    // The supervisor lists the shared MCP servers of the whole process, and each is a row in the panel: another test's
+    // servers would move the rows this one navigates by. (One supervisor per process in real life.)
+    let _own = crate::sync::LockOk::lock_ok(&share::tests::HUB_TEST);
+    let (mut app, _d) = fake_app("supui-live");
+    app.sup_paths = sup_dir("live");
+    let cfg = std::env::temp_dir().join(format!("claudeplusplus-cfg-supui-live-{}", std::process::id())).join("config.json");
+    let _ = std::fs::remove_file(&cfg);
+    app.config_path = Some(cfg.clone());
+    let (p, done) = (app.sup_paths.clone(), std::sync::mpsc::channel::<()>());
+    std::thread::spawn(move || {
+        supervisor::run(&p, &supervisor::Config { grace: Duration::from_secs(60), ..Default::default() }).unwrap();
+        let _ = done.0.send(());
+    });
+    let t = Instant::now();
+    while !app.sup_paths.sock().exists() {
+        assert!(t.elapsed() < Duration::from_secs(5));
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let (tx, rx) = mpsc::channel();
+    let client = supervisor::Client::connect(&app.sup_paths, std::process::id(), tx, |m| m).expect("connect");
+    app.sup = Some(Arc::new(client));
+    // What the supervisor says arrives as events; pump them until the panel has its status.
+    let pump = |app: &mut App| {
+        while let Ok(m) = rx.try_recv() {
+            app.on_event(AppEvent::Sup(m));
+        }
+    };
+    run_cmd(&mut app, "/supervisor");
+    let t = Instant::now();
+    while app.sup_ui.as_ref().unwrap().status.is_none() {
+        assert!(t.elapsed() < Duration::from_secs(5), "no status");
+        std::thread::sleep(Duration::from_millis(20));
+        pump(&mut app);
+    }
+    let text = screen(&mut app, 110, 34).join("\n");
+    assert!(text.contains("RUNNING") && text.contains(&format!("pid {}", std::process::id())) && text.contains("Windows") && text.contains("(this one)") && text.contains("no budget set"), "{text}");
+    assert!(text.contains("Restart") && text.contains("Stop") && text.contains("Activity") && text.contains("connected") && text.contains("Memory") && text.contains("since it started"), "{text}");
+
+    // A setting is changed in the supervisor itself and saved.
+    press(&mut app, KeyCode::Right); // Stays after the last window: 60 s is none of the choices, so → first
+    let t = Instant::now();
+    loop {
+        pump(&mut app);
+        if config::get_str(&cfg, "supervisor_grace_s").is_some() && app.sup_setting(0) == "20" {
+            break;
+        }
+        assert!(t.elapsed() < Duration::from_secs(5), "the supervisor never answered the change: {}", app.sup_setting(0));
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert_eq!(config::get_str(&cfg, "supervisor_grace_s").as_deref(), Some("20"));
+
+    // Stop: it leaves and stays stopped.
+    for _ in 0..3 {
+        press(&mut app, KeyCode::Down); // settings 1, 2, then the buttons
+    }
+    press(&mut app, KeyCode::Right); // Restart -> Stop
+    press(&mut app, KeyCode::Enter);
+    done.1.recv_timeout(Duration::from_secs(5)).expect("the supervisor left");
+    assert!(app.sup_paths.stopped_marker().exists());
+    assert!(app.flash.as_ref().is_some_and(|f| f.to_string().contains("stopped")));
+}
+
+#[test]
+fn a_hint_names_the_message_being_answered_only_when_it_is_off_screen() {
+    use session::Entry;
+    let (mut app, _dir) = fake_app("hint");
+    let mut t = ratatui::Terminal::new(ratatui::backend::TestBackend::new(60, 14)).unwrap();
+    let mut count = |app: &mut App| {
+        t.draw(|f| ui::draw(f, app)).unwrap();
+        t.backend().buffer().content().iter().map(|c| c.symbol()).collect::<String>().matches("fix the zebra bug").count()
+    };
+    app.sessions[0].push(Entry::User("fix the zebra bug\nin detail please".into()));
+    app.sessions[0].push(Entry::Note("first".into()));
+    assert_eq!(count(&mut app), 1, "the message is on screen: no hint");
+    for i in 0..40 {
+        app.sessions[0].push(Entry::Note(format!("line {i}")));
+    }
+    assert_eq!(count(&mut app), 1, "the answer pushed it off the top: the hint is the only place it shows");
+    app.sessions[0].scroll = 10_000;
+    assert_eq!(count(&mut app), 1, "scrolled back to it: it shows itself, not twice");
+}
+
+#[test]
+fn the_end_of_turn_note_says_when_it_stopped() {
+    let (mut app, _dir) = fake_app("done");
+    let s = &mut app.sessions[0];
+    s.handle(&serde_json::from_str(r#"{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"hi there"}}}"#).unwrap());
+    s.handle(&serde_json::from_str(r#"{"type":"assistant","message":{"id":"m1","role":"assistant","content":[{"type":"text","text":"hi there"}]}}"#).unwrap());
+    s.handle(&serde_json::from_str(r#"{"type":"result","subtype":"success","is_error":false,"result":"hi"}"#).unwrap());
+    let note = s.items.iter().rev().find_map(|i| if let session::Entry::Note(t) = &i.entry { Some(t.clone()) } else { None }).unwrap_or_default();
+    let re = note.strip_prefix("✻ Worked for ").and_then(|r| r.split_once(" · done ")).map(|(_, c)| c.len() == 5 && c.as_bytes()[2] == b':');
+    assert_eq!(re, Some(true), "{note:?}");
+}
+
+#[test]
+fn a_conversation_selection_copies_while_dragging_stays_on_its_words_as_output_arrives_and_scrolls_at_the_edge() {
+    use ratatui::crossterm::event::{MouseButton::Left, MouseEventKind::{Down, Drag, Up}};
+    use ratatui::{Terminal, backend::TestBackend};
+    let (mut app, _d) = fake_app("selfollow");
+    for i in 0..30 {
+        app.s().push(session::Entry::Note(format!("earlier {i}")));
+    }
+    app.s().push(session::Entry::Assistant { text: "alpha beta gamma".into(), msg_id: String::new(), streaming: false });
+    let mut term = Terminal::new(TestBackend::new(100, 24)).unwrap();
+    let mut draw = |app: &mut App| {
+        term.draw(|f| ui::draw(f, app)).unwrap();
+        let b = term.backend().buffer().clone();
+        let rows: Vec<String> = (0..24).map(|y| (0..100).map(|x| b[(x, y)].symbol().to_string()).collect()).collect();
+        let marked: Vec<(u16, u16)> = (0..24).flat_map(|y| (0..100).map(move |x| (x, y))).filter(|&(x, y)| b[(x, y)].bg == theme::selection().bg.unwrap()).collect();
+        (rows, marked)
+    };
+    let (rows, _) = draw(&mut app);
+    let (y, x) = rows.iter().enumerate().find_map(|(y, r)| r.find("alpha").map(|i| (y as u16, r[..i].chars().count() as u16))).unwrap();
+    mouse_ev(&mut app, Down(Left), x, y);
+    mouse_ev(&mut app, Drag(Left), x + 9, y);
+    draw(&mut app);
+    assert!(app.sent_notices.contains(&"copy:alpha beta".to_string()), "copied before the button is up: {:?}", app.sent_notices);
+    mouse_ev(&mut app, Up(Left), x + 9, y);
+    // output arrives below: the answer moves up the screen and the highlight moves with it
+    for i in 0..3 {
+        app.s().push(session::Entry::Note(format!("later {i}")));
+    }
+    let (rows, marked) = draw(&mut app);
+    let (y2, _) = rows.iter().enumerate().find_map(|(y, r)| r.find("alpha").map(|i| (y as u16, i))).unwrap();
+    assert!(y2 < y, "the answer moved up");
+    assert_eq!(marked.len(), 10, "ten cells stay marked");
+    assert!(marked.iter().all(|&(mx, my)| my == y2 && (x..x + 10).contains(&mx)), "{marked:?} on row {y2}");
+    // dragging above the conversation scrolls it and the end follows
+    for i in 0..60 {
+        app.s().push(session::Entry::Note(format!("filler {i}")));
+    }
+    draw(&mut app);
+    let (area, before) = (app.sessions[0].sel.area, app.sessions[0].scroll);
+    mouse_ev(&mut app, Down(Left), area.x + 5, area.bottom() - 2);
+    mouse_ev(&mut app, Drag(Left), area.x + 5, 0);
+    std::thread::sleep(Duration::from_millis(60));
+    app.autoscroll_selection();
+    assert_eq!(app.sessions[0].scroll, before + 1, "a pointer above the conversation scrolls it");
+    mouse_ev(&mut app, Up(Left), area.x + 5, 0);
+}
+
+#[test]
+fn shift_arrows_select_in_the_message_box_copy_as_they_go_and_typing_replaces_the_selection() {
+    let (mut app, _d) = fake_app("boxsel");
+    let key = |app: &mut App, c, m| app.on_key(KeyEvent::new(c, m));
+    typed(&mut app, "hello big world");
+    for _ in 0..5 {
+        key(&mut app, KeyCode::Left, KeyModifiers::SHIFT);
+    }
+    assert_eq!(app.box_selection(), Some((10, 15)));
+    screen(&mut app, 80, 24); // the frame after each key puts the selection on the clipboard
+    assert_eq!(app.sent_notices.last().map(String::as_str), Some("copy:world"), "copied while selecting");
+    key(&mut app, KeyCode::Left, KeyModifiers::SHIFT | KeyModifiers::ALT);
+    assert_eq!(app.box_selection(), Some((6, 15)), "alt+shift takes a word at a time");
+    screen(&mut app, 80, 24);
+    assert_eq!(app.sent_notices.last().map(String::as_str), Some("copy:big world"));
+    key(&mut app, KeyCode::Right, KeyModifiers::NONE);
+    assert!(app.box_selection().is_none(), "a plain arrow drops it");
+    key(&mut app, KeyCode::Home, KeyModifiers::SHIFT);
+    key(&mut app, KeyCode::Char('X'), KeyModifiers::SHIFT);
+    assert_eq!(app.input, "Xig world", "typing replaces the selection (the cursor was after \"hello b\")");
+    typed(&mut app, "yz");
+    key(&mut app, KeyCode::Left, KeyModifiers::SHIFT);
+    key(&mut app, KeyCode::Backspace, KeyModifiers::NONE);
+    assert_eq!(app.input, "Xyig world", "backspace deletes the selection, not one more");
+    key(&mut app, KeyCode::Char('z'), KeyModifiers::CONTROL);
+    assert_eq!(app.input, "Xyzig world", "and ctrl+z brings it back in one step");
+}
+
+#[test]
+fn a_click_in_the_message_box_moves_the_cursor_and_a_drag_selects_and_copies_live() {
+    use ratatui::crossterm::event::{MouseButton::Left, MouseEventKind::{Down, Drag, Up}};
+    let (mut app, _d) = fake_app("boxclick");
+    typed(&mut app, "hello big world\nsecond line here");
+    let rows = screen(&mut app, 80, 24);
+    let (y, x0) = rows.iter().enumerate().find_map(|(y, r)| r.find("hello").map(|i| (y as u16, r[..i].chars().count() as u16))).unwrap();
+    mouse_ev(&mut app, Down(Left), x0 + 6, y);
+    mouse_ev(&mut app, Up(Left), x0 + 6, y);
+    assert_eq!((app.cursor, app.box_selection()), (6, None), "a click puts the cursor on the character");
+    mouse_ev(&mut app, Down(Left), x0 + 40, y);
+    mouse_ev(&mut app, Up(Left), x0 + 40, y);
+    assert_eq!(app.cursor, 15, "past the end of a line: its end, before the newline");
+    mouse_ev(&mut app, Down(Left), x0 + 6, y);
+    mouse_ev(&mut app, Drag(Left), x0 + 9, y);
+    screen(&mut app, 80, 24);
+    assert_eq!(app.box_selection(), Some((6, 9)));
+    assert!(app.sent_notices.contains(&"copy:big".to_string()), "copied while the button is down: {:?}", app.sent_notices);
+    mouse_ev(&mut app, Up(Left), x0 + 9, y);
+    screen(&mut app, 80, 24);
+    assert_eq!(app.box_selection(), Some((6, 9)), "it stays after the button is up");
+    assert!(app.flash.as_deref().is_some_and(|f| f.contains("copied 3 characters")), "{:?}", app.flash);
+    // typing over it, as with shift+arrows: one selection model for the mouse and the keyboard
+    app.on_event(AppEvent::Term(Event::Key(KeyEvent::new(KeyCode::Char('X'), KeyModifiers::SHIFT))));
+    assert_eq!(app.input, "hello X world\nsecond line here");
+}
+
+#[test]
+fn input_index_follows_the_wrapped_layout() {
+    use ui::input_index as at;
+    assert_eq!(at("hello", 10, 0, 3), 3);
+    assert_eq!(at("hello", 10, 0, 99), 5, "past the end: after the last character");
+    assert_eq!(at("ab\ncd", 10, 1, 1), 4);
+    assert_eq!(at("ab\ncd", 10, 0, 7), 2, "past the end of a row: before its newline");
+    assert_eq!(at("abcdef", 3, 1, 1), 4, "a wrapped row starts where the layout broke it");
+    assert_eq!(at("abcdef", 3, 0, 9), 3, "the end of a wrapped row is where the next begins");
+    assert_eq!(at("a\n\nb", 10, 1, 0), 2, "an empty row");
+    assert_eq!(at("日本語", 4, 0, 3), 1, "the second cell of a wide character");
+}
+
+#[test]
+fn drag_reporting_is_switched_on_after_plain_reporting_because_terminals_keep_only_the_last() {
+    let on = keys::mouse_modes(true);
+    let (plain, drag) = (on.find("\x1b[?1000h").unwrap(), on.find("\x1b[?1002h").unwrap());
+    assert!(plain < drag, "1002 last, or Ghostty reports no drag: {on:?}");
+    assert!(on.contains("\x1b[?1006h"));
+    let off = keys::mouse_modes(false);
+    assert!(off.contains("\x1b[?1002l") && off.contains("\x1b[?1000l") && off.contains("\x1b[?1006l"));
+}
+
+#[test]
+fn a_terminal_emulator_ends_up_reporting_drags_and_is_left_clean() {
+    // The bug this guards: with 1002 set before 1000 a terminal that keeps the last mode reported no drag at all.
+    // vt100 keeps the last mode like such a terminal does.
+    let mut t = vt100::Parser::new_with_callbacks(pane::nz(24), pane::nz(80), 0, pane::Replies::default());
+    t.process(keys::mouse_modes(true).as_bytes());
+    let s = t.screen();
+    assert_eq!(s.mouse_protocol_mode(), vt100::MouseProtocolMode::ButtonMotion, "drags are reported");
+    assert_eq!(s.mouse_protocol_encoding(), vt100::MouseProtocolEncoding::Sgr);
+    t.process(tty::RESET.as_bytes());
+    let s = t.screen();
+    assert_eq!(s.mouse_protocol_mode(), vt100::MouseProtocolMode::None, "nothing is reported after we leave");
+    assert_eq!(s.mouse_protocol_encoding(), vt100::MouseProtocolEncoding::Default);
+    assert!(tty::RESET.contains("\x1b[>0s"), "shift capture is handed back too");
+    assert!(keys::mouse_modes(false).contains("\x1b[>0s"));
 }

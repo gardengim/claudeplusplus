@@ -19,6 +19,11 @@ pub fn claude_dir() -> Option<PathBuf> {
     env_or_home("CLAUDE_CONFIG_DIR", ".claude")
 }
 
+/// `~/rest` as a path under the home folder; `None` for anything else.
+pub fn under_home(p: &str) -> Option<PathBuf> {
+    Some(std::env::home_dir()?.join(p.strip_prefix("~/")?))
+}
+
 pub fn path() -> Option<PathBuf> {
     Some(env_or_home("XDG_CONFIG_HOME", ".config")?.join(DIR).join("config.json"))
 }

@@ -1,6 +1,6 @@
 //! Full-screen session list: this directory's earlier conversations (Claude Code's transcripts, see
 //! history.rs) plus the supervisor's background sessions from every directory (see jobs.rs). Rows that
-//! want you come first. Type to filter (`s:work` filters by state), see the end of the highlighted
+//! want you come first. `/` starts a filter (`s:work` filters by state), see the end of the highlighted
 //! conversation, Enter to open it. Built when opened and dropped when closed.
 
 use crate::history::{self, Summary};
@@ -48,6 +48,8 @@ pub enum Outcome {
     Fork(String, String, Option<String>),
     /// `claude stop <short>`; then open the session here if given.
     Stop(String, Option<(String, String, Option<String>)>),
+    /// Interrupt the turn this open tab is working on (session id); the list stays.
+    Interrupt(String),
     /// Say something and keep the list.
     Refused(String),
 }
@@ -83,10 +85,50 @@ pub struct Explorer {
     folded: Vec<String>,
     /// A destructive chord pressed once: (session id, which); the same chord again confirms.
     armed: Option<(String, char)>,
-    /// What the docked column last drew, for mouse clicks: (first entry on screen, entries, cursor).
-    pub dock_hit: (usize, usize, usize),
     /// The `/color` of the highlighted conversation, read from its transcript once per row: (id, colour).
     tint: Option<(String, Option<String>)>,
+    /// `/` was pressed: typing now edits the filter. Without it, letters do nothing.
+    filtering: bool,
+    /// Opened before the list was read: the rows come in a moment.
+    loading: bool,
+}
+
+/// What the lists show, read from disk: slow enough (hundreds of files) that the app does it on a thread.
+pub fn load() -> (Vec<Summary>, Vec<Job>) {
+    (history::recent_all(MAX_SESSIONS), jobs::load())
+}
+
+/// `s` cut to `w` columns with an ellipsis, or padded with spaces up to `w`.
+fn fit(s: &str, w: usize) -> String {
+    use unicode_width::UnicodeWidthChar;
+    let mut out = String::new();
+    let mut used = 0;
+    for c in s.chars() {
+        let cw = c.width().unwrap_or(0);
+        if used + cw > w.saturating_sub(1) && s.chars().map(|c| c.width().unwrap_or(0)).sum::<usize>() > w {
+            out.push('…');
+            used += 1;
+            break;
+        }
+        out.push(c);
+        used += cw;
+    }
+    out.push_str(&" ".repeat(w.saturating_sub(used)));
+    out
+}
+
+/// A group heading as spans: fold marker and count quiet, the state glyph in its colour, the name plain.
+fn head_spans(text: &str, style: Style) -> Vec<Span<'static>> {
+    let mut parts = text.splitn(2, ' ');
+    let (marker, rest) = (parts.next().unwrap_or(""), parts.next().unwrap_or(""));
+    let (name, count) = rest.rsplit_once(' ').unwrap_or((rest, ""));
+    let mut out = vec![Span::styled(format!("{marker} "), theme::dim())];
+    match name.split_once(' ') {
+        Some((glyph, label)) if glyph.chars().count() == 1 => out.extend([Span::styled(format!("{glyph} "), style), Span::styled(label.to_string(), theme::bold())]),
+        _ => out.push(Span::styled(name.to_string(), theme::bold())),
+    }
+    out.push(Span::styled(format!("  {count}"), theme::dim()));
+    out
 }
 
 fn merge(here: &str, items: Vec<Summary>, jobs: Vec<Job>) -> Vec<Row> {
@@ -115,7 +157,29 @@ fn merge(here: &str, items: Vec<Summary>, jobs: Vec<Job>) -> Vec<Row> {
 
 impl Explorer {
     pub fn new(cwd: &str, open: Vec<(String, State)>) -> Self {
-        Self::from(cwd, history::recent_all(MAX_SESSIONS), jobs::load(), open)
+        let (items, jobs) = load();
+        Self::from(cwd, items, jobs, open)
+    }
+
+    /// Opens at once on what was read last (or empty, and "loading…", when nothing was yet): `reload` fills it in.
+    pub fn from_cache(cwd: &str, open: Vec<(String, State)>, last: Option<&(Vec<Summary>, Vec<Job>)>) -> Self {
+        match last {
+            Some((items, jobs)) => Self::from(cwd, items.clone(), jobs.clone(), open),
+            None => {
+                let mut e = Self::from(cwd, vec![], vec![], open);
+                e.loading = true;
+                e
+            }
+        }
+    }
+
+    /// New rows from a read done elsewhere. The cursor stays on its conversation, else goes to `prefer`.
+    pub fn reload(&mut self, here: &str, data: &(Vec<Summary>, Vec<Job>), open: Vec<(String, State)>, prefer: Option<String>) {
+        let keep = self.cur().map(|i| self.rows[i].id.clone()).or(prefer);
+        self.rows = merge(here, data.0.clone(), data.1.clone());
+        self.loading = false;
+        self.set_open(open);
+        self.seek(keep);
     }
 
     #[cfg(test)]
@@ -124,7 +188,7 @@ impl Explorer {
     }
 
     fn from(here: &str, items: Vec<Summary>, jobs: Vec<Job>, open: Vec<(String, State)>) -> Self {
-        let mut e = Explorer { rows: merge(here, items, jobs), open: vec![], query: String::new(), sel: 0, preview: None, peek: None, folded: vec![], armed: None, dock_hit: (0, 0, 0), tint: None };
+        let mut e = Explorer { rows: merge(here, items, jobs), open: vec![], query: String::new(), sel: 0, preview: None, peek: None, folded: vec![], armed: None, tint: None, filtering: false, loading: false };
         e.set_open(open);
         e.sel = e.first_row();
         e
@@ -211,6 +275,28 @@ impl Explorer {
         self.sel = id.and_then(|id| e.iter().position(|x| matches!(x, Entry::Row(i) if self.rows[*i].id == id))).unwrap_or(self.sel.min(e.len().saturating_sub(1)));
     }
 
+    pub fn filtering(&self) -> bool {
+        self.filtering
+    }
+
+    /// Leave the filter, keeping the cursor on the conversation it was on (the top one if nothing matched).
+    pub fn clear_filter(&mut self) {
+        if !self.filtering && self.query.is_empty() {
+            return;
+        }
+        let keep = self.cur().map(|i| self.rows[i].id.clone());
+        (self.filtering, self.query) = (false, String::new());
+        match keep {
+            Some(id) => self.select(&id),
+            None => self.sel = self.first_row(),
+        }
+    }
+
+    /// Put the cursor on this conversation, if the list has it.
+    pub fn select(&mut self, id: &str) {
+        self.seek(Some(id.to_string()));
+    }
+
     /// Folded headings are shared between the side panel and the full list, so the app hands them in.
     pub fn set_folds(&mut self, folds: Vec<String>) {
         self.folded = folds;
@@ -288,22 +374,20 @@ impl Explorer {
         out
     }
 
-    /// Re-read the sources, keeping the cursor on the same session.
-    pub fn refresh(&mut self, here: &str, open: Vec<(String, State)>) {
-        let keep = self.cur().map(|i| self.rows[i].id.clone());
-        self.rows = merge(here, history::recent_all(MAX_SESSIONS), jobs::load());
-        self.set_open(open);
-        self.seek(keep);
-    }
-
     /// The docked column: one compact line per session under group headings, only what fits around the cursor.
     pub fn dock_lines(&mut self, width: usize, height: usize, focused: bool) -> Vec<Line<'static>> {
         let entries = self.entries();
         self.sel = self.sel.min(entries.len().saturating_sub(1));
-        let total = entries.len();
-        let mut out = vec![Line::from(vec![Span::styled(" Sessions", theme::dim()), Span::styled(format!(" · {}", GROUPS[GROUP.load(Ordering::Relaxed) as usize]), theme::dim())])];
-        let keys = if focused {
-            vec![theme::hints(&[("↑↓", "move"), ("enter", "open"), ("tab", "group")]), theme::hints(&[("ctrl+t", "new"), ("←", "wide")]), theme::hints(&[("→", "open"), ("esc", "back")])]
+        let head = if self.filtering {
+            Line::from(vec![Span::styled(" / ", theme::accent()), Span::raw(self.query.clone()), Span::styled(" ", theme::selected())])
+        } else {
+            Line::from(vec![Span::styled(" Sessions", theme::dim()), Span::styled(format!(" · {}", GROUPS[GROUP.load(Ordering::Relaxed) as usize]), theme::dim())])
+        };
+        let mut out = vec![head];
+        let keys = if focused && self.filtering {
+            vec![theme::hints(&[("↑↓", "move"), ("enter", "open")]), theme::hints(&[("esc", "clear filter")])]
+        } else if focused {
+            vec![theme::hints(&[("↑↓", "move"), ("enter", "open"), ("/", "filter")]), theme::hints(&[("←", "wide"), ("^x", "stop"), ("esc", "hide")])]
         } else {
             vec![theme::hints(&[("←", "focus")])]
         };
@@ -316,20 +400,30 @@ impl Explorer {
                 at = lines.len();
             }
             match e {
-                Entry::Head(_, t, style) => lines.push(panel::row(on, vec![Span::styled(t, style)])),
+                Entry::Head(_, t, style) => {
+                    if !lines.is_empty() {
+                        lines.push(Line::raw("")); // air between groups
+                        if pos == self.sel {
+                            at = lines.len();
+                        }
+                    }
+                    lines.push(panel::row(on, head_spans(&t, style)));
+                }
                 Entry::Row(i) => {
                     let r = &self.rows[i];
                     let glyph = r.state.map_or(" ", State::glyph);
                     let title = if !r.title.is_empty() { &*r.title } else if !r.detail.is_empty() { &*r.detail } else { "(empty)" };
-                    let text: String = title.chars().take(width.saturating_sub(6)).collect();
+                    let text = fit(title, width.saturating_sub(8)).trim_end().to_string();
                     let dot = if r.tab { theme::CURRENT } else { " " };
-                    let spans = if on { vec![Span::raw(format!("{glyph}{dot}{text}"))] } else { vec![Span::styled(glyph, Self::state_cell(r).style), Span::raw(format!("{dot}{text}"))] };
+                    let spans = if on { vec![Span::raw(format!("{glyph} {dot} {text}"))] } else { vec![Span::styled(glyph, Self::state_cell(r).style), Span::raw(format!(" {dot} {text}"))] };
                     lines.push(panel::row(on, spans));
                 }
             }
         }
+        if lines.is_empty() {
+            lines.push(Line::styled(if self.loading { " loading…" } else { " no sessions yet" }, theme::dim()));
+        }
         let first = if lines.len() <= room { 0 } else { at.saturating_sub(room / 2).min(lines.len() - room) };
-        self.dock_hit = (first, total.min(first + room), self.sel);
         out.extend(lines.into_iter().skip(first).take(room));
         out.resize(height.saturating_sub(keys.len()).max(out.len()), Line::raw(""));
         out.extend(keys);
@@ -347,6 +441,8 @@ impl Explorer {
             return self.delete(armed);
         }
         match k.code {
+            // Esc steps back: out of the filter first, then out of the list.
+            KeyCode::Esc if self.filtering => self.clear_filter(),
             KeyCode::Esc => return Outcome::Close,
             KeyCode::Char('c' | 'r' | 'd') if ctrl => return Outcome::Close,
             KeyCode::Right if self.cur().is_none() => return Outcome::Close,
@@ -370,15 +466,16 @@ impl Explorer {
             KeyCode::PageDown => self.sel = (self.sel + 10).min(last),
             KeyCode::Home => self.sel = 0,
             KeyCode::End => self.sel = last,
-            KeyCode::Char('u') if ctrl => {
+            KeyCode::Char('/') if !ctrl && !self.filtering => self.filtering = true,
+            KeyCode::Char('u') if ctrl && self.filtering => {
                 self.query.clear();
                 self.sel = self.first_row();
             }
-            KeyCode::Backspace => {
+            KeyCode::Backspace if self.filtering => {
                 self.query.pop();
                 self.sel = self.first_row();
             }
-            KeyCode::Char(c) if !ctrl => {
+            KeyCode::Char(c) if !ctrl && self.filtering => {
                 self.query.push(c);
                 self.sel = self.first_row();
             }
@@ -387,7 +484,7 @@ impl Explorer {
         Outcome::Stay
     }
 
-    /// ctrl+f fork, ctrl+t take over, ctrl+x stop. Stopping needs the same chord twice.
+    /// ctrl+f fork, ctrl+t take over, ctrl+x stop. Stopping a background session needs the same chord twice; an open tab's turn is just interrupted.
     fn act(&mut self, code: KeyCode, armed: Option<(String, char)>) -> Outcome {
         let Some(r) = self.cur().map(|i| &self.rows[i]) else { return Outcome::Stay };
         let KeyCode::Char(c) = code else { return Outcome::Stay };
@@ -395,6 +492,9 @@ impl Explorer {
         if c == 'f' {
             let (id, title, cwd) = target();
             return Outcome::Fork(id, title, cwd);
+        }
+        if c == 'x' && r.tab && r.state.is_some_and(|s| matches!(s, State::Working | State::Blocked)) {
+            return Outcome::Interrupt(r.id.clone());
         }
         let Some(short) = r.short.clone().filter(|_| r.state.is_some_and(State::live)) else {
             return Outcome::Refused("only a session running in the background can be stopped".into());
@@ -448,33 +548,57 @@ impl Explorer {
         let m = self.matches();
         let entries = self.entries();
         self.sel = self.sel.min(entries.len().saturating_sub(1));
-        let head = vec![Line::from(vec![Span::styled("filter ", theme::dim()), Span::raw(self.query.clone()), Span::styled(" ", theme::selected())])];
+        let head = vec![
+            if self.filtering {
+                Line::from(vec![Span::styled("/ ", theme::accent()), Span::raw(self.query.clone()), Span::styled(" ", theme::selected())])
+            } else {
+                Line::styled("/ to filter", theme::dim())
+            },
+            Line::raw(""),
+        ];
+        // The list is 58 % of the screen when the preview sits beside it. Time, title and folder line up in columns.
+        let main_w = if width >= panel::SIDE_MIN_WIDTH as usize { width.saturating_sub(2) * 58 / 100 } else { width.saturating_sub(2) };
+        let dir_w = if main_w >= 64 { 16 } else { 0 };
+        let title_w = main_w.saturating_sub(2 + 2 + 4 + 2 + if dir_w > 0 { dir_w + 2 } else { 0 }).max(10);
         let mut focus = 0;
         let body: Vec<Line> = if m.is_empty() {
-            let msg = if self.rows.is_empty() { "no sessions here yet" } else { "nothing matches" };
+            let msg = if self.loading { "loading…" } else if self.rows.is_empty() { "no sessions here yet" } else { "nothing matches" };
             vec![Line::styled(msg, theme::dim())]
         } else {
             let sel = self.sel;
-            focus = sel;
-            entries
-                .into_iter()
-                .enumerate()
-                .map(|(at, e)| match e {
-                    Entry::Head(_, t, style) => panel::row_with(at == sel, false, vec![Span::styled(t, if at == sel { theme::bold() } else { style })]),
+            let mut lines: Vec<Line> = Vec::new();
+            for (at, e) in entries.into_iter().enumerate() {
+                match e {
+                    Entry::Head(_, t, style) => {
+                        if !lines.is_empty() {
+                            lines.push(Line::raw("")); // air between groups
+                        }
+                        if at == sel {
+                            focus = lines.len();
+                        }
+                        lines.push(panel::row_with(at == sel, false, head_spans(&t, style)));
+                    }
                     Entry::Row(i) => {
+                        if at == sel {
+                            focus = lines.len();
+                        }
                         let r = &self.rows[i];
                         let dot = if r.tab { theme::CURRENT } else { " " };
                         let title = if !r.title.is_empty() { &*r.title } else if !r.detail.is_empty() { &*r.detail } else { "(empty)" };
-                        let mut spans = vec![Self::state_cell(r), Span::raw(format!("{dot}{:>4}  {title}", history::ago(r.modified)))];
-                        if let Some(dir) = std::path::Path::new(&*r.cwd).file_name() {
+                        let mut spans = vec![Self::state_cell(r), Span::raw(dot), Span::styled(format!("{:>4}  ", history::ago(r.modified)), theme::dim()), Span::raw(fit(title, title_w))];
+                        if dir_w > 0 {
+                            let dir = std::path::Path::new(&*r.cwd).file_name().map(|d| d.to_string_lossy().into_owned()).unwrap_or_default();
+                            spans.push(Span::styled(format!("  {}", fit(&dir, dir_w)), theme::dim()));
+                        } else if let Some(dir) = std::path::Path::new(&*r.cwd).file_name() {
                             spans.push(Span::styled(format!("  {}", dir.to_string_lossy()), theme::dim()));
                         }
-                        panel::row(at == sel, spans)
+                        lines.push(panel::row(at == sel, spans));
                     }
-                })
-                .collect()
+                }
+            }
+            lines
         };
-        let footer = theme::hints(&[("↑↓", "move"), ("enter", "open/fold"), ("type", "to filter"), ("tab", GROUPS[GROUP.load(Ordering::Relaxed) as usize]), ("ctrl+f", "fork"), ("ctrl+t", "take over"), ("del", "delete"), ("→", "open"), ("esc", "close")]);
+        let footer = theme::hints(&[("↑↓", "move"), ("enter", "open"), ("/", "filter"), ("tab", GROUPS[GROUP.load(Ordering::Relaxed) as usize]), ("^x", "stop"), ("del", "delete"), ("esc", "close")]);
         let title = format!("Sessions {}/{}", m.len(), self.rows.len());
         let mut v = View::new(title, body, focus, footer).with_head(head).rows(10, usize::MAX);
         if let Some(i) = self.cur() {
@@ -567,12 +691,18 @@ mod tests {
         for c in "log".chars() {
             e.key(key(KeyCode::Char(c)));
         }
-        assert_eq!(e.selected().map(|x| x.0), Some("aaa111".into()), "typing puts the cursor on the first match");
+        assert!(e.query.is_empty(), "letters alone start nothing");
+        for c in "/log".chars() {
+            e.key(key(KeyCode::Char(c)));
+        }
+        assert_eq!(e.selected().map(|x| x.0), Some("aaa111".into()), "/ then typing puts the cursor on the first match");
         e.key(key(KeyCode::Down));
         e.key(key(KeyCode::Down)); // clamped to the last match
         assert!(matches!(e.key(key(KeyCode::Enter)), Outcome::Open(id, ..) if id == "ccc333"));
         e.key(key(KeyCode::Char('x')));
         assert!(matches!(e.key(key(KeyCode::Enter)), Outcome::Stay), "no match, nothing to open");
+        assert!(matches!(e.key(key(KeyCode::Esc)), Outcome::Stay), "esc leaves the filter first");
+        assert!(e.query.is_empty() && !e.filtering);
         assert!(matches!(e.key(key(KeyCode::Esc)), Outcome::Close));
     }
 
@@ -647,6 +777,17 @@ mod tests {
     }
 
     #[test]
+    fn ctrl_x_interrupts_an_open_tab_that_is_working_without_asking_twice() {
+        let ctrl_x = KeyEvent::new(KeyCode::Char('x'), KeyModifiers::CONTROL);
+        let mut e = explorer();
+        e.set_open(vec![("aaa111".into(), State::Working)]);
+        e.seek(Some("aaa111".into()));
+        assert!(matches!(e.key(ctrl_x), Outcome::Interrupt(id) if id == "aaa111"));
+        e.set_open(vec![("aaa111".into(), State::Done)]);
+        assert!(matches!(e.key(ctrl_x), Outcome::Refused(_)), "an idle tab has nothing to stop");
+    }
+
+    #[test]
     fn draws_list_marks_open_sessions_and_shows_a_preview_when_wide() {
         let mut e = explorer();
         for width in [60u16, 120] {
@@ -654,7 +795,7 @@ mod tests {
             t.draw(|f| {
                 let v = e.view(width as usize);
                 let h = panel::height(&v, 20);
-                let _ = panel::render(f, ratatui::layout::Rect::new(0, 20 - h, width, h), v);
+                panel::render(f, ratatui::layout::Rect::new(0, 20 - h, width, h), v);
             })
             .unwrap();
             let text: String = t.backend().buffer().content().iter().map(|c| c.symbol()).collect();

@@ -27,6 +27,9 @@ pub struct Ui {
     pub hits: Vec<Hit>,
     /// Where the conversation was scrolled before the search, to go back there on Esc.
     pub scroll: usize,
+    /// Two menus, one with the keys: the scope strip (left and right) or the matches (up and down). What you
+    /// type always goes to the search box.
+    pub on_scope: bool,
 }
 
 pub enum Outcome {
@@ -114,15 +117,16 @@ impl Ui {
                     None => Outcome::Close,
                 };
             }
-            KeyCode::Tab | KeyCode::BackTab => {
+            KeyCode::Tab | KeyCode::BackTab => self.on_scope = !self.on_scope,
+            KeyCode::Left | KeyCode::Right if self.on_scope => {
                 self.history = !self.history;
                 self.cursor = 0;
                 self.refresh(items, history);
             }
-            KeyCode::Up if n > 0 => self.cursor = cycle(self.cursor, n, true),
-            KeyCode::Down if n > 0 => self.cursor = cycle(self.cursor, n, false),
-            KeyCode::PageUp => self.cursor = self.cursor.saturating_sub(8),
-            KeyCode::PageDown => self.cursor = (self.cursor + 8).min(n.saturating_sub(1)),
+            KeyCode::Up if n > 0 && !self.on_scope => self.cursor = cycle(self.cursor, n, true),
+            KeyCode::Down if n > 0 && !self.on_scope => self.cursor = cycle(self.cursor, n, false),
+            KeyCode::PageUp if !self.on_scope => self.cursor = self.cursor.saturating_sub(8),
+            KeyCode::PageDown if !self.on_scope => self.cursor = (self.cursor + 8).min(n.saturating_sub(1)),
             KeyCode::Char('u') if ctrl => {
                 self.query.clear();
                 self.refresh(items, history);
@@ -153,15 +157,14 @@ impl Ui {
 }
 
 pub fn view(ui: &Ui) -> View {
-    let chip = |label: &str, on: bool| Span::styled(format!(" {label} "), if on { theme::selected() } else { theme::dim() });
     let head = vec![Line::from(vec![
         Span::styled("/ ", theme::accent()),
         Span::raw(ui.query.clone()),
         Span::styled("▏", theme::accent()),
         Span::raw("   "),
-        chip("this conversation", !ui.history),
-        chip("messages you sent", ui.history),
     ])];
+    let mut head = head;
+    head[0].spans.extend(panel::tab_strip_focus(vec![("this conversation".into(), theme::dim()), ("messages you sent".into(), theme::dim())], ui.history as usize, ui.on_scope).spans);
     let body: Vec<Line<'static>> = if ui.hits.is_empty() {
         vec![Line::styled(if ui.query.trim().is_empty() { "type to search" } else { "no match" }, theme::dim())]
     } else {
@@ -169,12 +172,12 @@ pub fn view(ui: &Ui) -> View {
             .iter()
             .enumerate()
             .map(|(i, h)| {
-                panel::row(i == ui.cursor, vec![Span::styled(format!("{} ", h.who), theme::dim()), Span::raw(h.text.0.clone()), Span::styled(h.text.1.clone(), theme::accent().add_modifier(ratatui::style::Modifier::BOLD)), Span::raw(h.text.2.clone())])
+                panel::row_in(i == ui.cursor, !ui.on_scope, vec![Span::styled(format!("{} ", h.who), theme::dim()), Span::raw(h.text.0.clone()), Span::styled(h.text.1.clone(), theme::accent().add_modifier(ratatui::style::Modifier::BOLD)), Span::raw(h.text.2.clone())])
             })
             .collect()
     };
     let n = ui.hits.len();
     let title = if n >= MAX_HITS { format!("Search · first {n}, newest first") } else { format!("Search · {n} match{}", if n == 1 { "" } else { "es" }) };
-    let footer = theme::hints(&[("type", "search"), ("↑↓", "match"), ("tab", "conversation / history"), ("enter", if ui.history { "use" } else { "stay here" }), ("esc", "back")]);
+    let footer = theme::hints(&[("type", "search"), ("↑↓←→", "move"), ("tab", "next menu"), ("enter", if ui.history { "use" } else { "stay here" }), ("esc", "back")]);
     View::new(title, body, ui.cursor, footer).with_head(head).rows(5, 10)
 }

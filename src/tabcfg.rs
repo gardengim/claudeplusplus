@@ -63,7 +63,23 @@ pub fn step(current: Option<bool>, delta: isize) -> Option<bool> {
     order[(at + delta).rem_euclid(3) as usize]
 }
 
-pub fn view(ui: &Ui, s: &Session, width: usize) -> View {
+/// What identifies this tab's conversation, as (label, value); the `c` and `p` keys copy the id and the path.
+pub fn info(s: &Session, cwd: &str) -> Vec<(&'static str, String)> {
+    let unknown = || "— (none until the first message)".to_string();
+    let transcript = s.session_id.as_deref().and_then(crate::history::find).map(|p| p.display().to_string());
+    let window = if s.ctx_window > 0 { s.ctx_window } else { 200_000 };
+    vec![
+        ("Session id", s.session_id.clone().unwrap_or_else(unknown)),
+        ("Name", if s.title.is_empty() { "—".into() } else { s.title.clone() }),
+        ("Folder", cwd.to_string()),
+        ("Model", if s.model.is_empty() { "—".into() } else { s.model.clone() }),
+        ("Context", format!("{} of {} tokens", s.ctx_tokens, window)),
+        ("Cost", format!("${:.2}", s.cost)),
+        ("Transcript", transcript.unwrap_or_else(|| "—".into())),
+    ]
+}
+
+pub fn view(ui: &Ui, s: &Session, cwd: &str, width: usize) -> View {
     let rows = rows(s);
     let sel = ui.sel.min(rows.len() - 1);
     let label_w = rows.iter().map(|r| match r { Row::Tool(n, _) => n.chars().count(), _ => 15 }).max().unwrap_or(0).min(40) + 2;
@@ -99,8 +115,13 @@ pub fn view(ui: &Ui, s: &Session, width: usize) -> View {
     };
     let mut tail = vec![Line::raw("")];
     tail.extend(wrap(help, width.saturating_sub(4).max(20)).into_iter().map(|l| Line::styled(l, theme::dim())));
-    let footer = if ui.adding.is_some() { theme::hints(&[("enter", "add"), ("esc", "cancel")]) } else { theme::hints(&[("↑↓", "move"), ("←→", "change"), ("d", "remove"), ("esc", "close")]) };
-    View::new("Session", body, sel, footer).with_tail(tail).rows(0, 14)
+    let footer = if ui.adding.is_some() { theme::hints(&[("enter", "add"), ("esc", "cancel")]) } else { theme::hints(&[("↑↓", "move"), ("←→", "change"), ("d", "remove"), ("c", "copy id"), ("p", "copy path"), ("esc", "close")]) };
+    let head: Vec<Line> = info(s, cwd)
+        .into_iter()
+        .map(|(k, v)| Line::from(vec![Span::styled(format!("  {k:<12}"), theme::dim()), Span::raw(v)]))
+        .chain([Line::raw("")])
+        .collect();
+    View::new("Session", body, sel, footer).with_head(head).with_tail(tail).rows(0, 14)
 }
 
 #[cfg(test)]
