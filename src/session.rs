@@ -944,7 +944,7 @@ impl Session {
         let mut b = Backend::spawn(launch, resume, tx.clone(), move |pid, m| AppEvent::Backend(sid, pid, m))?;
         if !launch.shared.is_empty() && !std::mem::replace(&mut self.share_hinted, true) {
             let names: Vec<&str> = launch.shared.iter().map(|(n, _)| n.as_str()).collect();
-            self.note(format!("MCP servers shared with other tabs: {} ({} shared processes running). Plugin and claude.ai connector servers are not loaded in this mode; /config turns it off.", names.join(", "), crate::share::live()));
+            self.note(format!("MCP servers run once by the supervisor for all tabs and windows: {}. Plugin and claude.ai connector servers are not loaded in this mode; /config turns it off.", names.join(", ")));
         }
         if let Some(m) = &self.model_pref {
             b.control("set_model", json!({"model": m}))?;

@@ -82,7 +82,7 @@ impl Button {
     fn help(self) -> &'static str {
         match self {
             Button::Restart => "Windows reconnect within seconds and a new supervisor starts from the current claude++ binary.",
-            Button::Stop => "It leaves and stays stopped until you Start it; shared MCP servers end and run in each window instead.",
+            Button::Stop => "It leaves and stays stopped until you Start it; each window then runs its own supervisor, with its own copy of the shared MCP servers.",
             Button::Start => "Starts it now; it also starts by itself when a window needs it.",
         }
     }

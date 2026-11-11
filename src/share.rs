@@ -130,49 +130,47 @@ pub type HubFn = dyn Fn(&Def, u64, Value, Reply) -> Result<(), Reply> + Send + S
 
 static HUB: Mutex<Option<Arc<HubFn>>> = Mutex::new(None);
 
-/// While set, servers acquired with [`acquire_shared`] run in the supervisor and are shared across windows.
+/// While set, shared servers run in the supervisor (the shared one, or this window's own).
 pub fn set_hub(h: Option<Arc<HubFn>>) {
     *HUB.lock_ok() = h;
 }
 
-/// One tab's share of a server: it goes through the supervisor while there is one, and through a process of our
-/// own otherwise (started the first time it is needed, or at once when there is no supervisor to ask).
-pub struct Handle {
-    def: Def,
-    local: std::sync::OnceLock<Result<Arc<Server>, String>>,
-}
+/// How long a message waits for a supervisor to take it: a window starts (or replaces) its link a moment after its tabs.
+const HUB_WAIT: std::time::Duration = std::time::Duration::from_secs(20);
 
-/// A handle for `def`. Without a supervisor the process starts now, so it comes up while claude does.
-pub fn acquire_shared(def: &Def) -> Handle {
-    let h = Handle { def: def.clone(), local: Default::default() };
-    if HUB.lock_ok().is_none() {
-        let _ = h.local.set(acquire(def));
-    }
-    h
-}
+/// One tab's share of a server. The process is the supervisor's; this only says which one.
+pub struct Handle(Def);
 
 impl Handle {
-    /// One message from a tab; `reply` gets the JSON-RPC answer.
+    pub fn new(def: &Def) -> Handle {
+        Handle(def.clone())
+    }
+
+    /// One message from a tab; `reply` gets the JSON-RPC answer. While there is no supervisor to take it (the window is
+    /// still connecting, or lost its link and is making another) it waits for one, off the caller's thread.
     pub fn route(&self, client: u64, msg: Value, reply: Reply) {
         let hub = HUB.lock_ok().clone();
         let reply = match hub {
-            Some(hub) => match hub(&self.def, client, msg.clone(), reply) {
+            Some(h) => match h(&self.0, client, msg.clone(), reply) {
                 Ok(()) => return,
                 Err(reply) => reply,
             },
             None => reply,
         };
-        match self.local.get_or_init(|| acquire(&self.def)) {
-            Ok(s) => s.route(client, msg, reply),
-            Err(e) => reply(error(msg.get("id").unwrap_or(&Value::Null), e)),
-        }
+        let def = self.0.clone();
+        thread::spawn(move || {
+            let (t, mut reply) = (std::time::Instant::now(), reply);
+            while t.elapsed() < HUB_WAIT {
+                thread::sleep(std::time::Duration::from_millis(100));
+                let Some(hub) = HUB.lock_ok().clone() else { continue };
+                match hub(&def, client, msg.clone(), reply) {
+                    Ok(()) => return,
+                    Err(r) => reply = r,
+                }
+            }
+            reply(error(msg.get("id").unwrap_or(&Value::Null), "no supervisor to run the MCP server"));
+        });
     }
-}
-
-/// How many shared server processes are running now.
-pub fn live() -> usize {
-    let reg = REGISTRY.lock_ok();
-    reg.values().filter_map(Weak::upgrade).filter(|s| s.lock().tx.is_some()).count()
 }
 
 pub(crate) fn error(id: &Value, message: &str) -> Value {
@@ -522,7 +520,6 @@ done"#,
         std::thread::sleep(Duration::from_millis(200));
         let notes = std::fs::read_to_string(&log).unwrap().lines().filter(|l| l.contains("initialized")).count();
         assert_eq!(notes, 1, "`initialized` once for the process, not once per tab");
-        assert!(live() >= 2);
         let _ = std::fs::remove_dir_all(log.parent().unwrap());
     }
 
@@ -593,22 +590,28 @@ done"#,
     }
 
     #[test]
-    fn a_handle_goes_through_the_hub_when_it_takes_the_message_and_runs_the_server_itself_when_it_does_not() {
+    fn a_handle_goes_through_the_hub_and_waits_for_one_when_there_is_none_or_it_declines() {
         let _own = HUB_TEST.lock_ok();
-        let (def, log) = server("hub");
-        set_hub(Some(Arc::new(|_, _, msg, reply| {
-            reply(json!({"jsonrpc": "2.0", "id": msg["id"], "result": {"via": "hub"}}));
-            Ok(())
-        })));
-        let h = acquire_shared(&def);
+        let (def, _) = server("hub");
+        let h = Handle::new(&def);
+        let via = |tag: &'static str| -> Arc<HubFn> {
+            Arc::new(move |_, _, msg, reply| {
+                reply(json!({"jsonrpc": "2.0", "id": msg["id"], "result": {"via": tag}}));
+                Ok(())
+            })
+        };
+        set_hub(Some(via("hub")));
         assert_eq!(ask_handle(&h, 1, init(1))["result"]["via"], "hub");
-        assert!(!log.exists(), "nothing was started here");
+        // A hub that declines (its link is gone) and then no hub at all: the message waits for the next one.
         set_hub(Some(Arc::new(|_, _, _, reply| Err(reply))));
-        assert_eq!(ask_handle(&h, 1, init(2))["id"], 2, "the hub declined: answered by our own process");
-        assert!(log.exists());
+        let (tx, rx) = channel();
+        h.route(1, init(2), Box::new(move |v| tx.send(v).unwrap()));
+        assert!(rx.recv_timeout(Duration::from_millis(300)).is_err(), "still waiting");
         set_hub(None);
-        let h2 = acquire_shared(&def);
-        assert_eq!(ask_handle(&h2, 2, init(3))["id"], 3);
-        assert_eq!(std::fs::read_to_string(&log).unwrap().matches("start").count(), 1, "both handles share one process");
+        std::thread::sleep(Duration::from_millis(150));
+        set_hub(Some(via("second")));
+        let v = rx.recv_timeout(Duration::from_secs(5)).expect("answered by the one that came");
+        assert_eq!((v["id"].clone(), v["result"]["via"].clone()), (json!(2), json!("second")));
+        set_hub(None);
     }
 }

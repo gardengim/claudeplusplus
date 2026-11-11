@@ -77,7 +77,7 @@ impl Backend {
         wrap: impl Fn(u32, Msg) -> E + Send + 'static,
     ) -> io::Result<Self> {
         // Started first so they come up while claude does. One that cannot start still answers, with that error.
-        let shares: HashMap<String, crate::share::Handle> = launch.shared.iter().map(|(n, d)| (n.clone(), crate::share::acquire_shared(d))).collect();
+        let shares: HashMap<String, crate::share::Handle> = launch.shared.iter().map(|(n, d)| (n.clone(), crate::share::Handle::new(d))).collect();
         let terms = launch.terms.clone();
         let mut cmd = Command::new(&launch.bin);
         cmd.args([
@@ -403,7 +403,11 @@ done"#,
 
     #[test]
     fn two_backends_get_the_same_hosted_mcp_server_and_still_see_end_of_input() {
-        let _no_hub = crate::share::tests::HUB_TEST.lock().unwrap_or_else(|e| e.into_inner());
+        let _own_hub = crate::share::tests::HUB_TEST.lock().unwrap_or_else(|e| e.into_inner());
+        // The window's own supervisor runs the server, as it does for a window with no shared one.
+        let (stx, _srx) = mpsc::channel();
+        let sup = Arc::new(crate::supervisor::Client::private(std::process::id(), stx, |m| m).expect("a private supervisor"));
+        crate::share::set_hub(Some(sup.hub()));
         let (def, log) = crate::share::tests::server("backend");
         let out = log.with_file_name("claude-out");
         // The fake claude names the server in `initialize`, then asks it two things over the pipe, like the real one.
@@ -452,6 +456,8 @@ echo bye >&2"#,
                 Msg::Line(v) => panic!("unexpected {v}"),
             }
         }
+        crate::share::set_hub(None);
+        drop(sup);
         let _ = std::fs::remove_dir_all(log.parent().unwrap());
     }
 }

@@ -762,7 +762,7 @@ just switched to or that started working). It has these jobs:
   once per tab. Without the supervisor that is one process per window; with it, one process for **all** windows (same command,
   arguments, environment and folder). A window hands each JSON-RPC message to the supervisor and gets the answer back; request ids are
   kept apart per window. The process stops when the last window that used it is gone. If the supervisor goes away, a message in flight
-  gets a JSON-RPC error and the next ones are answered by a process of the window's own, as before. Off by default, like the setting.
+  gets a JSON-RPC error and the next ones wait (up to 20 s) for the window's next supervisor, which runs the server. Off by default, like the setting.
 - *Nothing else.* No process claude++ did not start is ever signalled.
 
 **Without the shared supervisor.** A window that cannot use it (`CLAUDEPP_SUPERVISOR=off`, stopped with `/supervisor`, or one that would
