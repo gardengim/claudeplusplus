@@ -272,9 +272,10 @@ impl Drop for Pane {
 /// Run `cmd` on a new pty of this size, as its own session with the pty as controlling terminal. Returns the child and the master side.
 pub(crate) fn open_pty(mut cmd: Command, (rows, cols): (u16, u16)) -> io::Result<(Child, OwnedFd)> {
     let (mut m, mut s) = (-1, -1);
-    let mut ws = winsize(rows, cols);
-    // SAFETY: plain libc call with valid out-pointers; the fds are wrapped right after.
-    if unsafe { libc::openpty(&mut m, &mut s, std::ptr::null_mut(), std::ptr::null_mut(), &mut ws) } != 0 {
+    let ws = winsize(rows, cols);
+    // SAFETY: plain libc call with valid out-pointers; the fds are wrapped right after. The size is only read: macOS declares
+    // it `*mut`, Linux `*const`, and a `*mut` passes for both (a `&mut` is flagged on Linux).
+    if unsafe { libc::openpty(&mut m, &mut s, std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::from_ref(&ws).cast_mut()) } != 0 {
         return Err(io::Error::last_os_error());
     }
     // SAFETY: openpty just returned these descriptors and nothing else owns them.
