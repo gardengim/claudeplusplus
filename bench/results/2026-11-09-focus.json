@@ -1,0 +1,94 @@
+{
+ "focus": {
+  "data": {
+   "after_turn1": {
+    "claude": 3,
+    "per_window": [
+     1,
+     1,
+     1
+    ],
+    "mb": 449.6,
+    "zombies": []
+   },
+   "A_one_focused": {
+    "claude": 1,
+    "per_window": [
+     1,
+     0,
+     0
+    ],
+    "mb": 160.3,
+    "zombies": []
+   },
+   "B_none_focused": {
+    "claude": 0,
+    "per_window": [
+     0,
+     0,
+     0
+    ],
+    "mb": 19.2,
+    "zombies": []
+   },
+   "C_both_resumed_and_answered": true,
+   "after_C": {
+    "claude": 2,
+    "per_window": [
+     1,
+     0,
+     1
+    ],
+    "mb": 310.8,
+    "zombies": []
+   }
+  },
+  "verdict": {
+   "A: only the focused window keeps its claude": true,
+   "B: with no window focused none keeps one": true,
+   "C: focus back, stopped windows answer": true,
+   "no zombies": true
+  }
+ },
+ "busy": {
+  "data": {
+   "checks_running_then_claude_procs": [
+    [
+     true,
+     1
+    ],
+    [
+     true,
+     1
+    ],
+    [
+     true,
+     1
+    ],
+    [
+     true,
+     1
+    ],
+    [
+     true,
+     1
+    ],
+    [
+     true,
+     1
+    ],
+    [
+     false,
+     1
+    ]
+   ],
+   "seconds_busy_at_least": 39,
+   "answered": true
+  },
+  "verdict": {
+   "the busy window was never stopped": true,
+   "it was busy for at least 30 s while unfocused with --idle-suspend 10 (test is meaningful)": true,
+   "its turn finished": true
+  }
+ }
+}

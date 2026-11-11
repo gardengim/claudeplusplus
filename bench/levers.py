@@ -6,6 +6,7 @@ otherwise; a few cents per stage.) One factor changes per run against the `lean`
   python3 bench/levers.py hidden        a tool turn on a bigger model: which OTHER models did Claude Code call?
   python3 bench/levers.py think         thinking/effort knobs on a bigger model: output tokens and cost
   python3 bench/levers.py big           one 3 MB tool result: peak memory, with and without the output caps
+  python3 bench/levers.py growth [N]    does one backend's footprint grow with the conversation, and does /compact give it back? (N=16: ~25 cents)
   python3 bench/levers.py one NAME=VAL [NAME=VAL ...]   any env/flag set, same measures
 Each run: a fresh folder, a clean environment (no CLAUDE* variables from a parent session), the backend flags
 claude++ uses. Measures: tokens of the first request, every model that was called (side calls included, from the
@@ -170,6 +171,17 @@ def main():
             k, v = kv(s)
             rows.append(run(f"{k}={v}", env={k: v})); show(rows[-1], b)
         b2 = run("base (again)"); show(b2); rows.append(b2)
+    elif stage == "growth":
+        # N turns that each ask for a page of text (so the context really grows), footprint after every turn, then /compact
+        # and one more turn. Answers: is a long conversation what makes a backend big, and is /compact a way back?
+        n = int(sys.argv[2]) if len(sys.argv) > 2 else 16
+        prompts = [f"Write 40 short numbered lines, each one sentence about the number {i}." for i in range(n)] + ["/compact", TRIVIAL]
+        r = run(f"growth: {n} turns, /compact, 1 more", prompts=prompts, sample=True, idle=3)
+        rows.append(r); show(r)
+        fp = [round(x) for x in r.get("fp", [])]
+        print(f"footprint after each turn (MB): {fp[:n]}\n  after /compact: {fp[n:n + 1]}  after the turn that follows: {fp[n + 1:]}")
+        ctx = [(x["usage"] or {}) for x in r["results"]]
+        print("  context tokens per turn:", [sum(u.get(k, 0) or 0 for k in ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens")) for u in ctx])
     elif stage == "full":
         # LEVERS_BASE=full python3 bench/levers.py full : the unprofiled backend, as `full` runs it
         b = run("full (your config)"); show(b); rows.append(b)

@@ -1,0 +1,3713 @@
+[
+ {
+  "scenario": "tabs-diff",
+  "arm": "claude++/opt",
+  "rep": 1,
+  "load": 3.2,
+  "first_paint_s": 0.008,
+  "S0": {
+   "mb": 5.9,
+   "procs": 1,
+   "names": {
+    "claudeplusplus": 1
+   },
+   "cpu_s": 0.04,
+   "t": 1794288448.2319732
+  },
+  "S1": {
+   "mb": 415.2,
+   "procs": 4,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 3
+   },
+   "cpu_s": 2.25,
+   "t": 1794288468.2945228
+  },
+  "turn1": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 2.19,
+    "pre_model_s": 0.05,
+    "model_s": 1.69
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 1.63,
+    "pre_model_s": 0.05,
+    "model_s": 1.44
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 2.07,
+    "pre_model_s": 0.02,
+    "model_s": 1.91
+   }
+  ],
+  "turn1_wall_s": 4.07,
+  "S2": {
+   "mb": 439.2,
+   "procs": 4,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 3
+   },
+   "cpu_s": 3.23,
+   "t": 1794288476.455934
+  },
+  "S3": {
+   "mb": 150.1,
+   "procs": 2,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 1
+   },
+   "cpu_s": 1.56,
+   "t": 1794288516.62398
+  },
+  "turn2": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 2.16,
+    "pre_model_s": 0.06,
+    "model_s": 1.51
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 1.59,
+    "pre_model_s": 0.01,
+    "model_s": 1.45
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 1.28,
+    "pre_model_s": 0.02,
+    "model_s": 1.15
+   }
+  ],
+  "turn2_wall_s": 3.24,
+  "S4": {
+   "mb": 459.3,
+   "procs": 4,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 3
+   },
+   "cpu_s": 2.96,
+   "t": 1794288523.964471
+  },
+  "screen_tail": null,
+  "died": [
+   null
+  ],
+  "leaked_procs": 0,
+  "usage": {
+   "requests": 6,
+   "input": 18,
+   "cache_write": 51579,
+   "cache_read": 86705,
+   "output": 91
+  },
+  "claude_record": null
+ },
+ {
+  "scenario": "tabs-diff",
+  "arm": "claude++/opt",
+  "rep": 0,
+  "load": 3.0,
+  "first_paint_s": 0.007,
+  "S0": {
+   "mb": 5.9,
+   "procs": 1,
+   "names": {
+    "claudeplusplus": 1
+   },
+   "cpu_s": 0.06,
+   "t": 1794288544.086297
+  },
+  "S1": {
+   "mb": 404.1,
+   "procs": 4,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 3
+   },
+   "cpu_s": 2.09,
+   "t": 1794288564.177343
+  },
+  "turn1": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 2.59,
+    "pre_model_s": 0.04,
+    "model_s": 2.38
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 1.92,
+    "pre_model_s": 0.04,
+    "model_s": 1.73
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 1.71,
+    "pre_model_s": 0.03,
+    "model_s": 1.5
+   }
+  ],
+  "turn1_wall_s": 3.68,
+  "S2": {
+   "mb": 428.2,
+   "procs": 4,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 3
+   },
+   "cpu_s": 2.95,
+   "t": 1794288571.936564
+  },
+  "S3": {
+   "mb": 183.1,
+   "procs": 2,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 1
+   },
+   "cpu_s": 2.27,
+   "t": 1794288612.103186
+  },
+  "turn2": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 2.17,
+    "pre_model_s": 0.04,
+    "model_s": 1.78
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 1.4,
+    "pre_model_s": 0.01,
+    "model_s": 1.25
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 1.54,
+    "pre_model_s": 0.01,
+    "model_s": 1.37
+   }
+  ],
+  "turn2_wall_s": 3.52,
+  "S4": {
+   "mb": 492.2,
+   "procs": 4,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 3
+   },
+   "cpu_s": 3.71,
+   "t": 1794288619.716949
+  },
+  "screen_tail": null,
+  "died": [
+   null
+  ],
+  "leaked_procs": 0,
+  "usage": {
+   "requests": 6,
+   "input": 18,
+   "cache_write": 37965,
+   "cache_read": 100369,
+   "output": 128
+  },
+  "claude_record": null
+ },
+ {
+  "scenario": "sep-diff",
+  "arm": "claude",
+  "rep": 1,
+  "load": 2.7,
+  "first_paint_s": 0.299,
+  "S0": {
+   "mb": 816.0,
+   "procs": 15,
+   "names": {
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 4.52,
+   "t": 1794288639.982028
+  },
+  "S1": {
+   "mb": 812.0,
+   "procs": 15,
+   "names": {
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 5.26,
+   "t": 1794288654.109013
+  },
+  "turn1": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 3.21,
+    "pre_model_s": 0.03,
+    "model_s": 2.95
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 2.76,
+    "pre_model_s": 0.02,
+    "model_s": 2.57
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 3.19,
+    "pre_model_s": 0.03,
+    "model_s": 2.94
+   }
+  ],
+  "turn1_wall_s": 4.32,
+  "S2": {
+   "mb": 864.2,
+   "procs": 18,
+   "names": {
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9,
+    "caffeinate": 3
+   },
+   "cpu_s": 7.15,
+   "t": 1794288662.161088
+  },
+  "S3": {
+   "mb": 847.0,
+   "procs": 15,
+   "names": {
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 8.91,
+   "t": 1794288702.387074
+  },
+  "turn2": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 1.56,
+    "pre_model_s": 0.01,
+    "model_s": 1.34
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 1.54,
+    "pre_model_s": 0.02,
+    "model_s": 1.29
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 1.51,
+    "pre_model_s": 0.01,
+    "model_s": 1.26
+   }
+  ],
+  "turn2_wall_s": 2.66,
+  "S4": {
+   "mb": 880.2,
+   "procs": 18,
+   "names": {
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9,
+    "caffeinate": 3
+   },
+   "cpu_s": 9.63,
+   "t": 1794288708.7884748
+  },
+  "screen_tail": null,
+  "died": [
+   null,
+   null,
+   null
+  ],
+  "leaked_procs": 0,
+  "usage": {
+   "requests": 6,
+   "input": 18,
+   "cache_write": 69875,
+   "cache_read": 223851,
+   "output": 197
+  },
+  "claude_record": {
+   "input": 3531,
+   "cache_write": 69875,
+   "cache_read": 223851,
+   "output": 259,
+   "cost_usd": 0.3042734,
+   "n": 3
+  }
+ },
+ {
+  "scenario": "sep-same",
+  "arm": "claude++/opt",
+  "rep": 1,
+  "load": 2.6,
+  "first_paint_s": 0.011,
+  "S0": {
+   "mb": 17.2,
+   "procs": 3,
+   "names": {
+    "claudeplusplus": 3
+   },
+   "cpu_s": 0.18,
+   "t": 1794288732.992446
+  },
+  "S1": {
+   "mb": 415.5,
+   "procs": 6,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3
+   },
+   "cpu_s": 2.03,
+   "t": 1794288747.023701
+  },
+  "turn1": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 1.63,
+    "pre_model_s": 0.05,
+    "model_s": 1.39
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 1.71,
+    "pre_model_s": 0.02,
+    "model_s": 1.48
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 1.92,
+    "pre_model_s": 0.02,
+    "model_s": 1.75
+   }
+  ],
+  "turn1_wall_s": 3.06,
+  "S2": {
+   "mb": 429.6,
+   "procs": 6,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3
+   },
+   "cpu_s": 2.94,
+   "t": 1794288753.786046
+  },
+  "S3": {
+   "mb": 446.2,
+   "procs": 6,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3
+   },
+   "cpu_s": 3.86,
+   "t": 1794288793.960653
+  },
+  "turn2": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 1.47,
+    "pre_model_s": 0.01,
+    "model_s": 1.37
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 2.08,
+    "pre_model_s": 0.01,
+    "model_s": 1.92
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 1.51,
+    "pre_model_s": 0.02,
+    "model_s": 1.37
+   }
+  ],
+  "turn2_wall_s": 2.67,
+  "S4": {
+   "mb": 458.3,
+   "procs": 6,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3
+   },
+   "cpu_s": 4.14,
+   "t": 1794288800.333597
+  },
+  "screen_tail": null,
+  "died": [
+   null,
+   null,
+   null
+  ],
+  "leaked_procs": 0,
+  "usage": {
+   "requests": 6,
+   "input": 18,
+   "cache_write": 60956,
+   "cache_read": 77268,
+   "output": 30
+  },
+  "claude_record": null
+ },
+ {
+  "scenario": "sep-same",
+  "arm": "claude++/opt",
+  "rep": 2,
+  "load": 2.8,
+  "first_paint_s": 0.006,
+  "S0": {
+   "mb": 16.7,
+   "procs": 3,
+   "names": {
+    "claudeplusplus": 3
+   },
+   "cpu_s": 0.17,
+   "t": 1794288824.555865
+  },
+  "S1": {
+   "mb": 415.2,
+   "procs": 6,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3
+   },
+   "cpu_s": 2.02,
+   "t": 1794288838.670629
+  },
+  "turn1": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 4.88,
+    "pre_model_s": 0.03,
+    "model_s": 4.68
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 6.03,
+    "pre_model_s": 0.02,
+    "model_s": 5.81
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 5.78,
+    "pre_model_s": 0.03,
+    "model_s": 5.56
+   }
+  ],
+  "turn1_wall_s": 6.92,
+  "S2": {
+   "mb": 445.6,
+   "procs": 6,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3
+   },
+   "cpu_s": 3.2,
+   "t": 1794288849.362349
+  },
+  "S3": {
+   "mb": 449.6,
+   "procs": 6,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3
+   },
+   "cpu_s": 4.38,
+   "t": 1794288889.558828
+  },
+  "turn2": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 1.69,
+    "pre_model_s": 0.03,
+    "model_s": 1.55
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 4.07,
+    "pre_model_s": 0.03,
+    "model_s": 3.87
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 3.71,
+    "pre_model_s": 0.03,
+    "model_s": 3.55
+   }
+  ],
+  "turn2_wall_s": 4.87,
+  "S4": {
+   "mb": 458.7,
+   "procs": 6,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3
+   },
+   "cpu_s": 4.8,
+   "t": 1794288898.126631
+  },
+  "screen_tail": null,
+  "died": [
+   null,
+   null,
+   null
+  ],
+  "leaked_procs": 0,
+  "usage": {
+   "requests": 6,
+   "input": 18,
+   "cache_write": 37964,
+   "cache_read": 100366,
+   "output": 140
+  },
+  "claude_record": null
+ },
+ {
+  "scenario": "sep-same",
+  "arm": "claude++",
+  "rep": 1,
+  "load": 4.1,
+  "first_paint_s": 0.007,
+  "S0": {
+   "mb": 17.3,
+   "procs": 3,
+   "names": {
+    "claudeplusplus": 3
+   },
+   "cpu_s": 0.15,
+   "t": 1794288922.326324
+  },
+  "S1": {
+   "mb": 703.3,
+   "procs": 18,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 2.91,
+   "t": 1794288936.408087
+  },
+  "turn1": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 3.5,
+    "pre_model_s": 0.06,
+    "model_s": 3.25
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 3.45,
+    "pre_model_s": 0.03,
+    "model_s": 3.3
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 3.42,
+    "pre_model_s": 0.06,
+    "model_s": 3.22
+   }
+  ],
+  "turn1_wall_s": 4.58,
+  "S2": {
+   "mb": 738.5,
+   "procs": 18,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 4.0,
+   "t": 1794288944.7153971
+  },
+  "S3": {
+   "mb": 730.5,
+   "procs": 18,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 5.24,
+   "t": 1794288984.947946
+  },
+  "turn2": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 4.09,
+    "pre_model_s": 0.05,
+    "model_s": 3.85
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 3.18,
+    "pre_model_s": 0.04,
+    "model_s": 2.93
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 3.47,
+    "pre_model_s": 0.04,
+    "model_s": 3.3
+   }
+  ],
+  "turn2_wall_s": 4.63,
+  "S4": {
+   "mb": 745.5,
+   "procs": 18,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 5.75,
+   "t": 1794288993.314882
+  },
+  "screen_tail": null,
+  "died": [
+   null,
+   null,
+   null
+  ],
+  "leaked_procs": 0,
+  "usage": {
+   "requests": 6,
+   "input": 18,
+   "cache_write": 105397,
+   "cache_read": 105117,
+   "output": 187
+  },
+  "claude_record": null
+ },
+ {
+  "scenario": "tabs-diff",
+  "arm": "claude++",
+  "rep": 2,
+  "load": 3.5,
+  "first_paint_s": 0.009,
+  "S0": {
+   "mb": 5.7,
+   "procs": 1,
+   "names": {
+    "claudeplusplus": 1
+   },
+   "cpu_s": 0.06,
+   "t": 1794289017.452397
+  },
+  "S1": {
+   "mb": 689.0,
+   "procs": 16,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 3.17,
+   "t": 1794289037.598815
+  },
+  "turn1": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 3.16,
+    "pre_model_s": 0.06,
+    "model_s": 2.94
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 5.55,
+    "pre_model_s": 0.05,
+    "model_s": 5.39
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 3.41,
+    "pre_model_s": 0.05,
+    "model_s": 3.2
+   }
+  ],
+  "turn1_wall_s": 6.55,
+  "S2": {
+   "mb": 720.0,
+   "procs": 16,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 4.33,
+   "t": 1794289048.292263
+  },
+  "S3": {
+   "mb": 269.6,
+   "procs": 6,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 1,
+    "caveman-mcp": 1,
+    "node": 3
+   },
+   "cpu_s": 2.03,
+   "t": 1794289088.5354428
+  },
+  "turn2": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 2.27,
+    "pre_model_s": 0.71,
+    "model_s": 1.38
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 2.99,
+    "pre_model_s": 1.03,
+    "model_s": 1.78
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 1.78,
+    "pre_model_s": 0.02,
+    "model_s": 1.59
+   }
+  ],
+  "turn2_wall_s": 3.96,
+  "S4": {
+   "mb": 751.0,
+   "procs": 16,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 4.68,
+   "t": 1794289096.7202911
+  },
+  "screen_tail": null,
+  "died": [
+   null
+  ],
+  "leaked_procs": 0,
+  "usage": {
+   "requests": 6,
+   "input": 18,
+   "cache_write": 63910,
+   "cache_read": 146605,
+   "output": 210
+  },
+  "claude_record": null
+ },
+ {
+  "scenario": "tabs-same",
+  "arm": "claude++/opt",
+  "rep": 0,
+  "load": 14.2,
+  "first_paint_s": 0.011,
+  "S0": {
+   "mb": 5.4,
+   "procs": 1,
+   "names": {
+    "claudeplusplus": 1
+   },
+   "cpu_s": 0.04,
+   "t": 1794289116.828738
+  },
+  "S1": {
+   "mb": 399.0,
+   "procs": 4,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 3
+   },
+   "cpu_s": 2.26,
+   "t": 1794289133.012008
+  },
+  "turn1": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 5.42,
+    "pre_model_s": 0.03,
+    "model_s": 5.12
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 4.43,
+    "pre_model_s": 0.04,
+    "model_s": 4.27
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 4.11,
+    "pre_model_s": 0.32,
+    "model_s": 3.6
+   }
+  ],
+  "turn1_wall_s": 6.09,
+  "S2": {
+   "mb": 433.0,
+   "procs": 4,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 3
+   },
+   "cpu_s": 3.29,
+   "t": 1794289143.256856
+  },
+  "S3": {
+   "mb": 148.0,
+   "procs": 2,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 1
+   },
+   "cpu_s": 1.51,
+   "t": 1794289183.519541
+  },
+  "turn2": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 5.67,
+    "pre_model_s": 1.39,
+    "model_s": 4.09
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 3.39,
+    "pre_model_s": 1.47,
+    "model_s": 1.76
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 1.71,
+    "pre_model_s": 0.04,
+    "model_s": 1.51
+   }
+  ],
+  "turn2_wall_s": 5.67,
+  "S4": {
+   "mb": 516.6,
+   "procs": 4,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 3
+   },
+   "cpu_s": 4.57,
+   "t": 1794289193.90638
+  },
+  "screen_tail": null,
+  "died": [
+   null
+  ],
+  "leaked_procs": 0,
+  "usage": {
+   "requests": 6,
+   "input": 18,
+   "cache_write": 37961,
+   "cache_read": 100366,
+   "output": 150
+  },
+  "claude_record": null
+ },
+ {
+  "scenario": "sep-same",
+  "arm": "claude++",
+  "rep": 2,
+  "load": 48.1,
+  "first_paint_s": 0.007,
+  "S0": {
+   "mb": 15.8,
+   "procs": 3,
+   "names": {
+    "claudeplusplus": 3
+   },
+   "cpu_s": 0.21,
+   "t": 1794289214.299399
+  },
+  "S1": {
+   "mb": 677.1,
+   "procs": 18,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 5.31,
+   "t": 1794289228.745363
+  },
+  "turn1": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 3.21,
+    "pre_model_s": 0.07,
+    "model_s": 2.87
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 3.59,
+    "pre_model_s": 0.07,
+    "model_s": 3.08
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 2.79,
+    "pre_model_s": 0.05,
+    "model_s": 2.49
+   }
+  ],
+  "turn1_wall_s": 4.17,
+  "S2": {
+   "mb": 716.3,
+   "procs": 18,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 7.06,
+   "t": 1794289238.152805
+  },
+  "S3": {
+   "mb": 715.3,
+   "procs": 18,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 8.34,
+   "t": 1794289278.69583
+  },
+  "turn2": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 2.78,
+    "pre_model_s": 0.04,
+    "model_s": 2.61
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 1.76,
+    "pre_model_s": 0.03,
+    "model_s": 1.53
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 2.18,
+    "pre_model_s": 0.03,
+    "model_s": 1.99
+   }
+  ],
+  "turn2_wall_s": 3.33,
+  "S4": {
+   "mb": 734.3,
+   "procs": 18,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 8.96,
+   "t": 1794289286.441803
+  },
+  "screen_tail": null,
+  "died": [
+   null,
+   null,
+   null
+  ],
+  "leaked_procs": 0,
+  "usage": {
+   "requests": 6,
+   "input": 18,
+   "cache_write": 59672,
+   "cache_read": 150826,
+   "output": 193
+  },
+  "claude_record": null
+ },
+ {
+  "scenario": "sep-same",
+  "arm": "claude",
+  "rep": 0,
+  "load": 47.1,
+  "first_paint_s": 1.256,
+  "S0": {
+   "mb": 783.0,
+   "procs": 15,
+   "names": {
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 7.44,
+   "t": 1794289311.016947
+  },
+  "S1": {
+   "mb": 768.0,
+   "procs": 15,
+   "names": {
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 8.8,
+   "t": 1794289325.429305
+  },
+  "turn1": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 3.79,
+    "pre_model_s": 0.1,
+    "model_s": 3.2
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 7.39,
+    "pre_model_s": 0.05,
+    "model_s": 7.15
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 5.69,
+    "pre_model_s": 0.04,
+    "model_s": 5.26
+   }
+  ],
+  "turn1_wall_s": 7.97,
+  "S2": {
+   "mb": 821.2,
+   "procs": 18,
+   "names": {
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9,
+    "caffeinate": 3
+   },
+   "cpu_s": 12.21,
+   "t": 1794289337.4758
+  },
+  "S3": {
+   "mb": 812.0,
+   "procs": 15,
+   "names": {
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 13.88,
+   "t": 1794289381.004301
+  },
+  "turn2": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 6.66,
+    "pre_model_s": 0.1,
+    "model_s": 6.31
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 10.18,
+    "pre_model_s": 0.59,
+    "model_s": 9.09
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 5.26,
+    "pre_model_s": 0.67,
+    "model_s": 4.32
+   }
+  ],
+  "turn2_wall_s": 10.76,
+  "S4": {
+   "mb": 840.2,
+   "procs": 18,
+   "names": {
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9,
+    "caffeinate": 3
+   },
+   "cpu_s": 16.41,
+   "t": 1794289399.6156428
+  },
+  "screen_tail": null,
+  "died": [
+   null,
+   null,
+   null
+  ],
+  "leaked_procs": 3,
+  "usage": {
+   "requests": 6,
+   "input": 18,
+   "cache_write": 110746,
+   "cache_read": 182807,
+   "output": 82
+  },
+  "claude_record": null
+ },
+ {
+  "scenario": "sep-same",
+  "arm": "claude",
+  "rep": 1,
+  "load": 191.7,
+  "first_paint_s": 2.265,
+  "S0": {
+   "mb": 776.0,
+   "procs": 15,
+   "names": {
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 8.57,
+   "t": 1794289441.95222
+  },
+  "S1": {
+   "mb": 766.0,
+   "procs": 15,
+   "names": {
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 10.31,
+   "t": 1794289461.6974669
+  },
+  "turn1": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 11.31,
+    "pre_model_s": 0.17,
+    "model_s": 10.67
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 9.69,
+    "pre_model_s": 0.13,
+    "model_s": 8.88
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 8.12,
+    "pre_model_s": 0.19,
+    "model_s": 7.43
+   }
+  ],
+  "turn1_wall_s": 11.31,
+  "S2": {
+   "mb": 838.2,
+   "procs": 18,
+   "names": {
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9,
+    "caffeinate": 3
+   },
+   "cpu_s": 15.94,
+   "t": 1794289503.7448
+  },
+  "S3": {
+   "mb": 803.0,
+   "procs": 15,
+   "names": {
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 17.09,
+   "t": 1794289544.436855
+  },
+  "turn2": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 5.41,
+    "pre_model_s": 0.05,
+    "model_s": 5.13
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 5.06,
+    "pre_model_s": 0.06,
+    "model_s": 4.81
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 2.2,
+    "pre_model_s": 0.07,
+    "model_s": 1.92
+   }
+  ],
+  "turn2_wall_s": 5.64,
+  "S4": {
+   "mb": 864.2,
+   "procs": 18,
+   "names": {
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9,
+    "caffeinate": 3
+   },
+   "cpu_s": 19.02,
+   "t": 1794289554.512375
+  },
+  "screen_tail": null,
+  "died": [
+   null,
+   null,
+   null
+  ],
+  "leaked_procs": 0,
+  "usage": {
+   "requests": 6,
+   "input": 18,
+   "cache_write": 82245,
+   "cache_read": 211338,
+   "output": 135
+  },
+  "claude_record": null
+ },
+ {
+  "scenario": "tabs-diff",
+  "arm": "claude++",
+  "rep": 0,
+  "load": 222.7,
+  "first_paint_s": 0.044,
+  "S0": {
+   "mb": 5.5,
+   "procs": 1,
+   "names": {
+    "claudeplusplus": 1
+   },
+   "cpu_s": 0.12,
+   "t": 1794289579.024249
+  },
+  "S1": {
+   "mb": 659.6,
+   "procs": 16,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 6.98,
+   "t": 1794289599.665417
+  },
+  "turn1": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 3.53,
+    "pre_model_s": 0.52,
+    "model_s": 2.78
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 4.63,
+    "pre_model_s": 0.13,
+    "model_s": 4.3
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 2.71,
+    "pre_model_s": 0.08,
+    "model_s": 2.43
+   }
+  ],
+  "turn1_wall_s": 5.62,
+  "S2": {
+   "mb": 724.7,
+   "procs": 17,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 9.24,
+   "t": 1794289616.278014
+  },
+  "S3": {
+   "mb": 236.5,
+   "procs": 6,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 1,
+    "caveman-mcp": 1,
+    "node": 3
+   },
+   "cpu_s": 3.56,
+   "t": 1794289658.045751
+  },
+  "turn2": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 20.37,
+    "pre_model_s": 18.02,
+    "model_s": 2.16
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 20.72,
+    "pre_model_s": 16.99,
+    "model_s": 3.46
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 15.31,
+    "pre_model_s": 1.04,
+    "model_s": 13.8
+   }
+  ],
+  "turn2_wall_s": 21.75,
+  "S4": {
+   "mb": 721.1,
+   "procs": 16,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 10.58,
+   "t": 1794289685.568295
+  },
+  "screen_tail": null,
+  "died": [
+   null
+  ],
+  "leaked_procs": 0,
+  "usage": {
+   "requests": 6,
+   "input": 16,
+   "cache_write": 99648,
+   "cache_read": 111235,
+   "output": 77
+  },
+  "claude_record": null
+ },
+ {
+  "scenario": "sep-same",
+  "arm": "claude++",
+  "rep": 0,
+  "load": 261.5,
+  "first_paint_s": 0.709,
+  "S0": {
+   "mb": 16.3,
+   "procs": 4,
+   "names": {
+    "claudeplusplus": 3
+   },
+   "cpu_s": 0.29,
+   "t": 1794289707.9207602
+  },
+  "S1": {
+   "mb": 663.4,
+   "procs": 19,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 6.83,
+   "t": 1794289724.241894
+  },
+  "turn1": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 4.99,
+    "pre_model_s": 0.2,
+    "model_s": 4.65
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 3.4,
+    "pre_model_s": 0.05,
+    "model_s": 3.13
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 3.26,
+    "pre_model_s": 0.08,
+    "model_s": 2.98
+   }
+  ],
+  "turn1_wall_s": 4.99,
+  "S2": {
+   "mb": 710.5,
+   "procs": 18,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 8.85,
+   "t": 1794289734.0945039
+  },
+  "S3": {
+   "mb": 709.6,
+   "procs": 18,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 10.36,
+   "t": 1794289774.9394848
+  },
+  "turn2": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 2.28,
+    "pre_model_s": 0.08,
+    "model_s": 2.0
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 4.49,
+    "pre_model_s": 0.07,
+    "model_s": 4.2
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 1.84,
+    "pre_model_s": 0.05,
+    "model_s": 1.67
+   }
+  ],
+  "turn2_wall_s": 5.07,
+  "S4": {
+   "mb": 724.7,
+   "procs": 19,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 11.25,
+   "t": 1794289784.2324579
+  },
+  "screen_tail": null,
+  "died": [
+   null,
+   null,
+   null
+  ],
+  "leaked_procs": 0,
+  "usage": {
+   "requests": 6,
+   "input": 18,
+   "cache_write": 79431,
+   "cache_read": 131039,
+   "output": 144
+  },
+  "claude_record": null
+ },
+ {
+  "scenario": "sep-same",
+  "arm": "claude++/opt",
+  "rep": 0,
+  "load": 180.7,
+  "first_paint_s": 0.242,
+  "S0": {
+   "mb": 15.8,
+   "procs": 3,
+   "names": {
+    "claudeplusplus": 3
+   },
+   "cpu_s": 0.32,
+   "t": 1794289813.217301
+  },
+  "S1": {
+   "mb": 379.2,
+   "procs": 6,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3
+   },
+   "cpu_s": 4.35,
+   "t": 1794289827.716645
+  },
+  "turn1": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 5.24,
+    "pre_model_s": 0.16,
+    "model_s": 4.91
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 3.99,
+    "pre_model_s": 0.11,
+    "model_s": 3.71
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 3.27,
+    "pre_model_s": 0.16,
+    "model_s": 2.95
+   }
+  ],
+  "turn1_wall_s": 5.24,
+  "S2": {
+   "mb": 431.4,
+   "procs": 6,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3
+   },
+   "cpu_s": 5.87,
+   "t": 1794289837.604001
+  },
+  "S3": {
+   "mb": 418.3,
+   "procs": 6,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3
+   },
+   "cpu_s": 7.18,
+   "t": 1794289878.12604
+  },
+  "turn2": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 3.66,
+    "pre_model_s": 0.07,
+    "model_s": 3.43
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 3.21,
+    "pre_model_s": 0.04,
+    "model_s": 2.97
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 2.09,
+    "pre_model_s": 0.03,
+    "model_s": 1.93
+   }
+  ],
+  "turn2_wall_s": 3.78,
+  "S4": {
+   "mb": 449.5,
+   "procs": 6,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3
+   },
+   "cpu_s": 7.91,
+   "t": 1794289885.992608
+  },
+  "screen_tail": null,
+  "died": [
+   null,
+   null,
+   null
+  ],
+  "leaked_procs": 0,
+  "usage": {
+   "requests": 6,
+   "input": 18,
+   "cache_write": 37956,
+   "cache_read": 100367,
+   "output": 203
+  },
+  "claude_record": null
+ },
+ {
+  "scenario": "sep-diff",
+  "arm": "claude++",
+  "rep": 0,
+  "load": 102.0,
+  "first_paint_s": 0.099,
+  "S0": {
+   "mb": 15.5,
+   "procs": 3,
+   "names": {
+    "claudeplusplus": 3
+   },
+   "cpu_s": 0.27,
+   "t": 1794289910.647569
+  },
+  "S1": {
+   "mb": 673.8,
+   "procs": 18,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 7.06,
+   "t": 1794289925.2295759
+  },
+  "turn1": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 10.52,
+    "pre_model_s": 0.22,
+    "model_s": 10.15
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 5.24,
+    "pre_model_s": 0.08,
+    "model_s": 5.03
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 3.42,
+    "pre_model_s": 0.08,
+    "model_s": 3.16
+   }
+  ],
+  "turn1_wall_s": 10.52,
+  "S2": {
+   "mb": 712.2,
+   "procs": 18,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 9.42,
+   "t": 1794289939.911435
+  },
+  "S3": {
+   "mb": 721.2,
+   "procs": 18,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 11.63,
+   "t": 1794289982.207934
+  },
+  "turn2": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 3.74,
+    "pre_model_s": 0.36,
+    "model_s": 3.2
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 3.17,
+    "pre_model_s": 0.3,
+    "model_s": 2.66
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 2.74,
+    "pre_model_s": 0.55,
+    "model_s": 2.03
+   }
+  ],
+  "turn2_wall_s": 3.88,
+  "S4": {
+   "mb": 732.2,
+   "procs": 18,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 12.69,
+   "t": 1794289990.777184
+  },
+  "screen_tail": null,
+  "died": [
+   null,
+   null,
+   null
+  ],
+  "leaked_procs": 0,
+  "usage": {
+   "requests": 6,
+   "input": 18,
+   "cache_write": 59651,
+   "cache_read": 150834,
+   "output": 164
+  },
+  "claude_record": null
+ },
+ {
+  "scenario": "tabs-same",
+  "arm": "claude++",
+  "rep": 2,
+  "load": 54.2,
+  "first_paint_s": 0.022,
+  "S0": {
+   "mb": 5.5,
+   "procs": 1,
+   "names": {
+    "claudeplusplus": 1
+   },
+   "cpu_s": 0.1,
+   "t": 1794290015.258017
+  },
+  "S1": {
+   "mb": 659.6,
+   "procs": 17,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 6.59,
+   "t": 1794290031.7894988
+  },
+  "turn1": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 6.54,
+    "pre_model_s": 0.12,
+    "model_s": 6.29
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 6.77,
+    "pre_model_s": 0.13,
+    "model_s": 6.43
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 6.06,
+    "pre_model_s": 0.07,
+    "model_s": 5.71
+   }
+  ],
+  "turn1_wall_s": 8.04,
+  "S2": {
+   "mb": 697.6,
+   "procs": 16,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 8.22,
+   "t": 1794290044.338548
+  },
+  "S3": {
+   "mb": 235.4,
+   "procs": 6,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 1,
+    "caveman-mcp": 1,
+    "node": 3
+   },
+   "cpu_s": 3.02,
+   "t": 1794290085.130545
+  },
+  "turn2": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 9.42,
+    "pre_model_s": 6.05,
+    "model_s": 3.21
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 9.23,
+    "pre_model_s": 5.06,
+    "model_s": 3.96
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 4.37,
+    "pre_model_s": 0.18,
+    "model_s": 3.94
+   }
+  ],
+  "turn2_wall_s": 10.22,
+  "S4": {
+   "mb": 713.9,
+   "procs": 16,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 9.37,
+   "t": 1794290100.187489
+  },
+  "screen_tail": null,
+  "died": [
+   null
+  ],
+  "leaked_procs": 0,
+  "usage": {
+   "requests": 6,
+   "input": 18,
+   "cache_write": 59632,
+   "cache_read": 150824,
+   "output": 155
+  },
+  "claude_record": null
+ },
+ {
+  "scenario": "sep-diff",
+  "arm": "claude",
+  "rep": 0,
+  "load": 28.4,
+  "first_paint_s": 1.792,
+  "S0": {
+   "mb": 767.0,
+   "procs": 15,
+   "names": {
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 8.81,
+   "t": 1794290120.986611
+  },
+  "S1": {
+   "mb": 759.0,
+   "procs": 15,
+   "names": {
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 10.17,
+   "t": 1794290135.956248
+  },
+  "turn1": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 5.62,
+    "pre_model_s": 0.18,
+    "model_s": 5.2
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 4.82,
+    "pre_model_s": 0.18,
+    "model_s": 4.31
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 4.02,
+    "pre_model_s": 0.06,
+    "model_s": 3.65
+   }
+  ],
+  "turn1_wall_s": 5.62,
+  "S2": {
+   "mb": 807.2,
+   "procs": 18,
+   "names": {
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9,
+    "caffeinate": 3
+   },
+   "cpu_s": 13.98,
+   "t": 1794290145.941909
+  },
+  "S3": {
+   "mb": 799.0,
+   "procs": 15,
+   "names": {
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 15.43,
+   "t": 1794290186.355107
+  },
+  "turn2": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 6.06,
+    "pre_model_s": 0.04,
+    "model_s": 5.8
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 3.24,
+    "pre_model_s": 0.01,
+    "model_s": 3.04
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 1.67,
+    "pre_model_s": 0.02,
+    "model_s": 1.48
+   }
+  ],
+  "turn2_wall_s": 6.06,
+  "S4": {
+   "mb": 839.2,
+   "procs": 18,
+   "names": {
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9,
+    "caffeinate": 3
+   },
+   "cpu_s": 16.61,
+   "t": 1794290196.46533
+  },
+  "screen_tail": null,
+  "died": [
+   null,
+   null,
+   null
+  ],
+  "leaked_procs": 0,
+  "usage": {
+   "requests": 6,
+   "input": 18,
+   "cache_write": 82265,
+   "cache_read": 211342,
+   "output": 143
+  },
+  "claude_record": {
+   "input": 3531,
+   "cache_write": 82265,
+   "cache_read": 211342,
+   "output": 206,
+   "cost_usd": 0.35204300000000005,
+   "n": 3
+  }
+ },
+ {
+  "scenario": "sep-same",
+  "arm": "claude",
+  "rep": 2,
+  "load": 14.5,
+  "first_paint_s": 0.389,
+  "S0": {
+   "mb": 801.0,
+   "procs": 15,
+   "names": {
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 5.19,
+   "t": 1794290220.7322738
+  },
+  "S1": {
+   "mb": 799.0,
+   "procs": 15,
+   "names": {
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 5.86,
+   "t": 1794290234.9290612
+  },
+  "turn1": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 3.62,
+    "pre_model_s": 0.06,
+    "model_s": 3.35
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 2.83,
+    "pre_model_s": 0.05,
+    "model_s": 2.56
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 3.14,
+    "pre_model_s": 0.04,
+    "model_s": 2.86
+   }
+  ],
+  "turn1_wall_s": 4.28,
+  "S2": {
+   "mb": 856.1,
+   "procs": 18,
+   "names": {
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9,
+    "caffeinate": 3
+   },
+   "cpu_s": 7.62,
+   "t": 1794290243.050591
+  },
+  "S3": {
+   "mb": 867.0,
+   "procs": 15,
+   "names": {
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 9.71,
+   "t": 1794290283.861985
+  },
+  "turn2": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 2.78,
+    "pre_model_s": 0.03,
+    "model_s": 2.54
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 2.79,
+    "pre_model_s": 0.04,
+    "model_s": 2.48
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 2.21,
+    "pre_model_s": 0.08,
+    "model_s": 1.87
+   }
+  ],
+  "turn2_wall_s": 3.36,
+  "S4": {
+   "mb": 895.2,
+   "procs": 18,
+   "names": {
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9,
+    "caffeinate": 3
+   },
+   "cpu_s": 11.56,
+   "t": 1794290292.1362188
+  },
+  "screen_tail": null,
+  "died": [
+   null,
+   null,
+   null
+  ],
+  "leaked_procs": 0,
+  "usage": {
+   "requests": 6,
+   "input": 18,
+   "cache_write": 82244,
+   "cache_read": 211338,
+   "output": 138
+  },
+  "claude_record": null
+ },
+ {
+  "scenario": "sep-diff",
+  "arm": "claude++/opt",
+  "rep": 1,
+  "load": 9.0,
+  "first_paint_s": 0.013,
+  "S0": {
+   "mb": 16.5,
+   "procs": 3,
+   "names": {
+    "claudeplusplus": 3
+   },
+   "cpu_s": 0.27,
+   "t": 1794290317.556431
+  },
+  "S1": {
+   "mb": 383.6,
+   "procs": 6,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3
+   },
+   "cpu_s": 4.17,
+   "t": 1794290331.976288
+  },
+  "turn1": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 3.81,
+    "pre_model_s": 0.13,
+    "model_s": 3.53
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 3.77,
+    "pre_model_s": 0.06,
+    "model_s": 3.52
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 6.39,
+    "pre_model_s": 0.12,
+    "model_s": 6.12
+   }
+  ],
+  "turn1_wall_s": 7.55,
+  "S2": {
+   "mb": 438.8,
+   "procs": 6,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3
+   },
+   "cpu_s": 5.66,
+   "t": 1794290344.253057
+  },
+  "S3": {
+   "mb": 432.8,
+   "procs": 6,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3
+   },
+   "cpu_s": 7.16,
+   "t": 1794290384.736681
+  },
+  "turn2": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 4.29,
+    "pre_model_s": 0.06,
+    "model_s": 4.06
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 4.06,
+    "pre_model_s": 0.05,
+    "model_s": 3.81
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 5.93,
+    "pre_model_s": 0.03,
+    "model_s": 5.77
+   }
+  ],
+  "turn2_wall_s": 7.07,
+  "S4": {
+   "mb": 437.8,
+   "procs": 6,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3
+   },
+   "cpu_s": 8.03,
+   "t": 1794290399.235861
+  },
+  "screen_tail": null,
+  "died": [
+   null,
+   null,
+   null
+  ],
+  "leaked_procs": 0,
+  "usage": {
+   "requests": 6,
+   "input": 18,
+   "cache_write": 56722,
+   "cache_read": 81498,
+   "output": 30
+  },
+  "claude_record": null
+ },
+ {
+  "scenario": "sep-diff",
+  "arm": "claude",
+  "rep": 2,
+  "load": 43.7,
+  "first_paint_s": 7.803,
+  "S0": {
+   "mb": 592.0,
+   "procs": 29,
+   "names": {
+    "claude": 3,
+    "caveman-mcp": 2,
+    "node": 2
+   },
+   "cpu_s": 9.09,
+   "t": 1794290438.265491
+  },
+  "S1": {
+   "mb": 746.0,
+   "procs": 15,
+   "names": {
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 12.29,
+   "t": 1794290457.745791
+  },
+  "turn1": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 15.48,
+    "pre_model_s": 0.42,
+    "model_s": 14.25
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 14.9,
+    "pre_model_s": 0.24,
+    "model_s": 13.59
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 14.73,
+    "pre_model_s": 0.38,
+    "model_s": 13.6
+   }
+  ],
+  "turn1_wall_s": 15.88,
+  "S2": {
+   "mb": 835.2,
+   "procs": 20,
+   "names": {
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9,
+    "caffeinate": 3
+   },
+   "cpu_s": 18.98,
+   "t": 1794290486.774886
+  },
+  "S3": {
+   "mb": 804.0,
+   "procs": 15,
+   "names": {
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 21.5,
+   "t": 1794290544.414585
+  },
+  "turn2": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 19.42,
+    "pre_model_s": 2.35,
+    "model_s": 13.62
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 22.22,
+    "pre_model_s": 1.11,
+    "model_s": 17.37
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 18.51,
+    "pre_model_s": 0.84,
+    "model_s": 14.75
+   }
+  ],
+  "turn2_wall_s": 22.78,
+  "S4": {
+   "mb": 840.2,
+   "procs": 18,
+   "names": {
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9,
+    "caffeinate": 3
+   },
+   "cpu_s": 28.07,
+   "t": 1794290581.389653
+  },
+  "screen_tail": null,
+  "died": [
+   null,
+   null,
+   null
+  ],
+  "leaked_procs": 6,
+  "usage": {
+   "requests": 6,
+   "input": 18,
+   "cache_write": 61797,
+   "cache_read": 231859,
+   "output": 179
+  },
+  "claude_record": {
+   "input": 2354,
+   "cache_write": 41203,
+   "cache_read": 154578,
+   "output": 159,
+   "cost_usd": 0.181738,
+   "n": 2
+  }
+ },
+ {
+  "scenario": "sep-diff",
+  "arm": "claude++/opt",
+  "rep": 0,
+  "load": 265.3,
+  "first_paint_s": 0.882,
+  "S0": {
+   "mb": 16.0,
+   "procs": 3,
+   "names": {
+    "claudeplusplus": 3
+   },
+   "cpu_s": 0.33,
+   "t": 1794290622.717571
+  },
+  "S1": {
+   "mb": 413.4,
+   "procs": 6,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3
+   },
+   "cpu_s": 5.14,
+   "t": 1794290637.297227
+  },
+  "turn1": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 6.11,
+    "pre_model_s": 0.56,
+    "model_s": 5.34
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 7.59,
+    "pre_model_s": 0.09,
+    "model_s": 7.36
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 7.25,
+    "pre_model_s": 0.07,
+    "model_s": 6.97
+   }
+  ],
+  "turn1_wall_s": 8.42,
+  "S2": {
+   "mb": 430.5,
+   "procs": 6,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3
+   },
+   "cpu_s": 8.06,
+   "t": 1794290655.079445
+  },
+  "S3": {
+   "mb": 432.5,
+   "procs": 6,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3
+   },
+   "cpu_s": 9.07,
+   "t": 1794290699.193398
+  },
+  "turn2": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 3.7,
+    "pre_model_s": 0.11,
+    "model_s": 3.42
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 2.24,
+    "pre_model_s": 0.04,
+    "model_s": 2.06
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 3.1,
+    "pre_model_s": 0.05,
+    "model_s": 2.87
+   }
+  ],
+  "turn2_wall_s": 4.26,
+  "S4": {
+   "mb": 435.5,
+   "procs": 6,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3
+   },
+   "cpu_s": 9.86,
+   "t": 1794290707.7070458
+  },
+  "screen_tail": null,
+  "died": [
+   null,
+   null,
+   null
+  ],
+  "leaked_procs": 0,
+  "usage": {
+   "requests": 6,
+   "input": 18,
+   "cache_write": 47338,
+   "cache_read": 90932,
+   "output": 81
+  },
+  "claude_record": null
+ },
+ {
+  "scenario": "tabs-same",
+  "arm": "claude++",
+  "rep": 0,
+  "load": 75.6,
+  "first_paint_s": 0.02,
+  "S0": {
+   "mb": 5.4,
+   "procs": 1,
+   "names": {
+    "claudeplusplus": 1
+   },
+   "cpu_s": 0.11,
+   "t": 1794290731.986343
+  },
+  "S1": {
+   "mb": 665.6,
+   "procs": 17,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 7.01,
+   "t": 1794290751.603344
+  },
+  "turn1": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 11.18,
+    "pre_model_s": 1.72,
+    "model_s": 9.3
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 8.17,
+    "pre_model_s": 1.23,
+    "model_s": 6.79
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 7.97,
+    "pre_model_s": 1.38,
+    "model_s": 6.38
+   }
+  ],
+  "turn1_wall_s": 11.18,
+  "S2": {
+   "mb": 701.6,
+   "procs": 16,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 9.62,
+   "t": 1794290767.753016
+  },
+  "S3": {
+   "mb": 239.5,
+   "procs": 6,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 1,
+    "caveman-mcp": 1,
+    "node": 3
+   },
+   "cpu_s": 3.69,
+   "t": 1794290812.542218
+  },
+  "turn2": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 11.84,
+    "pre_model_s": 7.7,
+    "model_s": 3.35
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 10.71,
+    "pre_model_s": 6.71,
+    "model_s": 3.33
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 6.06,
+    "pre_model_s": 0.73,
+    "model_s": 5.05
+   }
+  ],
+  "turn2_wall_s": 11.84,
+  "S4": {
+   "mb": 714.9,
+   "procs": 16,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 10.4,
+   "t": 1794290834.952822
+  },
+  "screen_tail": null,
+  "died": [
+   null
+  ],
+  "leaked_procs": 0,
+  "usage": {
+   "requests": 6,
+   "input": 16,
+   "cache_write": 60127,
+   "cache_read": 150842,
+   "output": 167
+  },
+  "claude_record": null
+ },
+ {
+  "scenario": "tabs-diff",
+  "arm": "claude++",
+  "rep": 1,
+  "load": 126.8,
+  "first_paint_s": 1.894,
+  "S0": {
+   "mb": 5.4,
+   "procs": 1,
+   "names": {
+    "claudeplusplus": 1
+   },
+   "cpu_s": 0.13,
+   "t": 1794290856.9485781
+  },
+  "S1": {
+   "mb": 660.5,
+   "procs": 16,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 8.28,
+   "t": 1794290877.5100942
+  },
+  "turn1": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 3.37,
+    "pre_model_s": 0.21,
+    "model_s": 2.95
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 3.98,
+    "pre_model_s": 0.08,
+    "model_s": 3.71
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 5.29,
+    "pre_model_s": 0.08,
+    "model_s": 5.01
+   }
+  ],
+  "turn1_wall_s": 7.24,
+  "S2": {
+   "mb": 696.6,
+   "procs": 17,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 10.51,
+   "t": 1794290891.6752908
+  },
+  "S3": {
+   "mb": 235.5,
+   "procs": 6,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 1,
+    "caveman-mcp": 1,
+    "node": 3
+   },
+   "cpu_s": 3.7,
+   "t": 1794290935.3461812
+  },
+  "turn2": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 16.96,
+    "pre_model_s": 9.82,
+    "model_s": 6.99
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 11.18,
+    "pre_model_s": 8.78,
+    "model_s": 2.24
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 11.9,
+    "pre_model_s": 4.11,
+    "model_s": 7.53
+   }
+  ],
+  "turn2_wall_s": 16.96,
+  "S4": {
+   "mb": 717.8,
+   "procs": 16,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 11.07,
+   "t": 1794290956.988307
+  },
+  "screen_tail": null,
+  "died": [
+   null
+  ],
+  "leaked_procs": 0,
+  "usage": {
+   "requests": 6,
+   "input": 18,
+   "cache_write": 59651,
+   "cache_read": 150832,
+   "output": 166
+  },
+  "claude_record": null
+ },
+ {
+  "scenario": "tabs-same",
+  "arm": "claude++",
+  "rep": 1,
+  "load": 86.8,
+  "first_paint_s": 0.017,
+  "S0": {
+   "mb": 5.4,
+   "procs": 1,
+   "names": {
+    "claudeplusplus": 1
+   },
+   "cpu_s": 0.11,
+   "t": 1794290978.629898
+  },
+  "S1": {
+   "mb": 642.9,
+   "procs": 16,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 7.15,
+   "t": 1794290995.281609
+  },
+  "turn1": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 7.58,
+    "pre_model_s": 0.77,
+    "model_s": 6.66
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 5.45,
+    "pre_model_s": 0.42,
+    "model_s": 4.86
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 7.19,
+    "pre_model_s": 1.61,
+    "model_s": 5.39
+   }
+  ],
+  "turn1_wall_s": 9.15,
+  "S2": {
+   "mb": 689.0,
+   "procs": 17,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 10.0,
+   "t": 1794291009.345949
+  },
+  "S3": {
+   "mb": 229.7,
+   "procs": 6,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 1,
+    "caveman-mcp": 1,
+    "node": 3
+   },
+   "cpu_s": 4.16,
+   "t": 1794291050.719903
+  },
+  "turn2": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 10.32,
+    "pre_model_s": 5.31,
+    "model_s": 4.53
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 18.23,
+    "pre_model_s": 9.7,
+    "model_s": 8.16
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 4.97,
+    "pre_model_s": 0.31,
+    "model_s": 4.45
+   }
+  ],
+  "turn2_wall_s": 19.22,
+  "S4": {
+   "mb": 699.2,
+   "procs": 16,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 11.74,
+   "t": 1794291077.6592362
+  },
+  "screen_tail": null,
+  "died": [
+   null
+  ],
+  "leaked_procs": 0,
+  "usage": {
+   "requests": 6,
+   "input": 16,
+   "cache_write": 80164,
+   "cache_read": 131032,
+   "output": 137
+  },
+  "claude_record": null
+ },
+ {
+  "scenario": "sep-diff",
+  "arm": "claude++/opt",
+  "rep": 2,
+  "load": 86.8,
+  "first_paint_s": 0.075,
+  "S0": {
+   "mb": 15.4,
+   "procs": 5,
+   "names": {
+    "claudeplusplus": 3
+   },
+   "cpu_s": 0.29,
+   "t": 1794291100.627437
+  },
+  "S1": {
+   "mb": 390.7,
+   "procs": 6,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3
+   },
+   "cpu_s": 5.02,
+   "t": 1794291115.588212
+  },
+  "turn1": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 6.97,
+    "pre_model_s": 0.33,
+    "model_s": 6.5
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 4.39,
+    "pre_model_s": 0.15,
+    "model_s": 4.02
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 2.68,
+    "pre_model_s": 0.16,
+    "model_s": 2.36
+   }
+  ],
+  "turn1_wall_s": 6.97,
+  "S2": {
+   "mb": 429.0,
+   "procs": 6,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3
+   },
+   "cpu_s": 7.47,
+   "t": 1794291131.127247
+  },
+  "S3": {
+   "mb": 465.0,
+   "procs": 6,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3
+   },
+   "cpu_s": 9.5,
+   "t": 1794291173.9733279
+  },
+  "turn2": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 6.56,
+    "pre_model_s": 0.27,
+    "model_s": 5.85
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 5.22,
+    "pre_model_s": 0.09,
+    "model_s": 4.88
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 5.74,
+    "pre_model_s": 0.11,
+    "model_s": 5.35
+   }
+  ],
+  "turn2_wall_s": 6.87,
+  "S4": {
+   "mb": 462.1,
+   "procs": 6,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3
+   },
+   "cpu_s": 10.84,
+   "t": 1794291186.8130019
+  },
+  "screen_tail": null,
+  "died": [
+   null,
+   null,
+   null
+  ],
+  "leaked_procs": 0,
+  "usage": {
+   "requests": 6,
+   "input": 18,
+   "cache_write": 47329,
+   "cache_read": 90932,
+   "output": 76
+  },
+  "claude_record": null
+ },
+ {
+  "scenario": "tabs-diff",
+  "arm": "claude++/opt",
+  "rep": 2,
+  "load": 66.8,
+  "first_paint_s": 0.032,
+  "S0": {
+   "mb": 5.3,
+   "procs": 1,
+   "names": {
+    "claudeplusplus": 1
+   },
+   "cpu_s": 0.11,
+   "t": 1794291211.836587
+  },
+  "S1": {
+   "mb": 379.5,
+   "procs": 4,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 3
+   },
+   "cpu_s": 4.65,
+   "t": 1794291232.72602
+  },
+  "turn1": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 6.82,
+    "pre_model_s": 0.91,
+    "model_s": 5.69
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 6.08,
+    "pre_model_s": 0.28,
+    "model_s": 5.6
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 4.84,
+    "pre_model_s": 0.3,
+    "model_s": 3.69
+   }
+  ],
+  "turn1_wall_s": 7.07,
+  "S2": {
+   "mb": 426.5,
+   "procs": 4,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 3
+   },
+   "cpu_s": 7.54,
+   "t": 1794291245.600307
+  },
+  "S3": {
+   "mb": 148.5,
+   "procs": 2,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 1
+   },
+   "cpu_s": 2.96,
+   "t": 1794291287.327839
+  },
+  "turn2": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 11.65,
+    "pre_model_s": 7.88,
+    "model_s": 3.56
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 9.82,
+    "pre_model_s": 6.85,
+    "model_s": 2.76
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 7.24,
+    "pre_model_s": 0.38,
+    "model_s": 6.7
+   }
+  ],
+  "turn2_wall_s": 11.65,
+  "S4": {
+   "mb": 433.8,
+   "procs": 4,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 3
+   },
+   "cpu_s": 7.63,
+   "t": 1794291304.263826
+  },
+  "screen_tail": null,
+  "died": [
+   null
+  ],
+  "leaked_procs": 0,
+  "usage": {
+   "requests": 6,
+   "input": 18,
+   "cache_write": 37971,
+   "cache_read": 100371,
+   "output": 140
+  },
+  "claude_record": null
+ },
+ {
+  "scenario": "sep-diff",
+  "arm": "claude++",
+  "rep": 2,
+  "load": 41.9,
+  "first_paint_s": 0.038,
+  "S0": {
+   "mb": 16.7,
+   "procs": 5,
+   "names": {
+    "claudeplusplus": 3
+   },
+   "cpu_s": 0.33,
+   "t": 1794291327.963974
+  },
+  "S1": {
+   "mb": 662.6,
+   "procs": 18,
+   "names": {
+    "caveman-mcp": 3,
+    "node": 9,
+    "claudeplusplus": 3,
+    "claude": 3
+   },
+   "cpu_s": 7.54,
+   "t": 1794291342.7506812
+  },
+  "turn1": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 9.32,
+    "pre_model_s": 0.33,
+    "model_s": 8.77
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 5.65,
+    "pre_model_s": 0.28,
+    "model_s": 5.1
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 5.06,
+    "pre_model_s": 0.17,
+    "model_s": 4.66
+   }
+  ],
+  "turn1_wall_s": 9.32,
+  "S2": {
+   "mb": 713.9,
+   "procs": 19,
+   "names": {
+    "caveman-mcp": 3,
+    "node": 9,
+    "claudeplusplus": 3,
+    "claude": 3
+   },
+   "cpu_s": 10.11,
+   "t": 1794291356.980232
+  },
+  "S3": {
+   "mb": 708.8,
+   "procs": 18,
+   "names": {
+    "caveman-mcp": 3,
+    "node": 9,
+    "claudeplusplus": 3,
+    "claude": 3
+   },
+   "cpu_s": 11.85,
+   "t": 1794291402.58583
+  },
+  "turn2": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 5.8,
+    "pre_model_s": 1.0,
+    "model_s": 4.64
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 9.96,
+    "pre_model_s": 0.54,
+    "model_s": 9.23
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 5.81,
+    "pre_model_s": 0.48,
+    "model_s": 5.17
+   }
+  ],
+  "turn2_wall_s": 10.56,
+  "S4": {
+   "mb": 722.0,
+   "procs": 18,
+   "names": {
+    "caveman-mcp": 3,
+    "node": 9,
+    "claudeplusplus": 3,
+    "claude": 3
+   },
+   "cpu_s": 13.22,
+   "t": 1794291417.513016
+  },
+  "screen_tail": null,
+  "died": [
+   null,
+   null,
+   null
+  ],
+  "leaked_procs": 0,
+  "usage": {
+   "requests": 6,
+   "input": 18,
+   "cache_write": 79413,
+   "cache_read": 131033,
+   "output": 167
+  },
+  "claude_record": null
+ },
+ {
+  "scenario": "tabs-same",
+  "arm": "claude++/opt",
+  "rep": 1,
+  "load": 31.7,
+  "first_paint_s": 0.047,
+  "S0": {
+   "mb": 5.5,
+   "procs": 1,
+   "names": {
+    "claudeplusplus": 1
+   },
+   "cpu_s": 0.13,
+   "t": 1794291441.886882
+  },
+  "S1": {
+   "mb": 389.6,
+   "procs": 4,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 3
+   },
+   "cpu_s": 4.59,
+   "t": 1794291458.111367
+  },
+  "turn1": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 3.91,
+    "pre_model_s": 0.06,
+    "model_s": 3.64
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 3.35,
+    "pre_model_s": 0.05,
+    "model_s": 3.14
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 2.69,
+    "pre_model_s": 0.05,
+    "model_s": 2.46
+   }
+  ],
+  "turn1_wall_s": 4.67,
+  "S2": {
+   "mb": 423.6,
+   "procs": 4,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 3
+   },
+   "cpu_s": 5.78,
+   "t": 1794291467.4950871
+  },
+  "S3": {
+   "mb": 147.5,
+   "procs": 2,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 1
+   },
+   "cpu_s": 2.47,
+   "t": 1794291508.063859
+  },
+  "turn2": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 6.71,
+    "pre_model_s": 4.08,
+    "model_s": 2.45
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 5.85,
+    "pre_model_s": 3.29,
+    "model_s": 2.37
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 3.83,
+    "pre_model_s": 0.07,
+    "model_s": 3.65
+   }
+  ],
+  "turn2_wall_s": 6.82,
+  "S4": {
+   "mb": 439.7,
+   "procs": 4,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 3
+   },
+   "cpu_s": 6.05,
+   "t": 1794291519.140335
+  },
+  "screen_tail": null,
+  "died": [
+   null
+  ],
+  "leaked_procs": 0,
+  "usage": {
+   "requests": 6,
+   "input": 18,
+   "cache_write": 47319,
+   "cache_read": 90931,
+   "output": 73
+  },
+  "claude_record": null
+ },
+ {
+  "scenario": "tabs-same",
+  "arm": "claude++/opt",
+  "rep": 2,
+  "load": 23.4,
+  "first_paint_s": 0.064,
+  "S0": {
+   "mb": 5.6,
+   "procs": 1,
+   "names": {
+    "claudeplusplus": 1
+   },
+   "cpu_s": 0.08,
+   "t": 1794291539.409596
+  },
+  "S1": {
+   "mb": 369.8,
+   "procs": 4,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 3
+   },
+   "cpu_s": 4.76,
+   "t": 1794291555.6919081
+  },
+  "turn1": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 5.75,
+    "pre_model_s": 0.06,
+    "model_s": 5.5
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 6.16,
+    "pre_model_s": 0.06,
+    "model_s": 5.78
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 6.53,
+    "pre_model_s": 0.04,
+    "model_s": 6.26
+   }
+  ],
+  "turn1_wall_s": 8.5,
+  "S2": {
+   "mb": 413.8,
+   "procs": 4,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 3
+   },
+   "cpu_s": 6.27,
+   "t": 1794291568.718174
+  },
+  "S3": {
+   "mb": 142.7,
+   "procs": 2,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 1
+   },
+   "cpu_s": 2.41,
+   "t": 1794291608.922244
+  },
+  "turn2": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 2.7,
+    "pre_model_s": 0.43,
+    "model_s": 2.15
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 3.24,
+    "pre_model_s": 0.43,
+    "model_s": 2.65
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 2.36,
+    "pre_model_s": 0.01,
+    "model_s": 2.18
+   }
+  ],
+  "turn2_wall_s": 4.34,
+  "S4": {
+   "mb": 410.0,
+   "procs": 4,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 3
+   },
+   "cpu_s": 4.46,
+   "t": 1794291617.409558
+  },
+  "screen_tail": null,
+  "died": [
+   null
+  ],
+  "leaked_procs": 0,
+  "usage": {
+   "requests": 6,
+   "input": 18,
+   "cache_write": 37974,
+   "cache_read": 100367,
+   "output": 141
+  },
+  "claude_record": null
+ },
+ {
+  "scenario": "sep-diff",
+  "arm": "claude++",
+  "rep": 1,
+  "load": 12.6,
+  "first_paint_s": 0.006,
+  "S0": {
+   "mb": 17.3,
+   "procs": 3,
+   "names": {
+    "claudeplusplus": 3
+   },
+   "cpu_s": 0.18,
+   "t": 1794291637.71386
+  },
+  "S1": {
+   "mb": 692.8,
+   "procs": 18,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 5.12,
+   "t": 1794291652.098305
+  },
+  "turn1": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 3.84,
+    "pre_model_s": 0.07,
+    "model_s": 3.62
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 3.05,
+    "pre_model_s": 0.06,
+    "model_s": 2.76
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 3.8,
+    "pre_model_s": 0.06,
+    "model_s": 3.57
+   }
+  ],
+  "turn1_wall_s": 4.94,
+  "S2": {
+   "mb": 728.9,
+   "procs": 18,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 6.45,
+   "t": 1794291661.036879
+  },
+  "S3": {
+   "mb": 731.9,
+   "procs": 18,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 7.71,
+   "t": 1794291701.346771
+  },
+  "turn2": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 2.23,
+    "pre_model_s": 0.02,
+    "model_s": 1.99
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 1.54,
+    "pre_model_s": 0.02,
+    "model_s": 1.4
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 1.62,
+    "pre_model_s": 0.02,
+    "model_s": 1.48
+   }
+  ],
+  "turn2_wall_s": 2.77,
+  "S4": {
+   "mb": 746.0,
+   "procs": 18,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 8.13,
+   "t": 1794291707.923868
+  },
+  "screen_tail": null,
+  "died": [
+   null,
+   null,
+   null
+  ],
+  "leaked_procs": 0,
+  "usage": {
+   "requests": 6,
+   "input": 18,
+   "cache_write": 59696,
+   "cache_read": 150844,
+   "output": 199
+  },
+  "claude_record": null
+ }
+]

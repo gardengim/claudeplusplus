@@ -27,7 +27,7 @@ def names(pids):
 
 class Term:
     def __init__(self, argv, cwd=W, env_extra=None):
-        env = {k: v for k, v in os.environ.items() if not k.startswith("CLAUDE")}; env["TERM"] = "xterm-256color"; env.update(env_extra or {})
+        env = {k: v for k, v in os.environ.items() if not k.startswith("CLAUDE") or k.startswith("CLAUDEPP_")}; env["TERM"] = "xterm-256color"; env.update(env_extra or {})
         self.pid, self.fd = pty.fork()
         if self.pid == 0:
             os.chdir(cwd); os.execvpe(argv[0], argv, env)

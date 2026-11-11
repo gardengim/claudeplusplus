@@ -1,0 +1,389 @@
+[
+ {
+  "scenario": "sep-active",
+  "arm": "claude++/opt",
+  "rep": 0,
+  "load": 11.5,
+  "first_paint_s": 0.007,
+  "S0": {
+   "mb": 18.0,
+   "procs": 4,
+   "names": {
+    "claudeplusplus": 4
+   },
+   "cpu_s": 0.19,
+   "t": 1794297390.2325718
+  },
+  "S1": {
+   "mb": 413.3,
+   "procs": 7,
+   "names": {
+    "claudeplusplus": 4,
+    "claude": 3
+   },
+   "cpu_s": 2.91,
+   "t": 1794297404.5332701
+  },
+  "turn1": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 2.21,
+    "pre_model_s": 0.08,
+    "model_s": 2.0
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 2.06,
+    "pre_model_s": 0.16,
+    "model_s": 1.71
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 1.82,
+    "pre_model_s": 0.12,
+    "model_s": 1.49
+   }
+  ],
+  "turn1_wall_s": 2.98,
+  "S2": {
+   "mb": 447.8,
+   "procs": 7,
+   "names": {
+    "claudeplusplus": 4,
+    "claude": 3
+   },
+   "cpu_s": 4.16,
+   "t": 1794297411.315435
+  },
+  "S3mid": {
+   "mb": 445.1,
+   "procs": 7,
+   "names": {
+    "claudeplusplus": 4,
+    "claude": 3
+   },
+   "cpu_s": 5.32,
+   "t": 1794297483.21379
+  },
+  "S3": {
+   "mb": 153.1,
+   "procs": 5,
+   "names": {
+    "claudeplusplus": 4,
+    "claude": 1
+   },
+   "cpu_s": 2.43,
+   "t": 1794297534.5822861
+  },
+  "turn2": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 2.97,
+    "pre_model_s": 1.11,
+    "model_s": 1.67
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 2.28,
+    "pre_model_s": 0.72,
+    "model_s": 1.41
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 1.59,
+    "pre_model_s": 0.03,
+    "model_s": 1.38
+   }
+  ],
+  "turn2_wall_s": 2.97,
+  "S4": {
+   "mb": 426.3,
+   "procs": 7,
+   "names": {
+    "claudeplusplus": 4,
+    "claude": 3
+   },
+   "cpu_s": 5.02,
+   "t": 1794297541.3095338
+  },
+  "screen_tail": null,
+  "died": [
+   null,
+   null,
+   null
+  ],
+  "leaked_procs": 1,
+  "usage": {
+   "requests": 6,
+   "input": 12,
+   "cache_write": 56925,
+   "cache_read": 86316,
+   "output": 30
+  },
+  "claude_record": null
+ },
+ {
+  "scenario": "sep-active",
+  "arm": "claude++/opt",
+  "rep": 2,
+  "load": 10.3,
+  "first_paint_s": 0.007,
+  "S0": {
+   "mb": 18.9,
+   "procs": 4,
+   "names": {
+    "claudeplusplus": 4
+   },
+   "cpu_s": 0.19,
+   "t": 1794297565.5286489
+  },
+  "S1": {
+   "mb": 401.2,
+   "procs": 7,
+   "names": {
+    "claudeplusplus": 4,
+    "claude": 3
+   },
+   "cpu_s": 2.83,
+   "t": 1794297579.771831
+  },
+  "turn1": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 1.54,
+    "pre_model_s": 0.03,
+    "model_s": 1.38
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 2.16,
+    "pre_model_s": 0.04,
+    "model_s": 1.94
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 1.6,
+    "pre_model_s": 0.04,
+    "model_s": 1.43
+   }
+  ],
+  "turn1_wall_s": 2.73,
+  "S2": {
+   "mb": 409.3,
+   "procs": 7,
+   "names": {
+    "claudeplusplus": 4,
+    "claude": 3
+   },
+   "cpu_s": 3.74,
+   "t": 1794297586.368725
+  },
+  "S3mid": {
+   "mb": 448.7,
+   "procs": 7,
+   "names": {
+    "claudeplusplus": 4,
+    "claude": 3
+   },
+   "cpu_s": 5.17,
+   "t": 1794297658.321683
+  },
+  "S3": {
+   "mb": 188.5,
+   "procs": 5,
+   "names": {
+    "claudeplusplus": 4,
+    "claude": 1
+   },
+   "cpu_s": 3.08,
+   "t": 1794297709.774401
+  },
+  "turn2": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 3.41,
+    "pre_model_s": 1.76,
+    "model_s": 1.52
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 3.39,
+    "pre_model_s": 1.72,
+    "model_s": 1.46
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 1.71,
+    "pre_model_s": 0.02,
+    "model_s": 1.51
+   }
+  ],
+  "turn2_wall_s": 3.95,
+  "S4": {
+   "mb": 459.6,
+   "procs": 7,
+   "names": {
+    "claudeplusplus": 4,
+    "claude": 3
+   },
+   "cpu_s": 5.7,
+   "t": 1794297717.63072
+  },
+  "screen_tail": null,
+  "died": [
+   null,
+   null,
+   null
+  ],
+  "leaked_procs": 1,
+  "usage": {
+   "requests": 6,
+   "input": 12,
+   "cache_write": 57047,
+   "cache_read": 86316,
+   "output": 30
+  },
+  "claude_record": null
+ },
+ {
+  "scenario": "sep-active",
+  "arm": "claude++/opt",
+  "rep": 1,
+  "load": 16.1,
+  "first_paint_s": 0.008,
+  "S0": {
+   "mb": 18.6,
+   "procs": 4,
+   "names": {
+    "claudeplusplus": 4
+   },
+   "cpu_s": 0.27,
+   "t": 1794297742.088925
+  },
+  "S1": {
+   "mb": 402.5,
+   "procs": 7,
+   "names": {
+    "claudeplusplus": 4,
+    "claude": 3
+   },
+   "cpu_s": 3.55,
+   "t": 1794297756.400689
+  },
+  "turn1": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 1.85,
+    "pre_model_s": 0.05,
+    "model_s": 1.67
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 1.71,
+    "pre_model_s": 0.04,
+    "model_s": 1.5
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 2.25,
+    "pre_model_s": 0.11,
+    "model_s": 2.02
+   }
+  ],
+  "turn1_wall_s": 3.39,
+  "S2": {
+   "mb": 444.7,
+   "procs": 7,
+   "names": {
+    "claudeplusplus": 4,
+    "claude": 3
+   },
+   "cpu_s": 4.72,
+   "t": 1794297763.764859
+  },
+  "S3mid": {
+   "mb": 443.8,
+   "procs": 7,
+   "names": {
+    "claudeplusplus": 4,
+    "claude": 3
+   },
+   "cpu_s": 5.83,
+   "t": 1794297835.719877
+  },
+  "S3": {
+   "mb": 150.8,
+   "procs": 5,
+   "names": {
+    "claudeplusplus": 4,
+    "claude": 1
+   },
+   "cpu_s": 2.77,
+   "t": 1794297887.154689
+  },
+  "turn2": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 3.09,
+    "pre_model_s": 1.28,
+    "model_s": 1.59
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 3.06,
+    "pre_model_s": 1.48,
+    "model_s": 1.38
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 1.83,
+    "pre_model_s": 0.03,
+    "model_s": 1.69
+   }
+  ],
+  "turn2_wall_s": 3.64,
+  "S4": {
+   "mb": 457.0,
+   "procs": 8,
+   "names": {
+    "claudeplusplus": 4,
+    "claude": 3
+   },
+   "cpu_s": 5.59,
+   "t": 1794297894.684618
+  },
+  "screen_tail": null,
+  "died": [
+   null,
+   null,
+   null
+  ],
+  "leaked_procs": 1,
+  "usage": {
+   "requests": 6,
+   "input": 12,
+   "cache_write": 56927,
+   "cache_read": 86316,
+   "output": 30
+  },
+  "claude_record": null
+ }
+]

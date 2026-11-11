@@ -1,0 +1,978 @@
+[
+ {
+  "arm": "claude++/opt",
+  "round": 0,
+  "load": 11.9,
+  "first_paint_s": 0.018,
+  "warmup": {
+   "answered": true,
+   "pre": 0.037,
+   "model": 1.701,
+   "total": 1.738,
+   "seen": 1.964
+  },
+  "turns": [
+   {
+    "answered": true,
+    "pre": 0.008,
+    "model": 1.219,
+    "total": 1.227,
+    "seen": 1.445
+   },
+   {
+    "answered": true,
+    "pre": 0.007,
+    "model": 1.272,
+    "total": 1.279,
+    "seen": 1.496
+   },
+   {
+    "answered": true,
+    "pre": 0.006,
+    "model": 1.144,
+    "total": 1.15,
+    "seen": 1.362
+   },
+   {
+    "answered": true,
+    "pre": 0.007,
+    "model": 1.267,
+    "total": 1.274,
+    "seen": 1.486
+   },
+   {
+    "answered": true,
+    "pre": 0.006,
+    "model": 1.201,
+    "total": 1.207,
+    "seen": 1.406
+   },
+   {
+    "answered": true,
+    "pre": 0.006,
+    "model": 1.351,
+    "total": 1.357,
+    "seen": 1.607
+   }
+  ],
+  "mb": 161.3,
+  "procs": 3,
+  "requests": 7,
+  "ctx_per_request": 24078
+ },
+ {
+  "arm": "claude",
+  "round": 0,
+  "load": 9.5,
+  "first_paint_s": 0.688,
+  "warmup": {
+   "answered": true,
+   "pre": 0.026,
+   "model": 2.125,
+   "total": 2.151,
+   "seen": 2.16
+  },
+  "turns": [
+   {
+    "answered": true,
+    "pre": 0.01,
+    "model": 1.236,
+    "total": 1.246,
+    "seen": 1.272
+   },
+   {
+    "answered": true,
+    "pre": 0.005,
+    "model": 1.303,
+    "total": 1.308,
+    "seen": 1.326
+   },
+   {
+    "answered": true,
+    "pre": 0.007,
+    "model": 1.61,
+    "total": 1.617,
+    "seen": 1.671
+   },
+   {
+    "answered": true,
+    "pre": 0.012,
+    "model": 1.401,
+    "total": 1.413,
+    "seen": 1.44
+   },
+   {
+    "answered": true,
+    "pre": 0.005,
+    "model": 1.359,
+    "total": 1.364,
+    "seen": 1.421
+   },
+   {
+    "answered": true,
+    "pre": 0.009,
+    "model": 1.35,
+    "total": 1.359,
+    "seen": 1.389
+   }
+  ],
+  "mb": 308.7,
+  "procs": 6,
+  "requests": 7,
+  "ctx_per_request": 49902
+ },
+ {
+  "arm": "claude++",
+  "round": 0,
+  "load": 7.5,
+  "first_paint_s": 0.014,
+  "warmup": {
+   "answered": true,
+   "pre": 0.033,
+   "model": 1.687,
+   "total": 1.72,
+   "seen": 1.902
+  },
+  "turns": [
+   {
+    "answered": true,
+    "pre": 0.01,
+    "model": 1.576,
+    "total": 1.586,
+    "seen": 1.741
+   },
+   {
+    "answered": true,
+    "pre": 0.008,
+    "model": 1.458,
+    "total": 1.466,
+    "seen": 1.728
+   },
+   {
+    "answered": true,
+    "pre": 0.005,
+    "model": 1.34,
+    "total": 1.345,
+    "seen": 1.489
+   },
+   {
+    "answered": true,
+    "pre": 0.008,
+    "model": 1.611,
+    "total": 1.619,
+    "seen": 1.871
+   },
+   {
+    "answered": true,
+    "pre": 0.021,
+    "model": 1.313,
+    "total": 1.334,
+    "seen": 1.538
+   },
+   {
+    "answered": true,
+    "pre": 0.009,
+    "model": 1.352,
+    "total": 1.361,
+    "seen": 1.624
+   }
+  ],
+  "mb": 258.6,
+  "procs": 7,
+  "requests": 7,
+  "ctx_per_request": 36094
+ },
+ {
+  "arm": "claude/flags",
+  "round": 0,
+  "load": 7.9,
+  "first_paint_s": 0.447,
+  "warmup": {
+   "answered": true,
+   "pre": 0.02,
+   "model": 1.51,
+   "total": 1.53,
+   "seen": 1.54
+  },
+  "turns": [
+   {
+    "answered": true,
+    "pre": 0.028,
+    "model": 1.449,
+    "total": 1.477,
+    "seen": 1.543
+   },
+   {
+    "answered": true,
+    "pre": 0.027,
+    "model": 1.413,
+    "total": 1.44,
+    "seen": 1.493
+   },
+   {
+    "answered": true,
+    "pre": 0.004,
+    "model": 1.177,
+    "total": 1.181,
+    "seen": 1.234
+   },
+   {
+    "answered": true,
+    "pre": 0.009,
+    "model": 1.312,
+    "total": 1.321,
+    "seen": 1.381
+   },
+   {
+    "answered": true,
+    "pre": 0.003,
+    "model": 1.101,
+    "total": 1.104,
+    "seen": 1.174
+   },
+   {
+    "answered": true,
+    "pre": 0.006,
+    "model": 1.289,
+    "total": 1.295,
+    "seen": 1.308
+   }
+  ],
+  "mb": 207.7,
+  "procs": 2,
+  "requests": 7,
+  "ctx_per_request": 25264
+ },
+ {
+  "arm": "claude",
+  "round": 1,
+  "load": 8.1,
+  "first_paint_s": 0.406,
+  "warmup": {
+   "answered": true,
+   "pre": 0.012,
+   "model": 1.595,
+   "total": 1.607,
+   "seen": 1.665
+  },
+  "turns": [
+   {
+    "answered": true,
+    "pre": 0.004,
+    "model": 1.324,
+    "total": 1.328,
+    "seen": 1.366
+   },
+   {
+    "answered": true,
+    "pre": 0.003,
+    "model": 1.377,
+    "total": 1.38,
+    "seen": 1.426
+   },
+   {
+    "answered": true,
+    "pre": 0.007,
+    "model": 1.458,
+    "total": 1.465,
+    "seen": 1.506
+   },
+   {
+    "answered": true,
+    "pre": 0.005,
+    "model": 1.35,
+    "total": 1.355,
+    "seen": 1.379
+   },
+   {
+    "answered": true,
+    "pre": 0.003,
+    "model": 1.23,
+    "total": 1.233,
+    "seen": 1.249
+   },
+   {
+    "answered": true,
+    "pre": 0.002,
+    "model": 1.856,
+    "total": 1.858,
+    "seen": 1.891
+   }
+  ],
+  "mb": 310.7,
+  "procs": 6,
+  "requests": 7,
+  "ctx_per_request": 49885
+ },
+ {
+  "arm": "claude/flags",
+  "round": 1,
+  "load": 6.0,
+  "first_paint_s": 0.22,
+  "warmup": {
+   "answered": true,
+   "pre": 0.01,
+   "model": 1.235,
+   "total": 1.245,
+   "seen": 1.269
+  },
+  "turns": [
+   {
+    "answered": true,
+    "pre": 0.006,
+    "model": 1.268,
+    "total": 1.274,
+    "seen": 1.297
+   },
+   {
+    "answered": true,
+    "pre": 0.01,
+    "model": 1.076,
+    "total": 1.086,
+    "seen": 1.113
+   },
+   {
+    "answered": true,
+    "pre": 0.003,
+    "model": 1.133,
+    "total": 1.136,
+    "seen": 1.154
+   },
+   {
+    "answered": true,
+    "pre": 0.005,
+    "model": 1.29,
+    "total": 1.295,
+    "seen": 1.348
+   },
+   {
+    "answered": true,
+    "pre": 0.005,
+    "model": 1.14,
+    "total": 1.145,
+    "seen": 1.177
+   },
+   {
+    "answered": true,
+    "pre": 0.002,
+    "model": 1.192,
+    "total": 1.194,
+    "seen": 1.199
+   }
+  ],
+  "mb": 228.8,
+  "procs": 2,
+  "requests": 7,
+  "ctx_per_request": 25266
+ },
+ {
+  "arm": "claude++/opt",
+  "round": 1,
+  "load": 4.1,
+  "first_paint_s": 0.009,
+  "warmup": {
+   "answered": true,
+   "pre": 0.023,
+   "model": 1.675,
+   "total": 1.698,
+   "seen": 1.86
+  },
+  "turns": [
+   {
+    "answered": true,
+    "pre": 0.005,
+    "model": 1.104,
+    "total": 1.109,
+    "seen": 1.261
+   },
+   {
+    "answered": true,
+    "pre": 0.004,
+    "model": 1.278,
+    "total": 1.282,
+    "seen": 1.411
+   },
+   {
+    "answered": true,
+    "pre": 0.007,
+    "model": 1.367,
+    "total": 1.374,
+    "seen": 1.63
+   },
+   {
+    "answered": true,
+    "pre": 0.008,
+    "model": 1.358,
+    "total": 1.366,
+    "seen": 1.615
+   },
+   {
+    "answered": true,
+    "pre": 0.003,
+    "model": 1.237,
+    "total": 1.24,
+    "seen": 1.387
+   },
+   {
+    "answered": true,
+    "pre": 0.014,
+    "model": 1.12,
+    "total": 1.134,
+    "seen": 1.281
+   }
+  ],
+  "mb": 157.7,
+  "procs": 3,
+  "requests": 7,
+  "ctx_per_request": 24088
+ },
+ {
+  "arm": "claude++",
+  "round": 1,
+  "load": 5.3,
+  "first_paint_s": 0.008,
+  "warmup": {
+   "answered": true,
+   "pre": 0.02,
+   "model": 2.053,
+   "total": 2.073,
+   "seen": 2.22
+  },
+  "turns": [
+   {
+    "answered": true,
+    "pre": 0.009,
+    "model": 1.144,
+    "total": 1.153,
+    "seen": 1.295
+   },
+   {
+    "answered": true,
+    "pre": 0.005,
+    "model": 1.044,
+    "total": 1.049,
+    "seen": 1.17
+   },
+   {
+    "answered": true,
+    "pre": 0.009,
+    "model": 1.67,
+    "total": 1.679,
+    "seen": 1.975
+   },
+   {
+    "answered": true,
+    "pre": 0.007,
+    "model": 1.435,
+    "total": 1.442,
+    "seen": 1.744
+   },
+   {
+    "answered": true,
+    "pre": 0.006,
+    "model": 1.397,
+    "total": 1.403,
+    "seen": 1.634
+   },
+   {
+    "answered": true,
+    "pre": 0.005,
+    "model": 1.334,
+    "total": 1.339,
+    "seen": 1.567
+   }
+  ],
+  "mb": 255.0,
+  "procs": 7,
+  "requests": 7,
+  "ctx_per_request": 36097
+ },
+ {
+  "arm": "claude/flags",
+  "round": 2,
+  "load": 9.3,
+  "first_paint_s": 0.691,
+  "warmup": {
+   "answered": true,
+   "pre": 0.026,
+   "model": 1.48,
+   "total": 1.506,
+   "seen": 1.527
+  },
+  "turns": [
+   {
+    "answered": true,
+    "pre": 0.007,
+    "model": 1.838,
+    "total": 1.845,
+    "seen": 1.882
+   },
+   {
+    "answered": true,
+    "pre": 0.005,
+    "model": 1.281,
+    "total": 1.286,
+    "seen": 1.323
+   },
+   {
+    "answered": true,
+    "pre": 0.005,
+    "model": 1.238,
+    "total": 1.243,
+    "seen": 1.284
+   },
+   {
+    "answered": true,
+    "pre": 0.006,
+    "model": 1.438,
+    "total": 1.444,
+    "seen": 1.488
+   },
+   {
+    "answered": true,
+    "pre": 0.006,
+    "model": 1.273,
+    "total": 1.279,
+    "seen": 1.337
+   },
+   {
+    "answered": true,
+    "pre": 0.01,
+    "model": 1.305,
+    "total": 1.315,
+    "seen": 1.382
+   }
+  ],
+  "mb": 201.8,
+  "procs": 2,
+  "requests": 7,
+  "ctx_per_request": 25276
+ },
+ {
+  "arm": "claude++/opt",
+  "round": 2,
+  "load": 11.9,
+  "first_paint_s": 0.013,
+  "warmup": {
+   "answered": true,
+   "pre": 0.019,
+   "model": 1.441,
+   "total": 1.46,
+   "seen": 1.591
+  },
+  "turns": [
+   {
+    "answered": true,
+    "pre": 0.005,
+    "model": 1.173,
+    "total": 1.178,
+    "seen": 1.313
+   },
+   {
+    "answered": true,
+    "pre": 0.003,
+    "model": 1.052,
+    "total": 1.055,
+    "seen": 1.204
+   },
+   {
+    "answered": true,
+    "pre": 0.006,
+    "model": 1.235,
+    "total": 1.241,
+    "seen": 1.371
+   },
+   {
+    "answered": true,
+    "pre": 0.008,
+    "model": 1.2,
+    "total": 1.208,
+    "seen": 1.384
+   },
+   {
+    "answered": true,
+    "pre": 0.004,
+    "model": 1.287,
+    "total": 1.291,
+    "seen": 1.409
+   },
+   {
+    "answered": true,
+    "pre": 0.002,
+    "model": 0.965,
+    "total": 0.967,
+    "seen": 1.079
+   }
+  ],
+  "mb": 157.0,
+  "procs": 3,
+  "requests": 7,
+  "ctx_per_request": 24027
+ },
+ {
+  "arm": "claude++",
+  "round": 2,
+  "load": 7.5,
+  "first_paint_s": 0.01,
+  "warmup": {
+   "answered": true,
+   "pre": 0.044,
+   "model": 1.597,
+   "total": 1.641,
+   "seen": 1.757
+  },
+  "turns": [
+   {
+    "answered": true,
+    "pre": 0.009,
+    "model": 1.136,
+    "total": 1.145,
+    "seen": 1.296
+   },
+   {
+    "answered": true,
+    "pre": 0.009,
+    "model": 1.2,
+    "total": 1.209,
+    "seen": 1.314
+   },
+   {
+    "answered": true,
+    "pre": 0.009,
+    "model": 1.148,
+    "total": 1.157,
+    "seen": 1.289
+   },
+   {
+    "answered": true,
+    "pre": 0.007,
+    "model": 1.273,
+    "total": 1.28,
+    "seen": 1.404
+   },
+   {
+    "answered": true,
+    "pre": 0.01,
+    "model": 1.144,
+    "total": 1.154,
+    "seen": 1.293
+   },
+   {
+    "answered": true,
+    "pre": 0.011,
+    "model": 1.101,
+    "total": 1.112,
+    "seen": 1.267
+   }
+  ],
+  "mb": 258.1,
+  "procs": 7,
+  "requests": 7,
+  "ctx_per_request": 36118
+ },
+ {
+  "arm": "claude",
+  "round": 2,
+  "load": 5.7,
+  "first_paint_s": 0.239,
+  "warmup": {
+   "answered": true,
+   "pre": 0.027,
+   "model": 1.714,
+   "total": 1.741,
+   "seen": 1.752
+  },
+  "turns": [
+   {
+    "answered": true,
+    "pre": 0.015,
+    "model": 1.199,
+    "total": 1.214,
+    "seen": 1.246
+   },
+   {
+    "answered": true,
+    "pre": 0.011,
+    "model": 1.205,
+    "total": 1.216,
+    "seen": 1.235
+   },
+   {
+    "answered": true,
+    "pre": 0.014,
+    "model": 1.141,
+    "total": 1.155,
+    "seen": 1.19
+   },
+   {
+    "answered": true,
+    "pre": 0.011,
+    "model": 1.42,
+    "total": 1.431,
+    "seen": 1.5
+   },
+   {
+    "answered": true,
+    "pre": 0.007,
+    "model": 1.327,
+    "total": 1.334,
+    "seen": 1.393
+   },
+   {
+    "answered": true,
+    "pre": 0.011,
+    "model": 1.367,
+    "total": 1.378,
+    "seen": 1.393
+   }
+  ],
+  "mb": 300.7,
+  "procs": 6,
+  "requests": 7,
+  "ctx_per_request": 49899
+ },
+ {
+  "arm": "claude++",
+  "round": 3,
+  "load": 3.2,
+  "first_paint_s": 0.01,
+  "warmup": {
+   "answered": true,
+   "pre": 0.039,
+   "model": 2.171,
+   "total": 2.21,
+   "seen": 2.355
+  },
+  "turns": [
+   {
+    "answered": true,
+    "pre": 0.011,
+    "model": 1.15,
+    "total": 1.161,
+    "seen": 1.282
+   },
+   {
+    "answered": true,
+    "pre": 0.006,
+    "model": 1.217,
+    "total": 1.223,
+    "seen": 1.377
+   },
+   {
+    "answered": true,
+    "pre": 0.008,
+    "model": 1.213,
+    "total": 1.221,
+    "seen": 1.41
+   },
+   {
+    "answered": true,
+    "pre": 0.01,
+    "model": 1.164,
+    "total": 1.174,
+    "seen": 1.332
+   },
+   {
+    "answered": true,
+    "pre": 0.009,
+    "model": 1.082,
+    "total": 1.091,
+    "seen": 1.253
+   },
+   {
+    "answered": true,
+    "pre": 0.005,
+    "model": 1.623,
+    "total": 1.628,
+    "seen": 1.792
+   }
+  ],
+  "mb": 256.9,
+  "procs": 7,
+  "requests": 7,
+  "ctx_per_request": 36121
+ },
+ {
+  "arm": "claude",
+  "round": 3,
+  "load": 3.1,
+  "first_paint_s": 0.225,
+  "warmup": {
+   "answered": true,
+   "pre": 0.029,
+   "model": 1.611,
+   "total": 1.64,
+   "seen": 1.653
+  },
+  "turns": [
+   {
+    "answered": true,
+    "pre": 0.008,
+    "model": 1.243,
+    "total": 1.251,
+    "seen": 1.291
+   },
+   {
+    "answered": true,
+    "pre": 0.011,
+    "model": 1.2,
+    "total": 1.211,
+    "seen": 1.246
+   },
+   {
+    "answered": true,
+    "pre": 0.01,
+    "model": 1.127,
+    "total": 1.137,
+    "seen": 1.169
+   },
+   {
+    "answered": true,
+    "pre": 0.009,
+    "model": 1.162,
+    "total": 1.171,
+    "seen": 1.191
+   },
+   {
+    "answered": true,
+    "pre": 0.01,
+    "model": 1.234,
+    "total": 1.244,
+    "seen": 1.269
+   },
+   {
+    "answered": true,
+    "pre": 0.011,
+    "model": 1.152,
+    "total": 1.163,
+    "seen": 1.223
+   }
+  ],
+  "mb": 305.7,
+  "procs": 6,
+  "requests": 7,
+  "ctx_per_request": 49888
+ },
+ {
+  "arm": "claude/flags",
+  "round": 3,
+  "load": 2.7,
+  "first_paint_s": 0.224,
+  "warmup": {
+   "answered": true,
+   "pre": 0.01,
+   "model": 1.223,
+   "total": 1.233,
+   "seen": 1.268
+  },
+  "turns": [
+   {
+    "answered": true,
+    "pre": 0.007,
+    "model": 1.105,
+    "total": 1.112,
+    "seen": 1.146
+   },
+   {
+    "answered": true,
+    "pre": 0.005,
+    "model": 1.604,
+    "total": 1.609,
+    "seen": 1.614
+   },
+   {
+    "answered": true,
+    "pre": 0.002,
+    "model": 1.125,
+    "total": 1.127,
+    "seen": 1.14
+   },
+   {
+    "answered": true,
+    "pre": 0.002,
+    "model": 1.199,
+    "total": 1.201,
+    "seen": 1.248
+   },
+   {
+    "answered": true,
+    "pre": 0.009,
+    "model": 1.629,
+    "total": 1.638,
+    "seen": 1.696
+   },
+   {
+    "answered": true,
+    "pre": 0.009,
+    "model": 1.113,
+    "total": 1.122,
+    "seen": 1.178
+   }
+  ],
+  "mb": 211.7,
+  "procs": 2,
+  "requests": 7,
+  "ctx_per_request": 25268
+ },
+ {
+  "arm": "claude++/opt",
+  "round": 3,
+  "load": 3.0,
+  "first_paint_s": 0.008,
+  "warmup": {
+   "answered": true,
+   "pre": 0.017,
+   "model": 1.157,
+   "total": 1.174,
+   "seen": 1.309
+  },
+  "turns": [
+   {
+    "answered": true,
+    "pre": 0.004,
+    "model": 1.04,
+    "total": 1.044,
+    "seen": 1.245
+   },
+   {
+    "answered": true,
+    "pre": 0.002,
+    "model": 1.05,
+    "total": 1.052,
+    "seen": 1.162
+   },
+   {
+    "answered": true,
+    "pre": 0.002,
+    "model": 1.362,
+    "total": 1.364,
+    "seen": 1.481
+   },
+   {
+    "answered": true,
+    "pre": 0.002,
+    "model": 1.088,
+    "total": 1.09,
+    "seen": 1.21
+   },
+   {
+    "answered": true,
+    "pre": 0.003,
+    "model": 0.999,
+    "total": 1.002,
+    "seen": 1.118
+   },
+   {
+    "answered": true,
+    "pre": 0.006,
+    "model": 1.229,
+    "total": 1.235,
+    "seen": 1.344
+   }
+  ],
+  "mb": 159.8,
+  "procs": 3,
+  "requests": 7,
+  "ctx_per_request": 24027
+ }
+]

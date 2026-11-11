@@ -1,0 +1,3706 @@
+[
+ {
+  "scenario": "tabs-diff",
+  "arm": "claude++/opt",
+  "rep": 1,
+  "load": 15.2,
+  "first_paint_s": 0.021,
+  "S0": {
+   "mb": 6.0,
+   "procs": 2,
+   "names": {
+    "claudeplusplus": 1
+   },
+   "cpu_s": 0.14,
+   "t": 1794284231.519872
+  },
+  "S1": {
+   "mb": 401.0,
+   "procs": 4,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 3
+   },
+   "cpu_s": 3.89,
+   "t": 1794284251.823412
+  },
+  "turn1": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 2.19,
+    "pre_model_s": 0.08,
+    "model_s": 1.57
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 1.75,
+    "pre_model_s": 0.05,
+    "model_s": 1.57
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 2.08,
+    "pre_model_s": 0.2,
+    "model_s": 1.7
+   }
+  ],
+  "turn1_wall_s": 4.06,
+  "S2": {
+   "mb": 438.0,
+   "procs": 4,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 3
+   },
+   "cpu_s": 5.08,
+   "t": 1794284260.13603
+  },
+  "S3": {
+   "mb": 149.4,
+   "procs": 2,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 1
+   },
+   "cpu_s": 2.13,
+   "t": 1794284300.65661
+  },
+  "turn2": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 4.6,
+    "pre_model_s": 2.46,
+    "model_s": 1.94
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 4.21,
+    "pre_model_s": 2.5,
+    "model_s": 1.52
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 2.07,
+    "pre_model_s": 0.08,
+    "model_s": 1.79
+   }
+  ],
+  "turn2_wall_s": 5.18,
+  "S4": {
+   "mb": 444.7,
+   "procs": 4,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 3
+   },
+   "cpu_s": 5.45,
+   "t": 1794284310.236435
+  },
+  "screen_tail": null,
+  "died": [
+   null
+  ],
+  "leaked_procs": 0,
+  "usage": {
+   "requests": 6,
+   "input": 12,
+   "cache_write": 56923,
+   "cache_read": 86316,
+   "output": 30
+  },
+  "claude_record": null
+ },
+ {
+  "scenario": "tabs-diff",
+  "arm": "claude++/opt",
+  "rep": 0,
+  "load": 16.1,
+  "first_paint_s": 0.013,
+  "S0": {
+   "mb": 5.9,
+   "procs": 1,
+   "names": {
+    "claudeplusplus": 1
+   },
+   "cpu_s": 0.1,
+   "t": 1794284330.362377
+  },
+  "S1": {
+   "mb": 449.1,
+   "procs": 4,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 3
+   },
+   "cpu_s": 5.47,
+   "t": 1794284350.8675451
+  },
+  "turn1": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 2.36,
+    "pre_model_s": 0.15,
+    "model_s": 2.06
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 2.82,
+    "pre_model_s": 0.23,
+    "model_s": 2.47
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 2.72,
+    "pre_model_s": 0.16,
+    "model_s": 2.4
+   }
+  ],
+  "turn1_wall_s": 4.67,
+  "S2": {
+   "mb": 468.6,
+   "procs": 4,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 3
+   },
+   "cpu_s": 7.14,
+   "t": 1794284359.880193
+  },
+  "S3": {
+   "mb": 184.4,
+   "procs": 2,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 1
+   },
+   "cpu_s": 4.06,
+   "t": 1794284401.444343
+  },
+  "turn2": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 8.71,
+    "pre_model_s": 4.58,
+    "model_s": 3.9
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 8.87,
+    "pre_model_s": 5.81,
+    "model_s": 2.87
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 2.77,
+    "pre_model_s": 0.07,
+    "model_s": 2.46
+   }
+  ],
+  "turn2_wall_s": 9.84,
+  "S4": {
+   "mb": 472.7,
+   "procs": 4,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 3
+   },
+   "cpu_s": 7.81,
+   "t": 1794284415.932037
+  },
+  "screen_tail": null,
+  "died": [
+   null
+  ],
+  "leaked_procs": 0,
+  "usage": {
+   "requests": 6,
+   "input": 12,
+   "cache_write": 47541,
+   "cache_read": 95771,
+   "output": 108
+  },
+  "claude_record": null
+ },
+ {
+  "scenario": "sep-diff",
+  "arm": "claude",
+  "rep": 1,
+  "load": 24.5,
+  "first_paint_s": 3.33,
+  "S0": {
+   "mb": 760.0,
+   "procs": 15,
+   "names": {
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 8.39,
+   "t": 1794284436.483295
+  },
+  "S1": {
+   "mb": 762.0,
+   "procs": 15,
+   "names": {
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 9.24,
+   "t": 1794284450.969481
+  },
+  "turn1": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 3.78,
+    "pre_model_s": 0.06,
+    "model_s": 3.52
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 3.98,
+    "pre_model_s": 0.57,
+    "model_s": 3.09
+   },
+   {
+    "session": 2,
+    "answered": false
+   }
+  ],
+  "turn1_wall_s": null,
+  "S2": {
+   "mb": 797.0,
+   "procs": 15,
+   "names": {
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 18.5,
+   "t": 1794284607.884887
+  },
+  "S3": {
+   "mb": 793.0,
+   "procs": 15,
+   "names": {
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 19.62,
+   "t": 1794284648.907493
+  },
+  "turn2": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 3.77,
+    "pre_model_s": 0.1,
+    "model_s": 3.45
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 3.07,
+    "pre_model_s": 0.04,
+    "model_s": 2.87
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 3.23,
+    "pre_model_s": 0.05,
+    "model_s": 2.96
+   }
+  ],
+  "turn2_wall_s": 4.38,
+  "S4": {
+   "mb": 866.2,
+   "procs": 18,
+   "names": {
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9,
+    "caffeinate": 3
+   },
+   "cpu_s": 22.07,
+   "t": 1794284658.39727
+  },
+  "screen_tail": [
+   "\r\u2722\r\u2733\r\u27361\r\u273b\r\u273d\r1\r2\r\u273b\r\u2736\r\u27332\r\u2722\r\u00b7\r\u2026\r\u2722g\r\u2733n\r\u2736\r\u273bi\u2026\r\u273dkg\r\u23fa50Q\rWorking\u2026(running Stop hook \u00b7 3s \u00b7 \u21932 tokens)\rWorking\u20264\r\u273bWorking\u20265\rWorking\u2026\r\u2736\r8661\r\u27334\r\u2722Working\u2026\r\u00b7Working\u2026\r\u273bCrunched for 4s \u00b7 done 8:24 PM\r\r\r\u276f\u00a0",
+   "[38;2;235;159;127mn\r\u273bi\u2026\r\u273dtg1\run\r1\r\u273boi\r2\r\u2736rt\r\u2733\r\u2722pu\r\u00b7So\rr\r\u2722p\r\u2733S\r\u2736\r\u273b\r\u23fa54Q\rSprouting\u2026(running Stop hook \u00b7 2s)\r\u273dSprouting\u2026 \u00b7 \u21932 tokens)\rSprouting\u202634\rSprouting\u20265\rSprouting\u2026\r\u273bSprouting\u2026\r8661\rSprouting\u2026\r\u2736\r\u273bCogitated for 3s \u00b7 done 8:24 PM\r\r\r\u276f\u00a0",
+   "ess shift+tab twice to enable.\r\u276f\u00a0\r \u00b7 \u2190 2 agents\r\u273b\r\u2736\r\u2733\r\u2722\r1\r\u00b7\r1\r2\r\u2722\r\u2733\r\u2736\r\u273b\r\u273d\r\u273b\r\u2736\r\u2733(2s \u00b7 \u21931 tokens)\r\u23fa\r\u2722\r70Q\rIdeating\u2026running Sp hook \u00b7 3s \u00b7 \u21931 tokens)\r\u00b7Ideating\u20263\rIdeating\u20265\rIdeating\u2026\r661\rIdeating\u2026\r\u2722Ideating\u2026\rIdeating\u2026\r\u2733\r\u2736\r\u273bCooked for 3s \u00b7 done 8:24 PM\r\r\r\u276f\u00a0"
+  ],
+  "died": [
+   null,
+   null,
+   null
+  ],
+  "leaked_procs": 0,
+  "usage": {
+   "requests": 6,
+   "input": 12,
+   "cache_write": 82480,
+   "cache_read": 215822,
+   "output": 167
+  },
+  "claude_record": {
+   "input": 3525,
+   "cache_write": 82480,
+   "cache_read": 215822,
+   "output": 228,
+   "cost_usd": 0.01912072,
+   "n": 3
+  }
+ },
+ {
+  "scenario": "sep-same",
+  "arm": "claude++/opt",
+  "rep": 1,
+  "load": 27.3,
+  "first_paint_s": 0.126,
+  "S0": {
+   "mb": 15.9,
+   "procs": 3,
+   "names": {
+    "claudeplusplus": 3
+   },
+   "cpu_s": 0.33,
+   "t": 1794284692.777666
+  },
+  "S1": {
+   "mb": 380.2,
+   "procs": 6,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3
+   },
+   "cpu_s": 4.1,
+   "t": 1794284707.1846132
+  },
+  "turn1": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 2.19,
+    "pre_model_s": 0.08,
+    "model_s": 1.98
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 3.03,
+    "pre_model_s": 0.06,
+    "model_s": 2.81
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 2.34,
+    "pre_model_s": 0.07,
+    "model_s": 2.09
+   }
+  ],
+  "turn1_wall_s": 3.61,
+  "S2": {
+   "mb": 434.3,
+   "procs": 6,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3
+   },
+   "cpu_s": 5.54,
+   "t": 1794284714.815973
+  },
+  "S3": {
+   "mb": 421.3,
+   "procs": 6,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3
+   },
+   "cpu_s": 6.58,
+   "t": 1794284755.262391
+  },
+  "turn2": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 5.71,
+    "pre_model_s": 1.24,
+    "model_s": 4.27
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 4.87,
+    "pre_model_s": 1.19,
+    "model_s": 3.57
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 4.33,
+    "pre_model_s": 0.58,
+    "model_s": 3.55
+   }
+  ],
+  "turn2_wall_s": 5.71,
+  "S4": {
+   "mb": 442.4,
+   "procs": 6,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3
+   },
+   "cpu_s": 7.46,
+   "t": 1794284766.764974
+  },
+  "screen_tail": null,
+  "died": [
+   null,
+   null,
+   null
+  ],
+  "leaked_procs": 0,
+  "usage": {
+   "requests": 6,
+   "input": 12,
+   "cache_write": 61157,
+   "cache_read": 82086,
+   "output": 30
+  },
+  "claude_record": null
+ },
+ {
+  "scenario": "sep-same",
+  "arm": "claude++/opt",
+  "rep": 2,
+  "load": 28.6,
+  "first_paint_s": 0.045,
+  "S0": {
+   "mb": 15.8,
+   "procs": 3,
+   "names": {
+    "claudeplusplus": 3
+   },
+   "cpu_s": 0.26,
+   "t": 1794284791.3430521
+  },
+  "S1": {
+   "mb": 380.0,
+   "procs": 6,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3
+   },
+   "cpu_s": 4.05,
+   "t": 1794284805.699834
+  },
+  "turn1": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 2.06,
+    "pre_model_s": 0.07,
+    "model_s": 1.88
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 2.46,
+    "pre_model_s": 0.07,
+    "model_s": 2.23
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 2.67,
+    "pre_model_s": 0.09,
+    "model_s": 2.37
+   }
+  ],
+  "turn1_wall_s": 3.81,
+  "S2": {
+   "mb": 431.3,
+   "procs": 6,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3
+   },
+   "cpu_s": 5.52,
+   "t": 1794284813.38846
+  },
+  "S3": {
+   "mb": 421.1,
+   "procs": 6,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3
+   },
+   "cpu_s": 6.6,
+   "t": 1794284854.946982
+  },
+  "turn2": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 3.93,
+    "pre_model_s": 0.16,
+    "model_s": 3.58
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 3.35,
+    "pre_model_s": 0.04,
+    "model_s": 3.12
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 3.11,
+    "pre_model_s": 0.04,
+    "model_s": 2.9
+   }
+  ],
+  "turn2_wall_s": 4.27,
+  "S4": {
+   "mb": 454.4,
+   "procs": 6,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3
+   },
+   "cpu_s": 7.43,
+   "t": 1794284864.456362
+  },
+  "screen_tail": null,
+  "died": [
+   null,
+   null,
+   null
+  ],
+  "leaked_procs": 0,
+  "usage": {
+   "requests": 6,
+   "input": 12,
+   "cache_write": 38180,
+   "cache_read": 105227,
+   "output": 190
+  },
+  "claude_record": null
+ },
+ {
+  "scenario": "sep-same",
+  "arm": "claude++",
+  "rep": 1,
+  "load": 28.7,
+  "first_paint_s": 0.018,
+  "S0": {
+   "mb": 15.8,
+   "procs": 3,
+   "names": {
+    "claudeplusplus": 3
+   },
+   "cpu_s": 0.3,
+   "t": 1794284897.724276
+  },
+  "S1": {
+   "mb": 666.0,
+   "procs": 18,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 6.1,
+   "t": 1794284912.168292
+  },
+  "turn1": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 2.78,
+    "pre_model_s": 0.07,
+    "model_s": 2.57
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 2.19,
+    "pre_model_s": 0.05,
+    "model_s": 2.03
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 2.17,
+    "pre_model_s": 0.05,
+    "model_s": 2.0
+   }
+  ],
+  "turn1_wall_s": 3.33,
+  "S2": {
+   "mb": 712.1,
+   "procs": 18,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 7.62,
+   "t": 1794284919.794911
+  },
+  "S3": {
+   "mb": 703.1,
+   "procs": 19,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 8.72,
+   "t": 1794284960.486631
+  },
+  "turn2": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 2.36,
+    "pre_model_s": 0.03,
+    "model_s": 2.15
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 1.89,
+    "pre_model_s": 0.03,
+    "model_s": 1.7
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 1.87,
+    "pre_model_s": 0.03,
+    "model_s": 1.66
+   }
+  ],
+  "turn2_wall_s": 3.03,
+  "S4": {
+   "mb": 726.4,
+   "procs": 18,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 9.3,
+   "t": 1794284967.787134
+  },
+  "screen_tail": null,
+  "died": [
+   null,
+   null,
+   null
+  ],
+  "leaked_procs": 0,
+  "usage": {
+   "requests": 6,
+   "input": 12,
+   "cache_write": 107975,
+   "cache_read": 107580,
+   "output": 227
+  },
+  "claude_record": null
+ },
+ {
+  "scenario": "tabs-diff",
+  "arm": "claude++",
+  "rep": 2,
+  "load": 23.1,
+  "first_paint_s": 0.015,
+  "S0": {
+   "mb": 6.1,
+   "procs": 1,
+   "names": {
+    "claudeplusplus": 1
+   },
+   "cpu_s": 0.1,
+   "t": 1794285017.16627
+  },
+  "S1": {
+   "mb": 670.4,
+   "procs": 16,
+   "names": {
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9,
+    "claudeplusplus": 1
+   },
+   "cpu_s": 5.56,
+   "t": 1794285037.564068
+  },
+  "turn1": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 2.15,
+    "pre_model_s": 0.06,
+    "model_s": 1.94
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 2.16,
+    "pre_model_s": 0.07,
+    "model_s": 1.89
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 2.31,
+    "pre_model_s": 0.06,
+    "model_s": 2.11
+   }
+  ],
+  "turn1_wall_s": 4.26,
+  "S2": {
+   "mb": 709.4,
+   "procs": 16,
+   "names": {
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9,
+    "claudeplusplus": 1
+   },
+   "cpu_s": 7.1,
+   "t": 1794285046.533228
+  },
+  "S3": {
+   "mb": 239.2,
+   "procs": 6,
+   "names": {
+    "claude": 1,
+    "caveman-mcp": 1,
+    "node": 3,
+    "claudeplusplus": 1
+   },
+   "cpu_s": 2.74,
+   "t": 1794285087.064071
+  },
+  "turn2": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 5.96,
+    "pre_model_s": 3.64,
+    "model_s": 2.14
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 5.92,
+    "pre_model_s": 3.8,
+    "model_s": 1.95
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 2.22,
+    "pre_model_s": 0.04,
+    "model_s": 1.96
+   }
+  ],
+  "turn2_wall_s": 6.91,
+  "S4": {
+   "mb": 716.5,
+   "procs": 16,
+   "names": {
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9,
+    "claudeplusplus": 1
+   },
+   "cpu_s": 7.49,
+   "t": 1794285098.401341
+  },
+  "screen_tail": null,
+  "died": [
+   null
+  ],
+  "leaked_procs": 0,
+  "usage": {
+   "requests": 6,
+   "input": 12,
+   "cache_write": 64047,
+   "cache_read": 151489,
+   "output": 241
+  },
+  "claude_record": null
+ },
+ {
+  "scenario": "tabs-same",
+  "arm": "claude++/opt",
+  "rep": 0,
+  "load": 25.8,
+  "first_paint_s": 0.019,
+  "S0": {
+   "mb": 5.4,
+   "procs": 1,
+   "names": {
+    "claudeplusplus": 1
+   },
+   "cpu_s": 0.1,
+   "t": 1794285118.5381591
+  },
+  "S1": {
+   "mb": 396.5,
+   "procs": 4,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 3
+   },
+   "cpu_s": 3.62,
+   "t": 1794285134.7731872
+  },
+  "turn1": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 2.17,
+    "pre_model_s": 0.06,
+    "model_s": 1.79
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 1.6,
+    "pre_model_s": 0.05,
+    "model_s": 1.4
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 1.92,
+    "pre_model_s": 0.04,
+    "model_s": 1.69
+   }
+  ],
+  "turn1_wall_s": 3.9,
+  "S2": {
+   "mb": 434.5,
+   "procs": 4,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 3
+   },
+   "cpu_s": 4.83,
+   "t": 1794285142.97187
+  },
+  "S3": {
+   "mb": 148.4,
+   "procs": 2,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 1
+   },
+   "cpu_s": 2.11,
+   "t": 1794285183.281845
+  },
+  "turn2": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 6.81,
+    "pre_model_s": 4.3,
+    "model_s": 2.39
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 8.06,
+    "pre_model_s": 5.79,
+    "model_s": 2.12
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 2.98,
+    "pre_model_s": 0.08,
+    "model_s": 2.67
+   }
+  ],
+  "turn2_wall_s": 9.04,
+  "S4": {
+   "mb": 446.6,
+   "procs": 4,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 3
+   },
+   "cpu_s": 6.05,
+   "t": 1794285196.787091
+  },
+  "screen_tail": null,
+  "died": [
+   null
+  ],
+  "leaked_procs": 0,
+  "usage": {
+   "requests": 6,
+   "input": 12,
+   "cache_write": 47538,
+   "cache_read": 95771,
+   "output": 99
+  },
+  "claude_record": null
+ },
+ {
+  "scenario": "sep-same",
+  "arm": "claude++",
+  "rep": 2,
+  "load": 36.1,
+  "first_paint_s": 0.093,
+  "S0": {
+   "mb": 15.9,
+   "procs": 3,
+   "names": {
+    "claudeplusplus": 3
+   },
+   "cpu_s": 0.31,
+   "t": 1794285217.274987
+  },
+  "S1": {
+   "mb": 667.1,
+   "procs": 18,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 6.51,
+   "t": 1794285232.182517
+  },
+  "turn1": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 3.18,
+    "pre_model_s": 0.13,
+    "model_s": 2.86
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 3.32,
+    "pre_model_s": 0.08,
+    "model_s": 2.99
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 3.11,
+    "pre_model_s": 0.08,
+    "model_s": 2.89
+   }
+  ],
+  "turn1_wall_s": 4.25,
+  "S2": {
+   "mb": 712.6,
+   "procs": 18,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 8.28,
+   "t": 1794285241.2243578
+  },
+  "S3": {
+   "mb": 708.3,
+   "procs": 18,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 9.39,
+   "t": 1794285281.7640011
+  },
+  "turn2": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 1.82,
+    "pre_model_s": 0.03,
+    "model_s": 1.6
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 1.68,
+    "pre_model_s": 0.02,
+    "model_s": 1.53
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 1.68,
+    "pre_model_s": 0.03,
+    "model_s": 1.52
+   }
+  ],
+  "turn2_wall_s": 2.84,
+  "S4": {
+   "mb": 727.6,
+   "procs": 18,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 9.98,
+   "t": 1794285289.028437
+  },
+  "screen_tail": null,
+  "died": [
+   null,
+   null,
+   null
+  ],
+  "leaked_procs": 0,
+  "usage": {
+   "requests": 6,
+   "input": 12,
+   "cache_write": 59820,
+   "cache_read": 155712,
+   "output": 198
+  },
+  "claude_record": null
+ },
+ {
+  "scenario": "sep-same",
+  "arm": "claude",
+  "rep": 0,
+  "load": 56.8,
+  "first_paint_s": 1.534,
+  "S0": {
+   "mb": 777.0,
+   "procs": 15,
+   "names": {
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 8.13,
+   "t": 1794285322.353813
+  },
+  "S1": {
+   "mb": 762.0,
+   "procs": 15,
+   "names": {
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 9.21,
+   "t": 1794285336.944155
+  },
+  "turn1": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 3.08,
+    "pre_model_s": 0.05,
+    "model_s": 2.82
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 3.33,
+    "pre_model_s": 0.12,
+    "model_s": 3.02
+   },
+   {
+    "session": 2,
+    "answered": false
+   }
+  ],
+  "turn1_wall_s": null,
+  "S2": {
+   "mb": 794.0,
+   "procs": 15,
+   "names": {
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 16.93,
+   "t": 1794285492.5128179
+  },
+  "S3": {
+   "mb": 791.0,
+   "procs": 15,
+   "names": {
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 17.79,
+   "t": 1794285533.111179
+  },
+  "turn2": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 2.24,
+    "pre_model_s": 0.05,
+    "model_s": 2.06
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 1.8,
+    "pre_model_s": 0.03,
+    "model_s": 1.63
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 1.94,
+    "pre_model_s": 0.03,
+    "model_s": 1.66
+   }
+  ],
+  "turn2_wall_s": 3.06,
+  "S4": {
+   "mb": 857.2,
+   "procs": 18,
+   "names": {
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9,
+    "caffeinate": 3
+   },
+   "cpu_s": 19.6,
+   "t": 1794285540.500965
+  },
+  "screen_tail": [
+   "wed by the letter Q and nothing else.                                                       \r\u00b7Unfurling\u2026 (running UserPromptSubmit hooks\u2026 0/3 \u00b7 0s)\r  \u23bf \u00a0Tip: Run /install-slack-app to use Claude in Slack\r\u276f\u00a0\r \u00b7 \u2190 2 agents\r\u2722g\r1\r\u2733n\r2\r\u2736\r\u273bi\u2026\r\u273dlg\rrn\r\u273bui\r\u2736fl\r\u2733\r\u2722nr\r\u00b7Uu\r\u23fa50Q\rUnfurling\u2026(running Stop hook \u00b7 2s)\rUnfurling\u2026 \u00b7 \u21932 tokens)\rUnfurling\u20263\r\u2722Unfurling\u20265\rUnfurling\u2026\r\u273bCrunched for 2s \u00b7 done 8:38 PM\r\r\r\u276f\u00a0\r8",
+   "to your previous answer. Reply with the new number followed by the letter Q and nothing else.                                                       \r\u273dEbbing\u2026 (running UserPromptSubmit hooks\u2026 0/3 \u00b7 0s)\r  \u23bf \u00a0Tip: Run /install-slack-app to use Claude in Slack\r\u276f\u00a0\r \u00b7 \u2190 2 agents\r\u273bE\r2\r\u2736\r\r\u2733\r\u2722\r\u00b7\r\u2722\r\u2733\r\u2736\r\u23fa54Q\r\u273bEbbing\u2026(running Stop hook \u00b7 1s \u00b7 \u21932 tokens)\r\u273dEbbing\u20263\rEbbing\u20265\r\u273bCooked for 1s \u00b7 done 8:38 PM\r\r\r\u276f\u00a0\r81",
+   "d by the letter Q and nothing else.                                                       \r\u273bComputing\u2026 (running UserPromptSubmit hooks\u2026 0/3 \u00b7 0s)\r  \u23bf \u00a0Tip: Use /permissions to pre-approve and pre-deny bash, edit, and MCP tools\r\u276f\u00a0\r \u00b7 \u2190 2 agents\r\u2736mt\r\u2733\r\u2722ou\r1\r2\r\u00b7Cp\rm\r\u2722o\r\u2733C\r\u2736\r\u273b\r\u273d\r\u23fa70Q\rComputing\u2026(running Stop hook \u00b7 1s)\rComputing\u2026 \u00b7 \u21932 tokens)\r\u273bComputing\u20264\rComputing\u20265\r\u273bBaked for 2s \u00b7 done 8:38 PM\r\r\r\u276f\u00a0\r1"
+  ],
+  "died": [
+   null,
+   null,
+   null
+  ],
+  "leaked_procs": 0,
+  "usage": {
+   "requests": 6,
+   "input": 12,
+   "cache_write": 87174,
+   "cache_read": 211050,
+   "output": 171
+  },
+  "claude_record": null
+ },
+ {
+  "scenario": "sep-same",
+  "arm": "claude",
+  "rep": 1,
+  "load": 19.8,
+  "first_paint_s": 1.101,
+  "S0": {
+   "mb": 783.0,
+   "procs": 15,
+   "names": {
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 8.93,
+   "t": 1794285565.614034
+  },
+  "S1": {
+   "mb": 778.0,
+   "procs": 15,
+   "names": {
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 9.62,
+   "t": 1794285580.2349539
+  },
+  "turn1": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 2.61,
+    "pre_model_s": 0.16,
+    "model_s": 2.2
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 2.61,
+    "pre_model_s": 0.13,
+    "model_s": 2.24
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 2.37,
+    "pre_model_s": 0.11,
+    "model_s": 2.05
+   }
+  ],
+  "turn1_wall_s": 3.54,
+  "S2": {
+   "mb": 839.2,
+   "procs": 18,
+   "names": {
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9,
+    "caffeinate": 3
+   },
+   "cpu_s": 12.63,
+   "t": 1794285587.862251
+  },
+  "S3": {
+   "mb": 831.0,
+   "procs": 15,
+   "names": {
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 14.33,
+   "t": 1794285628.497775
+  },
+  "turn2": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 1.97,
+    "pre_model_s": 0.03,
+    "model_s": 1.71
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 1.87,
+    "pre_model_s": 0.03,
+    "model_s": 1.64
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 1.89,
+    "pre_model_s": 0.03,
+    "model_s": 1.62
+   }
+  ],
+  "turn2_wall_s": 3.05,
+  "S4": {
+   "mb": 868.2,
+   "procs": 18,
+   "names": {
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9,
+    "caffeinate": 3
+   },
+   "cpu_s": 15.74,
+   "t": 1794285635.6282518
+  },
+  "screen_tail": null,
+  "died": [
+   null,
+   null,
+   null
+  ],
+  "leaked_procs": 0,
+  "usage": {
+   "requests": 6,
+   "input": 12,
+   "cache_write": 62035,
+   "cache_read": 236347,
+   "output": 258
+  },
+  "claude_record": null
+ },
+ {
+  "scenario": "tabs-diff",
+  "arm": "claude++",
+  "rep": 0,
+  "load": 15.9,
+  "first_paint_s": 0.014,
+  "S0": {
+   "mb": 5.8,
+   "procs": 1,
+   "names": {
+    "claudeplusplus": 1
+   },
+   "cpu_s": 0.1,
+   "t": 1794285659.757359
+  },
+  "S1": {
+   "mb": 683.8,
+   "procs": 16,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 5.46,
+   "t": 1794285680.140982
+  },
+  "turn1": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 2.27,
+    "pre_model_s": 0.09,
+    "model_s": 2.03
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 1.98,
+    "pre_model_s": 0.08,
+    "model_s": 1.72
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 2.15,
+    "pre_model_s": 0.09,
+    "model_s": 1.91
+   }
+  ],
+  "turn1_wall_s": 4.11,
+  "S2": {
+   "mb": 710.5,
+   "procs": 16,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 6.89,
+   "t": 1794285688.737851
+  },
+  "S3": {
+   "mb": 240.3,
+   "procs": 6,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 1,
+    "caveman-mcp": 1,
+    "node": 3
+   },
+   "cpu_s": 2.8,
+   "t": 1794285729.306036
+  },
+  "turn2": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 7.14,
+    "pre_model_s": 4.81,
+    "model_s": 2.15
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 6.75,
+    "pre_model_s": 4.59,
+    "model_s": 1.97
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 3.23,
+    "pre_model_s": 0.1,
+    "model_s": 2.95
+   }
+  ],
+  "turn2_wall_s": 7.76,
+  "S4": {
+   "mb": 718.7,
+   "procs": 16,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 8.43,
+   "t": 1794285741.591079
+  },
+  "screen_tail": null,
+  "died": [
+   null
+  ],
+  "leaked_procs": 0,
+  "usage": {
+   "requests": 6,
+   "input": 12,
+   "cache_write": 60564,
+   "cache_read": 155708,
+   "output": 226
+  },
+  "claude_record": null
+ },
+ {
+  "scenario": "sep-same",
+  "arm": "claude++",
+  "rep": 0,
+  "load": 21.5,
+  "first_paint_s": 0.011,
+  "S0": {
+   "mb": 15.9,
+   "procs": 3,
+   "names": {
+    "claudeplusplus": 3
+   },
+   "cpu_s": 0.33,
+   "t": 1794285762.158668
+  },
+  "S1": {
+   "mb": 666.2,
+   "procs": 18,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 6.82,
+   "t": 1794285776.731487
+  },
+  "turn1": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 2.51,
+    "pre_model_s": 0.09,
+    "model_s": 2.21
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 2.42,
+    "pre_model_s": 0.1,
+    "model_s": 1.95
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 2.79,
+    "pre_model_s": 0.09,
+    "model_s": 2.46
+   }
+  ],
+  "turn1_wall_s": 3.96,
+  "S2": {
+   "mb": 711.3,
+   "procs": 18,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 8.43,
+   "t": 1794285784.788309
+  },
+  "S3": {
+   "mb": 734.3,
+   "procs": 18,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 10.07,
+   "t": 1794285825.597286
+  },
+  "turn2": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 2.19,
+    "pre_model_s": 0.07,
+    "model_s": 1.92
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 2.17,
+    "pre_model_s": 0.05,
+    "model_s": 1.95
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 1.92,
+    "pre_model_s": 0.03,
+    "model_s": 1.69
+   }
+  ],
+  "turn2_wall_s": 3.1,
+  "S4": {
+   "mb": 755.4,
+   "procs": 18,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 10.78,
+   "t": 1794285833.162699
+  },
+  "screen_tail": null,
+  "died": [
+   null,
+   null,
+   null
+  ],
+  "leaked_procs": 0,
+  "usage": {
+   "requests": 6,
+   "input": 12,
+   "cache_write": 59841,
+   "cache_read": 155715,
+   "output": 216
+  },
+  "claude_record": null
+ },
+ {
+  "scenario": "sep-same",
+  "arm": "claude++/opt",
+  "rep": 0,
+  "load": 18.9,
+  "first_paint_s": 0.014,
+  "S0": {
+   "mb": 16.1,
+   "procs": 3,
+   "names": {
+    "claudeplusplus": 3
+   },
+   "cpu_s": 0.3,
+   "t": 1794285857.740536
+  },
+  "S1": {
+   "mb": 396.2,
+   "procs": 6,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3
+   },
+   "cpu_s": 4.1,
+   "t": 1794285872.110571
+  },
+  "turn1": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 2.09,
+    "pre_model_s": 0.08,
+    "model_s": 1.85
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 2.07,
+    "pre_model_s": 0.1,
+    "model_s": 1.8
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 2.52,
+    "pre_model_s": 0.1,
+    "model_s": 2.25
+   }
+  ],
+  "turn1_wall_s": 3.67,
+  "S2": {
+   "mb": 439.3,
+   "procs": 6,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3
+   },
+   "cpu_s": 5.52,
+   "t": 1794285879.906898
+  },
+  "S3": {
+   "mb": 437.3,
+   "procs": 6,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3
+   },
+   "cpu_s": 6.59,
+   "t": 1794285920.620607
+  },
+  "turn2": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 3.03,
+    "pre_model_s": 0.15,
+    "model_s": 2.7
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 3.82,
+    "pre_model_s": 0.06,
+    "model_s": 3.6
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 3.03,
+    "pre_model_s": 0.11,
+    "model_s": 2.76
+   }
+  ],
+  "turn2_wall_s": 4.39,
+  "S4": {
+   "mb": 453.3,
+   "procs": 6,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3
+   },
+   "cpu_s": 7.39,
+   "t": 1794285928.976009
+  },
+  "screen_tail": null,
+  "died": [
+   null,
+   null,
+   null
+  ],
+  "leaked_procs": 0,
+  "usage": {
+   "requests": 6,
+   "input": 12,
+   "cache_write": 47530,
+   "cache_read": 95770,
+   "output": 96
+  },
+  "claude_record": null
+ },
+ {
+  "scenario": "sep-diff",
+  "arm": "claude++",
+  "rep": 0,
+  "load": 25.0,
+  "first_paint_s": 0.017,
+  "S0": {
+   "mb": 18.0,
+   "procs": 3,
+   "names": {
+    "claudeplusplus": 3
+   },
+   "cpu_s": 0.32,
+   "t": 1794285953.359602
+  },
+  "S1": {
+   "mb": 677.3,
+   "procs": 18,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 6.88,
+   "t": 1794285968.3384352
+  },
+  "turn1": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 3.74,
+    "pre_model_s": 0.52,
+    "model_s": 3.04
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 4.18,
+    "pre_model_s": 0.41,
+    "model_s": 3.59
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 3.04,
+    "pre_model_s": 0.26,
+    "model_s": 2.64
+   }
+  ],
+  "turn1_wall_s": 4.75,
+  "S2": {
+   "mb": 716.4,
+   "procs": 18,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 8.54,
+   "t": 1794285977.209651
+  },
+  "S3": {
+   "mb": 717.4,
+   "procs": 18,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 9.7,
+   "t": 1794286017.6839721
+  },
+  "turn2": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 1.67,
+    "pre_model_s": 0.02,
+    "model_s": 1.42
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 1.65,
+    "pre_model_s": 0.02,
+    "model_s": 1.48
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 1.55,
+    "pre_model_s": 0.03,
+    "model_s": 1.36
+   }
+  ],
+  "turn2_wall_s": 2.68,
+  "S4": {
+   "mb": 734.7,
+   "procs": 18,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 10.31,
+   "t": 1794286025.5747268
+  },
+  "screen_tail": null,
+  "died": [
+   null,
+   null,
+   null
+  ],
+  "leaked_procs": 0,
+  "usage": {
+   "requests": 6,
+   "input": 12,
+   "cache_write": 59847,
+   "cache_read": 155713,
+   "output": 259
+  },
+  "claude_record": null
+ },
+ {
+  "scenario": "tabs-same",
+  "arm": "claude++",
+  "rep": 2,
+  "load": 17.4,
+  "first_paint_s": 0.011,
+  "S0": {
+   "mb": 5.2,
+   "procs": 1,
+   "names": {
+    "claudeplusplus": 1
+   },
+   "cpu_s": 0.1,
+   "t": 1794286049.931131
+  },
+  "S1": {
+   "mb": 655.5,
+   "procs": 17,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 6.7,
+   "t": 1794286067.6061141
+  },
+  "turn1": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 4.58,
+    "pre_model_s": 0.19,
+    "model_s": 4.28
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 4.4,
+    "pre_model_s": 0.33,
+    "model_s": 3.84
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 3.66,
+    "pre_model_s": 0.71,
+    "model_s": 2.82
+   }
+  ],
+  "turn1_wall_s": 5.63,
+  "S2": {
+   "mb": 699.5,
+   "procs": 16,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 8.46,
+   "t": 1794286078.147094
+  },
+  "S3": {
+   "mb": 237.3,
+   "procs": 6,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 1,
+    "caveman-mcp": 1,
+    "node": 3
+   },
+   "cpu_s": 3.32,
+   "t": 1794286118.56864
+  },
+  "turn2": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 3.83,
+    "pre_model_s": 1.82,
+    "model_s": 1.78
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 4.19,
+    "pre_model_s": 1.95,
+    "model_s": 2.08
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 1.96,
+    "pre_model_s": 0.08,
+    "model_s": 1.78
+   }
+  ],
+  "turn2_wall_s": 5.19,
+  "S4": {
+   "mb": 725.7,
+   "procs": 16,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 8.26,
+   "t": 1794286128.184546
+  },
+  "screen_tail": null,
+  "died": [
+   null
+  ],
+  "leaked_procs": 0,
+  "usage": {
+   "requests": 6,
+   "input": 12,
+   "cache_write": 60517,
+   "cache_read": 155713,
+   "output": 267
+  },
+  "claude_record": null
+ },
+ {
+  "scenario": "sep-diff",
+  "arm": "claude",
+  "rep": 0,
+  "load": 17.8,
+  "first_paint_s": 0.955,
+  "S0": {
+   "mb": 786.0,
+   "procs": 15,
+   "names": {
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 7.99,
+   "t": 1794286149.703645
+  },
+  "S1": {
+   "mb": 776.0,
+   "procs": 15,
+   "names": {
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 8.52,
+   "t": 1794286164.019535
+  },
+  "turn1": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 2.33,
+    "pre_model_s": 0.04,
+    "model_s": 2.03
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 2.44,
+    "pre_model_s": 0.05,
+    "model_s": 2.18
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 2.31,
+    "pre_model_s": 0.05,
+    "model_s": 2.02
+   }
+  ],
+  "turn1_wall_s": 3.46,
+  "S2": {
+   "mb": 837.2,
+   "procs": 18,
+   "names": {
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9,
+    "caffeinate": 3
+   },
+   "cpu_s": 10.85,
+   "t": 1794286171.46647
+  },
+  "S3": {
+   "mb": 831.0,
+   "procs": 15,
+   "names": {
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 12.55,
+   "t": 1794286213.184222
+  },
+  "turn2": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 3.19,
+    "pre_model_s": 0.08,
+    "model_s": 2.94
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 2.73,
+    "pre_model_s": 0.03,
+    "model_s": 2.56
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 2.84,
+    "pre_model_s": 0.04,
+    "model_s": 2.54
+   }
+  ],
+  "turn2_wall_s": 4.0,
+  "S4": {
+   "mb": 876.2,
+   "procs": 18,
+   "names": {
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9,
+    "caffeinate": 3
+   },
+   "cpu_s": 14.52,
+   "t": 1794286221.945051
+  },
+  "screen_tail": null,
+  "died": [
+   null,
+   null,
+   null
+  ],
+  "leaked_procs": 0,
+  "usage": {
+   "requests": 6,
+   "input": 12,
+   "cache_write": 61968,
+   "cache_read": 236286,
+   "output": 252
+  },
+  "claude_record": {
+   "input": 3525,
+   "cache_write": 61968,
+   "cache_read": 236286,
+   "output": 316,
+   "cost_usd": 0.01526696,
+   "n": 3
+  }
+ },
+ {
+  "scenario": "sep-same",
+  "arm": "claude",
+  "rep": 2,
+  "load": 20.2,
+  "first_paint_s": 1.325,
+  "S0": {
+   "mb": 776.0,
+   "procs": 15,
+   "names": {
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 8.76,
+   "t": 1794286246.540709
+  },
+  "S1": {
+   "mb": 772.0,
+   "procs": 15,
+   "names": {
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 9.52,
+   "t": 1794286260.916513
+  },
+  "turn1": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 2.3,
+    "pre_model_s": 0.07,
+    "model_s": 2.0
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 3.02,
+    "pre_model_s": 0.14,
+    "model_s": 2.29
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 2.6,
+    "pre_model_s": 0.11,
+    "model_s": 1.98
+   }
+  ],
+  "turn1_wall_s": 3.73,
+  "S2": {
+   "mb": 841.2,
+   "procs": 18,
+   "names": {
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9,
+    "caffeinate": 3
+   },
+   "cpu_s": 12.66,
+   "t": 1794286268.737098
+  },
+  "S3": {
+   "mb": 828.0,
+   "procs": 15,
+   "names": {
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 13.75,
+   "t": 1794286309.211384
+  },
+  "turn2": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 1.69,
+    "pre_model_s": 0.01,
+    "model_s": 1.5
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 1.8,
+    "pre_model_s": 0.01,
+    "model_s": 1.61
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 2.64,
+    "pre_model_s": 0.01,
+    "model_s": 2.46
+   }
+  ],
+  "turn2_wall_s": 3.78,
+  "S4": {
+   "mb": 861.2,
+   "procs": 18,
+   "names": {
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9,
+    "caffeinate": 3
+   },
+   "cpu_s": 14.87,
+   "t": 1794286317.0013251
+  },
+  "screen_tail": null,
+  "died": [
+   null,
+   null,
+   null
+  ],
+  "leaked_procs": 0,
+  "usage": {
+   "requests": 6,
+   "input": 12,
+   "cache_write": 61949,
+   "cache_read": 236304,
+   "output": 251
+  },
+  "claude_record": null
+ },
+ {
+  "scenario": "sep-diff",
+  "arm": "claude++/opt",
+  "rep": 1,
+  "load": 13.8,
+  "first_paint_s": 0.014,
+  "S0": {
+   "mb": 18.0,
+   "procs": 3,
+   "names": {
+    "claudeplusplus": 3
+   },
+   "cpu_s": 0.24,
+   "t": 1794286341.3341131
+  },
+  "S1": {
+   "mb": 411.0,
+   "procs": 6,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3
+   },
+   "cpu_s": 3.3,
+   "t": 1794286355.571245
+  },
+  "turn1": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 2.31,
+    "pre_model_s": 0.05,
+    "model_s": 2.08
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 1.62,
+    "pre_model_s": 0.04,
+    "model_s": 1.42
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 1.8,
+    "pre_model_s": 0.04,
+    "model_s": 1.62
+   }
+  ],
+  "turn1_wall_s": 2.96,
+  "S2": {
+   "mb": 447.1,
+   "procs": 6,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3
+   },
+   "cpu_s": 4.39,
+   "t": 1794286362.426613
+  },
+  "S3": {
+   "mb": 443.1,
+   "procs": 6,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3
+   },
+   "cpu_s": 5.24,
+   "t": 1794286402.785772
+  },
+  "turn2": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 1.67,
+    "pre_model_s": 0.03,
+    "model_s": 1.51
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 1.53,
+    "pre_model_s": 0.02,
+    "model_s": 1.34
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 1.39,
+    "pre_model_s": 0.02,
+    "model_s": 1.25
+   }
+  ],
+  "turn2_wall_s": 2.55,
+  "S4": {
+   "mb": 457.5,
+   "procs": 6,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3
+   },
+   "cpu_s": 5.64,
+   "t": 1794286409.2800891
+  },
+  "screen_tail": null,
+  "died": [
+   null,
+   null,
+   null
+  ],
+  "leaked_procs": 0,
+  "usage": {
+   "requests": 6,
+   "input": 12,
+   "cache_write": 56917,
+   "cache_read": 86316,
+   "output": 30
+  },
+  "claude_record": null
+ },
+ {
+  "scenario": "sep-diff",
+  "arm": "claude",
+  "rep": 2,
+  "load": 13.3,
+  "first_paint_s": 1.569,
+  "S0": {
+   "mb": 772.0,
+   "procs": 15,
+   "names": {
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 7.73,
+   "t": 1794286433.880358
+  },
+  "S1": {
+   "mb": 774.0,
+   "procs": 15,
+   "names": {
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 8.33,
+   "t": 1794286448.253977
+  },
+  "turn1": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 2.41,
+    "pre_model_s": 0.04,
+    "model_s": 2.08
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 3.38,
+    "pre_model_s": 0.06,
+    "model_s": 3.12
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 3.35,
+    "pre_model_s": 0.13,
+    "model_s": 3.0
+   }
+  ],
+  "turn1_wall_s": 4.52,
+  "S2": {
+   "mb": 846.2,
+   "procs": 18,
+   "names": {
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9,
+    "caffeinate": 3
+   },
+   "cpu_s": 10.77,
+   "t": 1794286456.8241448
+  },
+  "S3": {
+   "mb": 851.0,
+   "procs": 15,
+   "names": {
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 13.18,
+   "t": 1794286498.283128
+  },
+  "turn2": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 3.73,
+    "pre_model_s": 0.07,
+    "model_s": 3.48
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 3.4,
+    "pre_model_s": 0.03,
+    "model_s": 3.11
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 3.08,
+    "pre_model_s": 0.21,
+    "model_s": 2.64
+   }
+  ],
+  "turn2_wall_s": 4.23,
+  "S4": {
+   "mb": 889.2,
+   "procs": 18,
+   "names": {
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9,
+    "caffeinate": 3
+   },
+   "cpu_s": 15.28,
+   "t": 1794286506.692752
+  },
+  "screen_tail": null,
+  "died": [
+   null,
+   null,
+   null
+  ],
+  "leaked_procs": 0,
+  "usage": {
+   "requests": 6,
+   "input": 12,
+   "cache_write": 62039,
+   "cache_read": 236312,
+   "output": 297
+  },
+  "claude_record": {
+   "input": 3525,
+   "cache_write": 62039,
+   "cache_read": 236312,
+   "output": 355,
+   "cost_usd": 0.015300919999999999,
+   "n": 3
+  }
+ },
+ {
+  "scenario": "sep-diff",
+  "arm": "claude++/opt",
+  "rep": 0,
+  "load": 23.1,
+  "first_paint_s": 0.145,
+  "S0": {
+   "mb": 15.2,
+   "procs": 3,
+   "names": {
+    "claudeplusplus": 3
+   },
+   "cpu_s": 0.26,
+   "t": 1794286531.31074
+  },
+  "S1": {
+   "mb": 384.8,
+   "procs": 6,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3
+   },
+   "cpu_s": 4.41,
+   "t": 1794286545.614295
+  },
+  "turn1": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 1.77,
+    "pre_model_s": 0.08,
+    "model_s": 1.51
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 1.85,
+    "pre_model_s": 0.07,
+    "model_s": 1.57
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 2.04,
+    "pre_model_s": 0.09,
+    "model_s": 1.83
+   }
+  ],
+  "turn1_wall_s": 3.18,
+  "S2": {
+   "mb": 436.9,
+   "procs": 6,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3
+   },
+   "cpu_s": 5.85,
+   "t": 1794286552.878253
+  },
+  "S3": {
+   "mb": 429.0,
+   "procs": 6,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3
+   },
+   "cpu_s": 6.78,
+   "t": 1794286593.4774861
+  },
+  "turn2": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 1.8,
+    "pre_model_s": 0.1,
+    "model_s": 1.57
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 2.22,
+    "pre_model_s": 0.04,
+    "model_s": 2.02
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 1.87,
+    "pre_model_s": 0.04,
+    "model_s": 1.69
+   }
+  ],
+  "turn2_wall_s": 3.01,
+  "S4": {
+   "mb": 446.3,
+   "procs": 6,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3
+   },
+   "cpu_s": 7.36,
+   "t": 1794286600.4818501
+  },
+  "screen_tail": null,
+  "died": [
+   null,
+   null,
+   null
+  ],
+  "leaked_procs": 0,
+  "usage": {
+   "requests": 6,
+   "input": 12,
+   "cache_write": 47558,
+   "cache_read": 95771,
+   "output": 103
+  },
+  "claude_record": null
+ },
+ {
+  "scenario": "tabs-same",
+  "arm": "claude++",
+  "rep": 0,
+  "load": 22.9,
+  "first_paint_s": 0.012,
+  "S0": {
+   "mb": 5.3,
+   "procs": 1,
+   "names": {
+    "claudeplusplus": 1
+   },
+   "cpu_s": 0.09,
+   "t": 1794286624.633478
+  },
+  "S1": {
+   "mb": 685.7,
+   "procs": 17,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 6.26,
+   "t": 1794286640.9808462
+  },
+  "turn1": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 2.17,
+    "pre_model_s": 0.08,
+    "model_s": 1.68
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 1.84,
+    "pre_model_s": 0.07,
+    "model_s": 1.6
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 1.96,
+    "pre_model_s": 0.05,
+    "model_s": 1.75
+   }
+  ],
+  "turn1_wall_s": 3.94,
+  "S2": {
+   "mb": 700.8,
+   "procs": 16,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 7.57,
+   "t": 1794286649.255436
+  },
+  "S3": {
+   "mb": 239.7,
+   "procs": 6,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 1,
+    "caveman-mcp": 1,
+    "node": 3
+   },
+   "cpu_s": 2.71,
+   "t": 1794286689.6458728
+  },
+  "turn2": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 2.94,
+    "pre_model_s": 1.24,
+    "model_s": 1.57
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 2.82,
+    "pre_model_s": 1.35,
+    "model_s": 1.31
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 1.52,
+    "pre_model_s": 0.01,
+    "model_s": 1.3
+   }
+  ],
+  "turn2_wall_s": 3.83,
+  "S4": {
+   "mb": 705.9,
+   "procs": 16,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 6.46,
+   "t": 1794286697.77046
+  },
+  "screen_tail": null,
+  "died": [
+   null
+  ],
+  "leaked_procs": 0,
+  "usage": {
+   "requests": 6,
+   "input": 12,
+   "cache_write": 60291,
+   "cache_read": 155724,
+   "output": 194
+  },
+  "claude_record": null
+ },
+ {
+  "scenario": "tabs-diff",
+  "arm": "claude++",
+  "rep": 1,
+  "load": 17.4,
+  "first_paint_s": 0.008,
+  "S0": {
+   "mb": 5.6,
+   "procs": 1,
+   "names": {
+    "claudeplusplus": 1
+   },
+   "cpu_s": 0.07,
+   "t": 1794286717.885387
+  },
+  "S1": {
+   "mb": 688.8,
+   "procs": 16,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 5.11,
+   "t": 1794286738.287394
+  },
+  "turn1": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 2.26,
+    "pre_model_s": 0.18,
+    "model_s": 1.86
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 1.97,
+    "pre_model_s": 0.07,
+    "model_s": 1.74
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 2.11,
+    "pre_model_s": 0.05,
+    "model_s": 1.85
+   }
+  ],
+  "turn1_wall_s": 4.06,
+  "S2": {
+   "mb": 720.9,
+   "procs": 16,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 6.33,
+   "t": 1794286746.677686
+  },
+  "S3": {
+   "mb": 244.8,
+   "procs": 6,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 1,
+    "caveman-mcp": 1,
+    "node": 3
+   },
+   "cpu_s": 2.4,
+   "t": 1794286786.9815512
+  },
+  "turn2": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 3.28,
+    "pre_model_s": 1.43,
+    "model_s": 1.62
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 3.57,
+    "pre_model_s": 1.74,
+    "model_s": 1.66
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 1.64,
+    "pre_model_s": 0.04,
+    "model_s": 1.42
+   }
+  ],
+  "turn2_wall_s": 4.56,
+  "S4": {
+   "mb": 733.0,
+   "procs": 16,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 6.35,
+   "t": 1794286795.923414
+  },
+  "screen_tail": null,
+  "died": [
+   null
+  ],
+  "leaked_procs": 0,
+  "usage": {
+   "requests": 6,
+   "input": 12,
+   "cache_write": 59863,
+   "cache_read": 155712,
+   "output": 241
+  },
+  "claude_record": null
+ },
+ {
+  "scenario": "tabs-same",
+  "arm": "claude++",
+  "rep": 1,
+  "load": 15.8,
+  "first_paint_s": 0.008,
+  "S0": {
+   "mb": 5.7,
+   "procs": 1,
+   "names": {
+    "claudeplusplus": 1
+   },
+   "cpu_s": 0.08,
+   "t": 1794286816.0408762
+  },
+  "S1": {
+   "mb": 662.9,
+   "procs": 16,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 4.72,
+   "t": 1794286832.272233
+  },
+  "turn1": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 2.18,
+    "pre_model_s": 0.05,
+    "model_s": 1.62
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 2.19,
+    "pre_model_s": 0.04,
+    "model_s": 1.94
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 1.73,
+    "pre_model_s": 0.04,
+    "model_s": 1.55
+   }
+  ],
+  "turn1_wall_s": 3.72,
+  "S2": {
+   "mb": 699.9,
+   "procs": 16,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 5.75,
+   "t": 1794286840.2961369
+  },
+  "S3": {
+   "mb": 239.6,
+   "procs": 6,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 1,
+    "caveman-mcp": 1,
+    "node": 3
+   },
+   "cpu_s": 2.26,
+   "t": 1794286880.5590332
+  },
+  "turn2": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 5.1,
+    "pre_model_s": 2.38,
+    "model_s": 2.57
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 7.47,
+    "pre_model_s": 4.9,
+    "model_s": 2.39
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 2.42,
+    "pre_model_s": 0.03,
+    "model_s": 2.17
+   }
+  ],
+  "turn2_wall_s": 8.45,
+  "S4": {
+   "mb": 730.0,
+   "procs": 16,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 6.93,
+   "t": 1794286894.0461051
+  },
+  "screen_tail": null,
+  "died": [
+   null
+  ],
+  "leaked_procs": 0,
+  "usage": {
+   "requests": 6,
+   "input": 12,
+   "cache_write": 59872,
+   "cache_read": 155711,
+   "output": 251
+  },
+  "claude_record": null
+ },
+ {
+  "scenario": "sep-diff",
+  "arm": "claude++/opt",
+  "rep": 2,
+  "load": 14.8,
+  "first_paint_s": 0.013,
+  "S0": {
+   "mb": 17.2,
+   "procs": 3,
+   "names": {
+    "claudeplusplus": 3
+   },
+   "cpu_s": 0.24,
+   "t": 1794286914.477931
+  },
+  "S1": {
+   "mb": 411.5,
+   "procs": 6,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3
+   },
+   "cpu_s": 3.36,
+   "t": 1794286928.664843
+  },
+  "turn1": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 1.65,
+    "pre_model_s": 0.04,
+    "model_s": 1.38
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 1.74,
+    "pre_model_s": 0.08,
+    "model_s": 1.46
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 1.6,
+    "pre_model_s": 0.04,
+    "model_s": 1.42
+   }
+  ],
+  "turn1_wall_s": 2.74,
+  "S2": {
+   "mb": 450.7,
+   "procs": 6,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3
+   },
+   "cpu_s": 4.34,
+   "t": 1794286935.366636
+  },
+  "S3": {
+   "mb": 442.7,
+   "procs": 6,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3
+   },
+   "cpu_s": 5.05,
+   "t": 1794286975.710471
+  },
+  "turn2": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 1.7,
+    "pre_model_s": 0.05,
+    "model_s": 1.51
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 1.55,
+    "pre_model_s": 0.05,
+    "model_s": 1.31
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 1.53,
+    "pre_model_s": 0.03,
+    "model_s": 1.34
+   }
+  ],
+  "turn2_wall_s": 2.69,
+  "S4": {
+   "mb": 459.7,
+   "procs": 6,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3
+   },
+   "cpu_s": 5.59,
+   "t": 1794286982.29337
+  },
+  "screen_tail": null,
+  "died": [
+   null,
+   null,
+   null
+  ],
+  "leaked_procs": 0,
+  "usage": {
+   "requests": 6,
+   "input": 12,
+   "cache_write": 56925,
+   "cache_read": 86316,
+   "output": 30
+  },
+  "claude_record": null
+ },
+ {
+  "scenario": "tabs-diff",
+  "arm": "claude++/opt",
+  "rep": 2,
+  "load": 11.7,
+  "first_paint_s": 0.01,
+  "S0": {
+   "mb": 5.9,
+   "procs": 1,
+   "names": {
+    "claudeplusplus": 1
+   },
+   "cpu_s": 0.09,
+   "t": 1794287006.441903
+  },
+  "S1": {
+   "mb": 429.9,
+   "procs": 4,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 3
+   },
+   "cpu_s": 3.52,
+   "t": 1794287026.6563861
+  },
+  "turn1": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 2.14,
+    "pre_model_s": 0.04,
+    "model_s": 1.71
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 1.61,
+    "pre_model_s": 0.03,
+    "model_s": 1.36
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 1.71,
+    "pre_model_s": 0.05,
+    "model_s": 1.52
+   }
+  ],
+  "turn1_wall_s": 3.66,
+  "S2": {
+   "mb": 442.0,
+   "procs": 4,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 3
+   },
+   "cpu_s": 4.5,
+   "t": 1794287034.537142
+  },
+  "S3": {
+   "mb": 148.9,
+   "procs": 2,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 1
+   },
+   "cpu_s": 1.69,
+   "t": 1794287074.877604
+  },
+  "turn2": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 4.03,
+    "pre_model_s": 1.65,
+    "model_s": 2.26
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 4.48,
+    "pre_model_s": 2.52,
+    "model_s": 1.83
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 1.85,
+    "pre_model_s": 0.03,
+    "model_s": 1.68
+   }
+  ],
+  "turn2_wall_s": 5.46,
+  "S4": {
+   "mb": 448.1,
+   "procs": 4,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 3
+   },
+   "cpu_s": 4.44,
+   "t": 1794287084.555713
+  },
+  "screen_tail": null,
+  "died": [
+   null
+  ],
+  "leaked_procs": 0,
+  "usage": {
+   "requests": 6,
+   "input": 12,
+   "cache_write": 47547,
+   "cache_read": 95770,
+   "output": 115
+  },
+  "claude_record": null
+ },
+ {
+  "scenario": "sep-diff",
+  "arm": "claude++",
+  "rep": 2,
+  "load": 25.8,
+  "first_paint_s": 0.039,
+  "S0": {
+   "mb": 16.4,
+   "procs": 3,
+   "names": {
+    "claudeplusplus": 3
+   },
+   "cpu_s": 0.21,
+   "t": 1794287104.953991
+  },
+  "S1": {
+   "mb": 683.1,
+   "procs": 18,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 5.43,
+   "t": 1794287119.533592
+  },
+  "turn1": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 2.32,
+    "pre_model_s": 0.09,
+    "model_s": 2.0
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 2.18,
+    "pre_model_s": 0.06,
+    "model_s": 1.98
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 2.18,
+    "pre_model_s": 0.06,
+    "model_s": 1.97
+   }
+  ],
+  "turn1_wall_s": 3.34,
+  "S2": {
+   "mb": 726.4,
+   "procs": 18,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 6.77,
+   "t": 1794287126.926688
+  },
+  "S3": {
+   "mb": 730.5,
+   "procs": 21,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 7.58,
+   "t": 1794287167.436626
+  },
+  "turn2": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 2.0,
+    "pre_model_s": 0.06,
+    "model_s": 1.8
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 1.88,
+    "pre_model_s": 0.03,
+    "model_s": 1.66
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 1.87,
+    "pre_model_s": 0.03,
+    "model_s": 1.72
+   }
+  ],
+  "turn2_wall_s": 3.0,
+  "S4": {
+   "mb": 745.4,
+   "procs": 18,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 8.27,
+   "t": 1794287174.486835
+  },
+  "screen_tail": null,
+  "died": [
+   null,
+   null,
+   null
+  ],
+  "leaked_procs": 0,
+  "usage": {
+   "requests": 6,
+   "input": 12,
+   "cache_write": 59832,
+   "cache_read": 155707,
+   "output": 235
+  },
+  "claude_record": null
+ },
+ {
+  "scenario": "tabs-same",
+  "arm": "claude++/opt",
+  "rep": 1,
+  "load": 23.0,
+  "first_paint_s": 0.013,
+  "S0": {
+   "mb": 5.7,
+   "procs": 1,
+   "names": {
+    "claudeplusplus": 1
+   },
+   "cpu_s": 0.09,
+   "t": 1794287198.6191201
+  },
+  "S1": {
+   "mb": 389.8,
+   "procs": 4,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 3
+   },
+   "cpu_s": 3.49,
+   "t": 1794287214.827735
+  },
+  "turn1": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 2.15,
+    "pre_model_s": 0.06,
+    "model_s": 1.73
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 1.82,
+    "pre_model_s": 0.04,
+    "model_s": 1.57
+   },
+   {
+    "session": 2,
+    "answered": false
+   }
+  ],
+  "turn1_wall_s": null,
+  "S2": {
+   "mb": 6.8,
+   "procs": 1,
+   "names": {
+    "claudeplusplus": 1
+   },
+   "cpu_s": 0.34,
+   "t": 1794287370.88644
+  },
+  "S3": {
+   "mb": 6.8,
+   "procs": 1,
+   "names": {
+    "claudeplusplus": 1
+   },
+   "cpu_s": 0.39,
+   "t": 1794287410.970284
+  },
+  "turn2": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 3.18,
+    "pre_model_s": 1.36,
+    "model_s": 1.68
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 3.39,
+    "pre_model_s": 1.52,
+    "model_s": 1.7
+   },
+   {
+    "session": 2,
+    "answered": false
+   }
+  ],
+  "turn2_wall_s": null,
+  "S4": {
+   "mb": 6.9,
+   "procs": 1,
+   "names": {
+    "claudeplusplus": 1
+   },
+   "cpu_s": 0.62,
+   "t": 1794287567.05266
+  },
+  "screen_tail": [
+   "3;49m\u280f\u25d2\u25d2\u280b\u0007What is 5times 9?   3\u25d2What is 8times 8?   \u2819\u25d0\u2839\u2838\u25d3\u283c\u28343\u25d1spond\u25cf14Q60\u2826\u2827What is 8times 8?   \u273b Worked for 3s                                     9153\u25cb same 2 \u25cb What is 5 times 9?   3 What is 8 times 8? 1656591949\u25cb What is8 times 8? idle: claude process stopped to free memory; it resumes on your next message0M+6M  888"
+  ],
+  "died": [
+   null
+  ],
+  "leaked_procs": 0,
+  "usage": {
+   "requests": 6,
+   "input": 12,
+   "cache_write": 47544,
+   "cache_read": 95773,
+   "output": 107
+  },
+  "claude_record": null
+ },
+ {
+  "scenario": "tabs-same",
+  "arm": "claude++/opt",
+  "rep": 2,
+  "load": 17.2,
+  "first_paint_s": 0.011,
+  "S0": {
+   "mb": 6.0,
+   "procs": 1,
+   "names": {
+    "claudeplusplus": 1
+   },
+   "cpu_s": 0.09,
+   "t": 1794287587.161498
+  },
+  "S1": {
+   "mb": 400.8,
+   "procs": 4,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 3
+   },
+   "cpu_s": 2.92,
+   "t": 1794287603.304864
+  },
+  "turn1": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 2.21,
+    "pre_model_s": 0.05,
+    "model_s": 1.57
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 1.65,
+    "pre_model_s": 0.06,
+    "model_s": 1.42
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 1.72,
+    "pre_model_s": 0.09,
+    "model_s": 1.45
+   }
+  ],
+  "turn1_wall_s": 3.72,
+  "S2": {
+   "mb": 435.9,
+   "procs": 4,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 3
+   },
+   "cpu_s": 4.03,
+   "t": 1794287611.1650088
+  },
+  "S3": {
+   "mb": 148.8,
+   "procs": 2,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 1
+   },
+   "cpu_s": 1.72,
+   "t": 1794287651.305302
+  },
+  "turn2": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 2.16,
+    "pre_model_s": 0.46,
+    "model_s": 1.3
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 2.39,
+    "pre_model_s": 0.4,
+    "model_s": 1.78
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 1.3,
+    "pre_model_s": 0.01,
+    "model_s": 1.08
+   }
+  ],
+  "turn2_wall_s": 3.37,
+  "S4": {
+   "mb": 449.1,
+   "procs": 4,
+   "names": {
+    "claudeplusplus": 1,
+    "claude": 3
+   },
+   "cpu_s": 3.67,
+   "t": 1794287658.735181
+  },
+  "screen_tail": null,
+  "died": [
+   null
+  ],
+  "leaked_procs": 0,
+  "usage": {
+   "requests": 6,
+   "input": 12,
+   "cache_write": 56929,
+   "cache_read": 86316,
+   "output": 30
+  },
+  "claude_record": null
+ },
+ {
+  "scenario": "sep-diff",
+  "arm": "claude++",
+  "rep": 1,
+  "load": 8.7,
+  "first_paint_s": 0.008,
+  "S0": {
+   "mb": 16.6,
+   "procs": 3,
+   "names": {
+    "claudeplusplus": 3
+   },
+   "cpu_s": 0.14,
+   "t": 1794287678.885494
+  },
+  "S1": {
+   "mb": 696.3,
+   "procs": 18,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 3.78,
+   "t": 1794287692.930294
+  },
+  "turn1": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 1.74,
+    "pre_model_s": 0.03,
+    "model_s": 1.55
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 1.92,
+    "pre_model_s": 0.02,
+    "model_s": 1.7
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 1.68,
+    "pre_model_s": 0.02,
+    "model_s": 1.5
+   }
+  ],
+  "turn1_wall_s": 2.82,
+  "S2": {
+   "mb": 730.6,
+   "procs": 18,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 4.62,
+   "t": 1794287699.627435
+  },
+  "S3": {
+   "mb": 730.6,
+   "procs": 18,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 5.45,
+   "t": 1794287739.955235
+  },
+  "turn2": [
+   {
+    "session": 0,
+    "answered": true,
+    "latency_s": 1.48,
+    "pre_model_s": 0.02,
+    "model_s": 1.29
+   },
+   {
+    "session": 1,
+    "answered": true,
+    "latency_s": 1.45,
+    "pre_model_s": 0.02,
+    "model_s": 1.22
+   },
+   {
+    "session": 2,
+    "answered": true,
+    "latency_s": 1.54,
+    "pre_model_s": 0.01,
+    "model_s": 1.36
+   }
+  ],
+  "turn2_wall_s": 2.7,
+  "S4": {
+   "mb": 753.6,
+   "procs": 18,
+   "names": {
+    "claudeplusplus": 3,
+    "claude": 3,
+    "caveman-mcp": 3,
+    "node": 9
+   },
+   "cpu_s": 5.84,
+   "t": 1794287746.503186
+  },
+  "screen_tail": null,
+  "died": [
+   null,
+   null,
+   null
+  ],
+  "leaked_procs": 0,
+  "usage": {
+   "requests": 6,
+   "input": 12,
+   "cache_write": 59883,
+   "cache_read": 155730,
+   "output": 243
+  },
+  "claude_record": null
+ }
+]

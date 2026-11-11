@@ -1,0 +1,703 @@
+{
+ "claude": "2.1.321 (Claude Code)",
+ "rows": [
+  {
+   "name": "growth: 16 turns, /compact, 1 more",
+   "ok": true,
+   "first_request_tokens": 8759,
+   "results": [
+    {
+     "is_error": false,
+     "text": "1. Zero is the additive identity, meaning that adding it to any number leaves that number unchanged.\n2. Zero is an even number, since it is divisible by 2 with no remainder.\n3. Zero is neither positive nor negative, sitting exactly between ",
+     "cost": 0.0023701,
+     "turns": 1,
+     "usage": {
+      "input_tokens": 2,
+      "cache_creation_input_tokens": 8757,
+      "cache_read_input_tokens": 0,
+      "output_tokens": 1237,
+      "output_tokens_details": {
+       "thinking_tokens": 0
+      },
+      "server_tool_use": {
+       "web_search_requests": 0,
+       "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+       "ephemeral_1h_input_tokens": 8757,
+       "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "global",
+      "iterations": [],
+      "speed": "standard",
+      "fallback_credit": null
+     },
+     "models": {
+      "claude-haiku-5-5": {
+       "in": 2,
+       "out": 1237,
+       "cache_read": 0,
+       "cache_write": 8757,
+       "cost": 0.0023701
+      }
+     }
+    },
+    {
+     "is_error": false,
+     "text": "1. One is the multiplicative identity, meaning that multiplying any number by one leaves it unchanged.\n2. One is neither prime nor composite, which sets it apart from every other positive integer.\n3. One is the smallest positive integer, co",
+     "cost": 0.00334468,
+     "turns": 1,
+     "usage": {
+      "input_tokens": 2,
+      "cache_creation_input_tokens": 1655,
+      "cache_read_input_tokens": 8388,
+      "output_tokens": 1119,
+      "output_tokens_details": {
+       "thinking_tokens": 0
+      },
+      "server_tool_use": {
+       "web_search_requests": 0,
+       "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+       "ephemeral_1h_input_tokens": 1655,
+       "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "global",
+      "iterations": [],
+      "speed": "standard",
+      "fallback_credit": null
+     },
+     "models": {
+      "claude-haiku-5-5": {
+       "in": 4,
+       "out": 2356,
+       "cache_read": 8388,
+       "cache_write": 10412,
+       "cost": 0.00334468
+      }
+     }
+    },
+    {
+     "is_error": false,
+     "text": "1. Two is the smallest and only even prime number, since its only divisors are one and itself.\n2. Two is the first prime number, and every other prime number is odd.\n3. Two is the base of the binary system, which uses only the digits 0 and ",
+     "cost": 0.00424466,
+     "turns": 1,
+     "usage": {
+      "input_tokens": 2,
+      "cache_creation_input_tokens": 1193,
+      "cache_read_input_tokens": 10018,
+      "output_tokens": 1122,
+      "output_tokens_details": {
+       "thinking_tokens": 0
+      },
+      "server_tool_use": {
+       "web_search_requests": 0,
+       "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+       "ephemeral_1h_input_tokens": 1193,
+       "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "global",
+      "iterations": [],
+      "speed": "standard",
+      "fallback_credit": null
+     },
+     "models": {
+      "claude-haiku-5-5": {
+       "in": 6,
+       "out": 3478,
+       "cache_read": 18406,
+       "cache_write": 11605,
+       "cost": 0.00424466
+      }
+     }
+    },
+    {
+     "is_error": false,
+     "text": "1. Three is the smallest odd prime number, since its only divisors are one and itself.\n2. Three is the second prime number after two, and it is the first odd prime.\n3. Three is the only prime number that is one less than a perfect square, s",
+     "cost": 0.00534892,
+     "turns": 1,
+     "usage": {
+      "input_tokens": 2,
+      "cache_creation_input_tokens": 1196,
+      "cache_read_input_tokens": 11186,
+      "output_tokens": 1506,
+      "output_tokens_details": {
+       "thinking_tokens": 278
+      },
+      "server_tool_use": {
+       "web_search_requests": 0,
+       "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+       "ephemeral_1h_input_tokens": 1196,
+       "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "global",
+      "iterations": [],
+      "speed": "standard",
+      "fallback_credit": null
+     },
+     "models": {
+      "claude-haiku-5-5": {
+       "in": 8,
+       "out": 4984,
+       "cache_read": 29592,
+       "cache_write": 12801,
+       "cost": 0.00534892
+      }
+     }
+    },
+    {
+     "is_error": false,
+     "text": "1. Four is the smallest composite number, since it is the first whole number with divisors other than one and itself.\n2. Four is the square of two, and it is the only number that equals both its own square and its own sum with two.\n3. Four ",
+     "cost": 0.0064696400000000005,
+     "turns": 1,
+     "usage": {
+      "input_tokens": 2,
+      "cache_creation_input_tokens": 1556,
+      "cache_read_input_tokens": 12382,
+      "output_tokens": 1371,
+      "output_tokens_details": {
+       "thinking_tokens": 75
+      },
+      "server_tool_use": {
+       "web_search_requests": 0,
+       "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+       "ephemeral_1h_input_tokens": 1556,
+       "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "global",
+      "iterations": [],
+      "speed": "standard",
+      "fallback_credit": null
+     },
+     "models": {
+      "claude-haiku-5-5": {
+       "in": 10,
+       "out": 6355,
+       "cache_read": 41974,
+       "cache_write": 14357,
+       "cost": 0.0064696400000000005
+      }
+     }
+    },
+    {
+     "is_error": false,
+     "text": "1. Five is the third prime number, since its only divisors are one and itself.\n2. Five is the number of fingers on each human hand.\n3. Five is the number of sides in a pentagon, the simplest polygon with five edges.\n4. The interior angles o",
+     "cost": 0.0075644200000000005,
+     "turns": 1,
+     "usage": {
+      "input_tokens": 2,
+      "cache_creation_input_tokens": 1421,
+      "cache_read_input_tokens": 13938,
+      "output_tokens": 1342,
+      "output_tokens_details": {
+       "thinking_tokens": 125
+      },
+      "server_tool_use": {
+       "web_search_requests": 0,
+       "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+       "ephemeral_1h_input_tokens": 1421,
+       "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "global",
+      "iterations": [],
+      "speed": "standard",
+      "fallback_credit": null
+     },
+     "models": {
+      "claude-haiku-5-5": {
+       "in": 12,
+       "out": 7697,
+       "cache_read": 55912,
+       "cache_write": 15778,
+       "cost": 0.0075644200000000005
+      }
+     }
+    },
+    {
+     "is_error": false,
+     "text": "1. Six is the smallest perfect number, since its proper divisors 1, 2, and 3 add up to 6.\n2. Six is the first composite number that is also the product of its smallest prime factors, 2 \u00d7 3.\n3. Six is the number of sides on a hexagon, a poly",
+     "cost": 0.00874861,
+     "turns": 1,
+     "usage": {
+      "input_tokens": 2,
+      "cache_creation_input_tokens": 1392,
+      "cache_read_input_tokens": 15359,
+      "output_tokens": 1504,
+      "output_tokens_details": {
+       "thinking_tokens": 321
+      },
+      "server_tool_use": {
+       "web_search_requests": 0,
+       "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+       "ephemeral_1h_input_tokens": 1392,
+       "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "global",
+      "iterations": [],
+      "speed": "standard",
+      "fallback_credit": null
+     },
+     "models": {
+      "claude-haiku-5-5": {
+       "in": 14,
+       "out": 9201,
+       "cache_read": 71271,
+       "cache_write": 17170,
+       "cost": 0.00874861
+      }
+     }
+    },
+    {
+     "is_error": false,
+     "text": "1. Seven is a prime number, since its only divisors are one and itself.\n2. Seven is the fourth prime number, following two, three, and five.\n3. Seven is the number of days in a week.\n4. Seven is the number of colors in the visible rainbow: ",
+     "cost": 0.01004412,
+     "turns": 1,
+     "usage": {
+      "input_tokens": 2,
+      "cache_creation_input_tokens": 1554,
+      "cache_read_input_tokens": 16751,
+      "output_tokens": 1634,
+      "output_tokens_details": {
+       "thinking_tokens": 357
+      },
+      "server_tool_use": {
+       "web_search_requests": 0,
+       "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+       "ephemeral_1h_input_tokens": 1554,
+       "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "global",
+      "iterations": [],
+      "speed": "standard",
+      "fallback_credit": null
+     },
+     "models": {
+      "claude-haiku-5-5": {
+       "in": 16,
+       "out": 10835,
+       "cache_read": 88022,
+       "cache_write": 18724,
+       "cost": 0.01004412
+      }
+     }
+    },
+    {
+     "is_error": false,
+     "text": "1. Eight is the smallest cube of a prime number, since 8 = 2\u00b3.\n2. Eight is the number of bits in a byte.\n3. Eight is the third power of two, following two squared and four.\n4. Eight is the number of sides on an octagon, a regular polygon wi",
+     "cost": 0.01135617,
+     "turns": 1,
+     "usage": {
+      "input_tokens": 2,
+      "cache_creation_input_tokens": 1684,
+      "cache_read_input_tokens": 18305,
+      "output_tokens": 1584,
+      "output_tokens_details": {
+       "thinking_tokens": 194
+      },
+      "server_tool_use": {
+       "web_search_requests": 0,
+       "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+       "ephemeral_1h_input_tokens": 1684,
+       "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "global",
+      "iterations": [],
+      "speed": "standard",
+      "fallback_credit": null
+     },
+     "models": {
+      "claude-haiku-5-5": {
+       "in": 18,
+       "out": 12419,
+       "cache_read": 106327,
+       "cache_write": 20408,
+       "cost": 0.01135617
+      }
+     }
+    },
+    {
+     "is_error": false,
+     "text": "1. Nine is the square of three, since 9 = 3\u00b2.\n2. Nine is the smallest odd composite number.\n3. Nine is the largest single-digit odd number that is not prime.\n4. Nine is the largest single-digit number that is a perfect square and odd, along",
+     "cost": 0.013222560000000001,
+     "turns": 1,
+     "usage": {
+      "input_tokens": 2,
+      "cache_creation_input_tokens": 1634,
+      "cache_read_input_tokens": 19989,
+      "output_tokens": 2679,
+      "output_tokens_details": {
+       "thinking_tokens": 1307
+      },
+      "server_tool_use": {
+       "web_search_requests": 0,
+       "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+       "ephemeral_1h_input_tokens": 1634,
+       "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "global",
+      "iterations": [],
+      "speed": "standard",
+      "fallback_credit": null
+     },
+     "models": {
+      "claude-haiku-5-5": {
+       "in": 20,
+       "out": 15098,
+       "cache_read": 126316,
+       "cache_write": 22042,
+       "cost": 0.013222560000000001
+      }
+     }
+    },
+    {
+     "is_error": false,
+     "text": "1. Ten is the base of the decimal system, which is why we count in groups of ten.\n2. In Roman numerals, ten is written as X.\n3. In base two, ten is written as 1010.\n4. Ten is the product of two and five, both of which are prime.\n5. Ten is t",
+     "cost": 0.015482790000000001,
+     "turns": 1,
+     "usage": {
+      "input_tokens": 2,
+      "cache_creation_input_tokens": 2729,
+      "cache_read_input_tokens": 21623,
+      "output_tokens": 2996,
+      "output_tokens_details": {
+       "thinking_tokens": 1509
+      },
+      "server_tool_use": {
+       "web_search_requests": 0,
+       "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+       "ephemeral_1h_input_tokens": 2729,
+       "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "global",
+      "iterations": [],
+      "speed": "standard",
+      "fallback_credit": null
+     },
+     "models": {
+      "claude-haiku-5-5": {
+       "in": 22,
+       "out": 18094,
+       "cache_read": 147939,
+       "cache_write": 24771,
+       "cost": 0.015482790000000001
+      }
+     }
+    },
+    {
+     "is_error": false,
+     "text": "1. Eleven is a prime number, since its only divisors are one and itself.\n2. Eleven is the fifth prime number, following two, three, five, and seven.\n3. In Roman numerals, eleven is written as XI.\n4. In base two, eleven is written as 1011.\n5",
+     "cost": 0.017536210000000003,
+     "turns": 1,
+     "usage": {
+      "input_tokens": 2,
+      "cache_creation_input_tokens": 3046,
+      "cache_read_input_tokens": 24352,
+      "output_tokens": 2401,
+      "output_tokens_details": {
+       "thinking_tokens": 1092
+      },
+      "server_tool_use": {
+       "web_search_requests": 0,
+       "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+       "ephemeral_1h_input_tokens": 3046,
+       "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "global",
+      "iterations": [],
+      "speed": "standard",
+      "fallback_credit": null
+     },
+     "models": {
+      "claude-haiku-5-5": {
+       "in": 24,
+       "out": 20495,
+       "cache_read": 172291,
+       "cache_write": 27817,
+       "cost": 0.017536210000000003
+      }
+     }
+    },
+    {
+     "is_error": false,
+     "text": "1. Twelve is the number of months in a year.\n2. A dozen is a group of twelve items.\n3. In Roman numerals, twelve is written as XII.\n4. In base two, twelve is written as 1100.\n5. A standard analog clock face is marked with the numbers one th",
+     "cost": 0.019429590000000004,
+     "turns": 1,
+     "usage": {
+      "input_tokens": 2,
+      "cache_creation_input_tokens": 2451,
+      "cache_read_input_tokens": 27398,
+      "output_tokens": 2258,
+      "output_tokens_details": {
+       "thinking_tokens": 1132
+      },
+      "server_tool_use": {
+       "web_search_requests": 0,
+       "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+       "ephemeral_1h_input_tokens": 2451,
+       "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "global",
+      "iterations": [],
+      "speed": "standard",
+      "fallback_credit": null
+     },
+     "models": {
+      "claude-haiku-5-5": {
+       "in": 26,
+       "out": 22753,
+       "cache_read": 199689,
+       "cache_write": 30268,
+       "cost": 0.019429590000000004
+      }
+     }
+    },
+    {
+     "is_error": false,
+     "text": "1. Thirteen is a prime number, since its only divisors are one and itself.\n2. Thirteen is the sixth prime number, following two, three, five, seven, and eleven.\n3. In Roman numerals, thirteen is written as XIII.\n4. In base two, thirteen is ",
+     "cost": 0.021536380000000004,
+     "turns": 1,
+     "usage": {
+      "input_tokens": 2,
+      "cache_creation_input_tokens": 2308,
+      "cache_read_input_tokens": 29849,
+      "output_tokens": 2693,
+      "output_tokens_details": {
+       "thinking_tokens": 1248
+      },
+      "server_tool_use": {
+       "web_search_requests": 0,
+       "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+       "ephemeral_1h_input_tokens": 2308,
+       "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "global",
+      "iterations": [],
+      "speed": "standard",
+      "fallback_credit": null
+     },
+     "models": {
+      "claude-haiku-5-5": {
+       "in": 28,
+       "out": 25446,
+       "cache_read": 229538,
+       "cache_write": 32576,
+       "cost": 0.021536380000000004
+      }
+     }
+    },
+    {
+     "is_error": false,
+     "text": "1. Fourteen is the product of two and seven, both of which are prime, so it is a semiprime.\n2. In Roman numerals, fourteen is written as XIV.\n3. In base two, fourteen is written as 1110.\n4. In hexadecimal, fourteen is written as E.\n5. A for",
+     "cost": 0.023814250000000006,
+     "turns": 1,
+     "usage": {
+      "input_tokens": 2,
+      "cache_creation_input_tokens": 2743,
+      "cache_read_input_tokens": 32157,
+      "output_tokens": 2815,
+      "output_tokens_details": {
+       "thinking_tokens": 1301
+      },
+      "server_tool_use": {
+       "web_search_requests": 0,
+       "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+       "ephemeral_1h_input_tokens": 2743,
+       "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "global",
+      "iterations": [],
+      "speed": "standard",
+      "fallback_credit": null
+     },
+     "models": {
+      "claude-haiku-5-5": {
+       "in": 30,
+       "out": 28261,
+       "cache_read": 261695,
+       "cache_write": 35319,
+       "cost": 0.023814250000000006
+      }
+     }
+    },
+    {
+     "is_error": false,
+     "text": "1. Fifteen is the product of three and five, both of which are prime, so it is a semiprime.\n2. In Roman numerals, fifteen is written as XV.\n3. In base two, fifteen is written as 1111, the largest value that four binary digits can hold.\n4. I",
+     "cost": 0.026020950000000004,
+     "turns": 1,
+     "usage": {
+      "input_tokens": 2,
+      "cache_creation_input_tokens": 2865,
+      "cache_read_input_tokens": 34900,
+      "output_tokens": 2569,
+      "output_tokens_details": {
+       "thinking_tokens": 1289
+      },
+      "server_tool_use": {
+       "web_search_requests": 0,
+       "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+       "ephemeral_1h_input_tokens": 2865,
+       "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "global",
+      "iterations": [],
+      "speed": "standard",
+      "fallback_credit": null
+     },
+     "models": {
+      "claude-haiku-5-5": {
+       "in": 32,
+       "out": 30830,
+       "cache_read": 296595,
+       "cache_write": 38184,
+       "cost": 0.026020950000000004
+      }
+     }
+    },
+    {
+     "is_error": false,
+     "text": "",
+     "cost": 0.030444975000000006,
+     "turns": 0,
+     "usage": {
+      "output_tokens_details": {
+       "thinking_tokens": 0
+      },
+      "input_tokens": 0,
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 0,
+      "output_tokens": 0,
+      "server_tool_use": {
+       "web_search_requests": 0,
+       "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+       "ephemeral_1h_input_tokens": 0,
+       "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "",
+      "iterations": [],
+      "speed": "standard",
+      "fallback_credit": null
+     },
+     "models": {
+      "claude-haiku-5-5": {
+       "in": 4232,
+       "out": 36682,
+       "cache_read": 369210,
+       "cache_write": 40999,
+       "cost": 0.030444975000000006
+      }
+     }
+    },
+    {
+     "is_error": false,
+     "text": "42Z",
+     "cost": 0.031409125,
+     "turns": 1,
+     "usage": {
+      "input_tokens": 2,
+      "cache_creation_input_tokens": 4414,
+      "cache_read_input_tokens": 7865,
+      "output_tokens": 5,
+      "output_tokens_details": {
+       "thinking_tokens": 0
+      },
+      "server_tool_use": {
+       "web_search_requests": 0,
+       "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+       "ephemeral_1h_input_tokens": 4414,
+       "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "global",
+      "iterations": [],
+      "speed": "standard",
+      "fallback_credit": null
+     },
+     "models": {
+      "claude-haiku-5-5": {
+       "in": 4234,
+       "out": 36687,
+       "cache_read": 377075,
+       "cache_write": 45413,
+       "cost": 0.031409125
+      }
+     }
+    }
+   ],
+   "fp": [
+    139.0,
+    143.0,
+    143.0,
+    141.0,
+    141.0,
+    142.0,
+    143.0,
+    144.0,
+    148.0,
+    145.0,
+    146.0,
+    146.0,
+    146.0,
+    149.0,
+    146.0,
+    147.0,
+    148.0,
+    150.0
+   ],
+   "footprint_mb": 150.0,
+   "procs": 1,
+   "startup_s": 0.63,
+   "idle_cpu_s": 0.0,
+   "idle_window_s": 3
+  }
+ ]
+}
