@@ -153,14 +153,23 @@ pub(crate) fn tree_mem_kb(roots: &[u32]) -> Vec<(u32, u64)> {
         })
         .collect();
     let all: Vec<u32> = trees.iter().flat_map(|t| t.1.iter().copied()).collect();
-    let mut per_pid = footprint_kb(&all);
-    if per_pid.is_empty() {
-        per_pid = rss_kb(&all);
-    }
+    let per_pid = held_kb(&all).0;
     trees.into_iter().map(|(r, ps)| (r, ps.iter().filter_map(|p| per_pid.iter().find(|x| x.0 == *p)).map(|x| x.1).sum())).collect()
 }
 
-pub(crate) fn footprint_kb(pids: &[u32]) -> Vec<(u32, u64)> {
+/// What each process holds, in KB, and where the number comes from: `footprint` where there is one (macOS: what the
+/// process really holds), else RSS, which overstates (about 2x in our measurements).
+pub(crate) fn held_kb(pids: &[u32]) -> (Vec<(u32, u64)>, &'static str) {
+    if pids.is_empty() {
+        return (vec![], "footprint");
+    }
+    match footprint_kb(pids) {
+        fp if !fp.is_empty() => (fp, "footprint"),
+        _ => (rss_kb(pids), "RSS, which overstates"),
+    }
+}
+
+fn footprint_kb(pids: &[u32]) -> Vec<(u32, u64)> {
     let args: Vec<String> = pids.iter().flat_map(|p| ["-p".to_string(), p.to_string()]).collect();
     match std::process::Command::new("footprint").args(&args).output() {
         Ok(o) => parse_footprint(&String::from_utf8_lossy(&o.stdout)),
@@ -187,7 +196,7 @@ pub(crate) fn parse_footprint(out: &str) -> Vec<(u32, u64)> {
 }
 
 /// Resident memory per pid, via `ps` (portable across macOS/Linux, no extra deps).
-pub(crate) fn rss_kb(pids: &[u32]) -> Vec<(u32, u64)> {
+fn rss_kb(pids: &[u32]) -> Vec<(u32, u64)> {
     let list = pids.iter().map(u32::to_string).collect::<Vec<_>>().join(",");
     let Ok(out) = std::process::Command::new("ps").args(["-o", "pid=,rss=", "-p", &list]).output() else {
         return vec![];

@@ -200,8 +200,7 @@ pub fn report() -> Option<Report> {
     let mut rel: Vec<(&Proc, Kind)> = procs.iter().zip(kinds).filter(|(_, k)| *k != Kind::Other).collect();
     rel.sort_by_key(|(p, k)| (*k, p.pid));
     let pids: Vec<u32> = rel.iter().map(|(p, _)| p.pid).collect();
-    let fp = crate::memory::footprint_kb(&pids);
-    let (mem, source) = if fp.is_empty() { (crate::memory::rss_kb(&pids), "RSS, which overstates") } else { (fp, "footprint") };
+    let (mem, source) = crate::memory::held_kb(&pids);
     let mem: HashMap<u32, u64> = mem.into_iter().collect();
     let rows = rel.into_iter().map(|(p, kind)| Row { pid: p.pid, kind, mb: mem.get(&p.pid).copied().unwrap_or(0) as f64 / 1024.0, cmd: p.cmd.clone() }).collect();
     Some(Report { rows, source })

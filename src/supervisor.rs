@@ -253,8 +253,8 @@ pub fn exe_mtime() -> u64 {
 fn mcp_rows() -> Vec<Value> {
     let running = share::running();
     let pids: Vec<u32> = running.iter().filter_map(|r| r.pid).collect();
-    let rss = if pids.is_empty() { vec![] } else { crate::memory::rss_kb(&pids) };
-    let mb = |pid: Option<u32>| pid.and_then(|p| rss.iter().find(|r| r.0 == p)).map_or(0, |r| r.1 / 1024);
+    let held = crate::memory::held_kb(&pids).0;
+    let mb = |pid: Option<u32>| pid.and_then(|p| held.iter().find(|r| r.0 == p)).map_or(0, |r| r.1 / 1024);
     running.into_iter().map(|r| json!({"key": r.key, "command": r.command, "cwd": r.cwd, "pid": r.pid, "windows": r.windows, "starts": r.starts, "mb": mb(r.pid)})).collect()
 }
 
@@ -502,10 +502,7 @@ fn measure(state: &Arc<Mutex<State>>, cfg: &Config, pace: &mut Pace) {
     }
     pace.measure = Instant::now();
     let mem = if tabs.is_empty() { vec![] } else { crate::memory::tree_mem_kb(&tabs) };
-    let mut ui = crate::memory::footprint_kb(&wins);
-    if ui.is_empty() {
-        ui = crate::memory::rss_kb(&wins);
-    }
+    let ui = crate::memory::held_kb(&wins).0;
     let mut s = state.lock().unwrap();
     let before = instances(&s);
     for i in s.insts.values_mut() {
