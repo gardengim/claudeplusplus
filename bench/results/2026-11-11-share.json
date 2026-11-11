@@ -1,0 +1,36 @@
+{
+ "off": {
+  "tabs answered": 3,
+  "server processes started": 9,
+  "tool calls served": 9,
+  "distinct server pids that answered": 9,
+  "processes in claude++'s tree": {
+   "claudeplusplus": 1,
+   "claude": 3,
+   "caveman-mcp": 3,
+   "node": 9,
+   "Python": 9
+  },
+  "mb": 1161.1,
+  "processes left after quit": 0
+ },
+ "on": {
+  "tabs answered": 3,
+  "server processes started": 3,
+  "tool calls served": 9,
+  "distinct server pids that answered": 3,
+  "processes in claude++'s tree": {
+   "claudeplusplus": 1,
+   "claude": 3,
+   "Python": 3,
+   "caveman-mcp": 1,
+   "node": 3
+  },
+  "mb": 696.5,
+  "processes left after quit": 0
+ },
+ "on, claude++ killed (SIGKILL)": {
+  "processes in the tree": 9,
+  "left after 4 s": 0
+ }
+}
